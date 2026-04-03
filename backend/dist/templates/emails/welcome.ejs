@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Welcome to Nexa AI</title>
+</head>
+<body style="margin:0;padding:0;background:#f0f0f0;font-family:Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f0f0;padding:32px 0;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;border-radius:8px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.08);">
+
+          <!-- Header -->
+          <tr>
+            <td style="background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);padding:40px 20px;text-align:center;">
+              <h1 style="color:#ffffff;margin:0;font-size:26px;font-weight:700;">Welcome to Nexa AI!</h1>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="background:#f9f9f9;padding:40px 32px;">
+              <p style="color:#333;font-size:16px;margin:0 0 12px;">Hi <%= fullName %>,</p>
+              <p style="color:#555;font-size:15px;line-height:1.6;margin:0 0 20px;">
+                Your email has been verified successfully! Your account is now active and ready to use.
+              </p>
+
+              <p style="color:#555;font-size:15px;margin:0 0 10px;">You can now:</p>
+              <ul style="color:#555;font-size:15px;line-height:1.9;margin:0 0 28px;padding-left:20px;">
+                <li>Chat with the AI assistant</li>
+                <li>Access company policies and knowledge base</li>
+                <li>Get instant answers to your questions</li>
+              </ul>
+
+              <!-- CTA -->
+              <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td align="center" style="padding:8px 0 24px;">
+                    <a href="<%= dashboardUrl %>"
+                       style="display:inline-block;background:#667eea;color:#ffffff;padding:14px 36px;text-decoration:none;border-radius:6px;font-size:15px;font-weight:700;">
+                      Go to Dashboard
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="color:#999;font-size:12px;margin:0;">
+                If you have any questions, please reach out to your administrator.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background:#f0f0f0;padding:20px;text-align:center;">
+              <p style="color:#aaa;font-size:12px;margin:0;">&copy; <%= new Date().getFullYear() %> Nexa AI. All rights reserved.</p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

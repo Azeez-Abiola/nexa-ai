@@ -1,0 +1,20 @@
+{
+  "name": "nexa-ai-root",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm --prefix backend run dev\" \"npm --prefix frontend run dev\"",
+    "build": "npm --prefix backend run build && npm --prefix frontend run build",
+    "start": "concurrently \"npm --prefix backend start\" \"npm --prefix frontend start\"",
+    "start:backend": "npm --prefix backend start",
+    "start:frontend": "npm --prefix frontend start"
+  },
+  "devDependencies": {
+    "@types/uuid": "^10.0.0",
+    "concurrently": "^7.6.0"
+  }
+}

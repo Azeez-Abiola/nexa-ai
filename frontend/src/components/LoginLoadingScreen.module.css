@@ -1,0 +1,125 @@
+.container {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #f5f5f5 0%, #e8e8e8 100%);
+  z-index: 9999;
+  backdrop-filter: blur(0px);
+}
+
+.content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2rem;
+}
+
+.logoWrapper {
+  perspective: 1000px;
+  position: relative;
+  width: 180px;
+  height: 180px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.logo {
+  width: 140px;
+  height: 140px;
+  border-radius: 50%;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+  object-fit: contain;
+  z-index: 1;
+}
+
+.rotatingDot {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background-color: #d97760;
+  top: 0;
+  left: 50%;
+  transform-origin: center 90px;
+  margin-left: -6px;
+  margin-top: -6px;
+}
+
+.textContainer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.loadingText {
+  font-size: 1.8rem;
+  font-weight: 600;
+  letter-spacing: 0.15em;
+  color: #d97760;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.dots {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #d97760;
+  display: inline-block;
+}
+
+.portalText {
+  font-size: 0.95rem;
+  color: #666;
+  letter-spacing: 0.1em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+/* Curved loading animation */
+@keyframes curveLoad {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .logoWrapper {
+    width: 160px;
+    height: 160px;
+  }
+
+  .logo {
+    width: 120px;
+    height: 120px;
+  }
+
+  .rotatingDot {
+    transform-origin: center 80px;
+  }
+
+  .loadingText {
+    font-size: 1.5rem;
+  }
+
+  .portalText {
+    font-size: 0.85rem;
+  }
+}

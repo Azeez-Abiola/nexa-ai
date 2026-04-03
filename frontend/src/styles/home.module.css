@@ -1,0 +1,273 @@
+.homeContainer {
+  min-height: 100vh;
+  width: 100%;
+  background: linear-gradient(135deg, #000000 0%, #1a1a1a 50%, #ffffff 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 2rem;
+  font-family: Georgia, serif;
+  position: relative;
+  overflow-x: hidden;
+}
+
+.logoContainer {
+  position: absolute;
+  top: 3rem;
+  left: 3rem;
+  z-index: 10;
+}
+
+/* Main Content Section - Avatar and Text Side by Side */
+.mainContent {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4rem;
+  max-width: 1200px;
+  width: 100%;
+  margin-top: 4rem;
+}
+
+.avatarSection {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.centralAvatarImage {
+  width: 280px;
+  height: auto;
+  object-fit: contain;
+}
+
+.textSection {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 300px;
+}
+
+.textContent {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.title {
+  font-size: 2.5rem;
+  font-weight: 700;
+  color: #ffffff;
+  line-height: 1.2;
+  margin: 0;
+  letter-spacing: -0.5px;
+  word-wrap: break-word;
+  font-family: Georgia, serif;
+}
+
+.description {
+  font-size: 1.1rem;
+  color: #ffffff;
+  line-height: 1.6;
+  margin: 0;
+  font-weight: 400;
+  letter-spacing: 0.3px;
+}
+
+.cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1.2em;
+  background-color: #ffffff;
+  margin-left: 4px;
+  animation: blink 0.9s steps(2, start) infinite;
+  vertical-align: middle;
+}
+
+@keyframes blink {
+  0%,
+  50% {
+    opacity: 1;
+  }
+  51%,
+  100% {
+    opacity: 0;
+  }
+}
+
+.cta {
+  opacity: 0;
+  transform: translateY(24px);
+}
+
+.revealed {
+  animation: revealsFloat 0.6s ease-out forwards;
+}
+
+@keyframes revealsFloat {
+  0% {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.ctaButton {
+  padding: 12px 32px;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #ffffff;
+  background: linear-gradient(135deg, #ed0000 0%, #c41e3a 100%);
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 15px rgba(237, 0, 0, 0.3);
+  letter-spacing: 0.5px;
+  align-self: flex-start;
+}
+
+.ctaButton:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(237, 0, 0, 0.4);
+}
+
+.ctaButton:active {
+  transform: translateY(0);
+}
+
+.floatingChatBtn {
+  position: fixed;
+  bottom: 30px;
+  right: 30px;
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #ed0000 0%, #c41e3a 100%);
+  border: none;
+  color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  box-shadow: 0 8px 24px rgba(237, 0, 0, 0.4);
+  z-index: 100;
+  transition: all 0.3s ease;
+}
+
+.floatingChatBtn:hover {
+  box-shadow: 0 12px 32px rgba(237, 0, 0, 0.5);
+  transform: translateY(-4px);
+}
+
+.floatingChatBtn:active {
+  transform: translateY(-2px);
+}
+
+/* Responsive for larger screens */
+@media (max-width: 1024px) {
+  .mainContent {
+    gap: 2rem;
+  }
+
+  .centralAvatarImage {
+    width: 240px;
+  }
+
+  .title {
+    font-size: 2rem;
+  }
+
+  .description {
+    font-size: 1rem;
+  }
+}
+
+/* Responsive for tablets */
+@media (max-width: 768px) {
+  .mainContent {
+    flex-direction: column;
+    gap: 2rem;
+    margin-top: 2rem;
+  }
+
+  .avatarSection {
+    order: -1;
+  }
+
+  .centralAvatarImage {
+    width: 200px;
+  }
+
+  .textSection {
+    width: 100%;
+  }
+
+  .textContent {
+    align-items: center;
+    text-align: center;
+  }
+
+  .title {
+    font-size: 1.8rem;
+  }
+
+  .description {
+    font-size: 1rem;
+  }
+
+  .ctaButton {
+    align-self: center;
+  }
+}
+
+/* Responsive for mobile */
+@media (max-width: 480px) {
+  .homeContainer {
+    padding: 1rem;
+  }
+
+  .logoContainer {
+    top: 1.5rem;
+    left: 1.5rem;
+  }
+
+  .mainContent {
+    margin-top: 3rem;
+    gap: 1.5rem;
+  }
+
+  .centralAvatarImage {
+    width: 150px;
+  }
+
+  .title {
+    font-size: 1.5rem;
+  }
+
+  .description {
+    font-size: 0.95rem;
+  }
+
+  .ctaButton {
+    padding: 10px 24px;
+    font-size: 0.95rem;
+  }
+
+  .floatingChatBtn {
+    bottom: 20px;
+    right: 20px;
+    width: 56px;
+    height: 56px;
+    font-size: 20px;
+  }
+}
+
