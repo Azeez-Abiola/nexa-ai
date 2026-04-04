@@ -1,0 +1,34 @@
+{
+  "fields": [
+    {
+      "type": "vector",
+      "path": "embedding",
+      "numDimensions": 1536,
+      "similarity": "cosine"
+    },
+    {
+      "type": "filter",
+      "path": "businessUnit"
+    },
+    {
+      "type": "filter",
+      "path": "allowedGrades"
+    },
+    {
+      "type": "filter",
+      "path": "sensitivityLevel"
+    },
+    {
+      "type": "filter",
+      "path": "documentId"
+    },
+    {
+      "type": "filter",
+      "path": "createdAt"
+    },
+    {
+      "type": "filter",
+      "path": "metadata.documentTitle"
+    }
+  ]
+}

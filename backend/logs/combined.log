@@ -1,0 +1,13 @@
+{"level":"info","message":"Frontend dist path: /Users/joshmacbook/UAC/nexa-ai/frontend/dist","timestamp":"2026-04-04T09:45:01.067Z"}
+{"level":"info","message":"Public folder path: /Users/joshmacbook/UAC/nexa-ai/public","timestamp":"2026-04-04T09:45:01.071Z"}
+{"level":"info","message":"Nexa AI backend listening on 0.0.0.0:4000","timestamp":"2026-04-04T09:45:01.089Z"}
+{"level":"info","message":"[Redis] Connected","timestamp":"2026-04-04T09:45:01.097Z"}
+{"level":"info","message":"MongoDB connected successfully","timestamp":"2026-04-04T09:45:05.856Z"}
+{"level":"info","message":"Business units initialized","timestamp":"2026-04-04T09:45:11.117Z"}
+{"level":"info","message":"Frontend dist path: /Users/joshmacbook/UAC/nexa-ai/frontend/dist","timestamp":"2026-04-04T19:03:07.812Z"}
+{"level":"info","message":"Public folder path: /Users/joshmacbook/UAC/nexa-ai/public","timestamp":"2026-04-04T19:03:07.815Z"}
+{"level":"info","message":"Nexa AI backend listening on 0.0.0.0:4000","timestamp":"2026-04-04T19:03:07.839Z"}
+{"level":"info","message":"[Redis] Connected","timestamp":"2026-04-04T19:03:07.846Z"}
+{"level":"info","message":"MongoDB connected successfully","timestamp":"2026-04-04T19:03:17.469Z"}
+{"level":"info","message":"Business units initialized","timestamp":"2026-04-04T19:03:22.086Z"}
+{"level":"info","message":"[Worker] Document processing worker started","timestamp":"2026-04-04T19:03:22.089Z"}

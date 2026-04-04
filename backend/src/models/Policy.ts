@@ -6,6 +6,7 @@ export interface PolicyDocument extends Document {
   content: string;
   tags: string[];
   businessUnit: string;
+  allowedGrades: string[];
   uploadedBy?: {
     adminId: string;
     adminEmail: string;
@@ -27,6 +28,11 @@ const PolicySchema = new Schema<PolicyDocument>(
     content: { type: String, required: true },
     tags: { type: [String], default: [] },
     businessUnit: { type: String, required: true, index: true },
+    allowedGrades: {
+      type: [String],
+      enum: ["Executive", "Senior VP", "VP", "Associate", "Senior Analyst", "Analyst"],
+      default: []
+    },
     uploadedBy: {
       adminId: String,
       adminEmail: String,

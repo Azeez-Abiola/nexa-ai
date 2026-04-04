@@ -2,7 +2,7 @@ import express, { Request, Response } from "express";
 import bcryptjs from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
-import { User, BusinessUnit } from "../models/User";
+import { User, BusinessUnit, EMPLOYEE_GRADES } from "../models/User";
 import { BusinessUnit as BusinessUnitModel } from "../models/BusinessUnit";
 import { BusinessUnitEmailMapping } from "../models/BusinessUnitEmailMapping";
 import { sendVerificationEmail, sendPasswordResetEmail, sendWelcomeEmail } from "../services/emailService";
@@ -14,6 +14,7 @@ interface AuthRequest {
   password: string;
   fullName?: string;
   businessUnit?: BusinessUnit;
+  grade?: string;
 }
 
 const JWT_SECRET = process.env.NEXA_AI_JWT_SECRET || "your-secret-key-change-in-production";
@@ -31,10 +32,16 @@ function generateToken(token: string): string {
 // Register endpoint (with email verification OTP)
 authRouter.post("/register", async (req: Request<{}, {}, AuthRequest>, res: Response) => {
   try {
-    const { email, password, fullName, businessUnit } = req.body;
+    const { email, password, fullName, businessUnit, grade } = req.body;
 
-    if (!email || !password || !fullName || !businessUnit) {
-      return res.status(400).json({ error: "Email, password, fullName, and businessUnit are required" });
+    if (!email || !password || !fullName || !businessUnit || !grade) {
+      return res.status(400).json({ error: "Email, password, fullName, businessUnit, and grade are required" });
+    }
+
+    if (!EMPLOYEE_GRADES.includes(grade as any)) {
+      return res.status(400).json({
+        error: `Invalid grade. Must be one of: ${EMPLOYEE_GRADES.join(", ")}`
+      });
     }
 
     // Validate password strength
@@ -87,6 +94,7 @@ authRouter.post("/register", async (req: Request<{}, {}, AuthRequest>, res: Resp
       password: hashedPassword,
       fullName,
       businessUnit,
+      grade,
       emailVerified: false,
       emailVerificationOTP: otp,
       emailVerificationOTPExpiry: new Date(Date.now() + 10 * 60 * 1000) // 10 minutes
@@ -107,6 +115,7 @@ authRouter.post("/register", async (req: Request<{}, {}, AuthRequest>, res: Resp
           email: user.email,
           fullName: user.fullName,
           businessUnit: user.businessUnit,
+          grade: user.grade,
           emailVerified: user.emailVerified
         }
       });
@@ -119,6 +128,7 @@ authRouter.post("/register", async (req: Request<{}, {}, AuthRequest>, res: Resp
         email: user.email,
         fullName: user.fullName,
         businessUnit: user.businessUnit,
+        grade: user.grade,
         emailVerified: user.emailVerified
       }
     });
@@ -255,7 +265,7 @@ authRouter.post("/login", async (req: Request<{}, {}, AuthRequest>, res: Respons
     const tenantSlug = buDoc?.slug;
 
     const token = jwt.sign(
-      { userId: user._id, email: user.email, businessUnit: user.businessUnit, tenantId, tenantSlug },
+      { userId: user._id, email: user.email, businessUnit: user.businessUnit, grade: user.grade, tenantId, tenantSlug },
       JWT_SECRET,
       { expiresIn: "7d" }
     );
@@ -267,6 +277,7 @@ authRouter.post("/login", async (req: Request<{}, {}, AuthRequest>, res: Respons
         email: user.email,
         fullName: user.fullName,
         businessUnit: user.businessUnit,
+        grade: user.grade,
         tenantId,
         tenantSlug,
         tenantLogo: buDoc?.logo,

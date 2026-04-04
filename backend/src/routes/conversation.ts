@@ -1,11 +1,11 @@
 import express, { Response } from "express";
 import { Conversation } from "../models/Conversation";
 import { authMiddleware, AuthenticatedRequest } from "../middleware/auth";
-import { Policy } from "../models/Policy";
 import { generateAIResponse, generateConversationTitle, streamAIResponse } from "../services/openaiService";
-import { searchGoogle, buildHybridContext } from "../services/googleSearchService";
+import { buildContextForQuery } from "../utils/contextBuilder";
 
 export const conversationRouter = express.Router();
+
 
 // Get all conversations for a user (returns conversationGroups from the single user document)
 conversationRouter.get("/", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
@@ -211,114 +211,50 @@ conversationRouter.post("/:id/message", authMiddleware, async (req: Authenticate
     // Generate AI response using OpenAI
     let aiResponse = "";
 
-    // Search for relevant policies to provide as context - FILTERED BY BUSINESS UNIT
-    let searchQuery = content;
     const businessUnit = req.businessUnit;
-    
-    // HYBRID APPROACH: Search policies AND Google in parallel
-    const [policiesRef, googleRef] = await Promise.allSettled([
-      // Search internal policies
-      Policy.find(
-        {
-          businessUnit: businessUnit,
-          $text: { $search: searchQuery }
-        },
-        { score: { $meta: "textScore" } }
-      )
-        .sort({ score: { $meta: "textScore" } })
-        .limit(3)
-        .lean()
-        .catch(async () => {
-          // Fallback to regex search if full-text index unavailable
-          const regexPatterns = searchQuery
-            .split(/\s+/)
-            .filter((w: string) => w.length > 2);
+    const context = await buildContextForQuery(content, businessUnit!, req.grade || "");
 
-          return Policy.find({
-            businessUnit: businessUnit,
-            $or: [
-              { title: { $regex: regexPatterns.join("|"), $options: "i" } },
-              { content: { $regex: regexPatterns.join("|"), $options: "i" } },
-              {
-                category: {
-                  $regex: regexPatterns.join("|"),
-                  $options: "i"
-                }
-              }
-            ]
-          })
-            .limit(3)
-            .lean();
-        }),
-      
-      // Search Google in parallel
-      searchGoogle(searchQuery, 3)
-    ]);
+    if (context.accessDenied) {
+      const deniedMessage = { role: "assistant" as const, content: "You do not have access to the information required to answer this question. Please contact your HR or manager if you believe this is an error.", timestamp: new Date() };
+      group.messages.push(deniedMessage);
+      await userConversations.save();
+      const conversation = { _id: group._id, userId: req.userId, title: group.title, messages: group.messages, createdAt: group.createdAt, updatedAt: group.updatedAt };
+      return res.json({ userMessage, assistantMessage: deniedMessage, conversation });
+    }
 
-    // Extract results from Promise.allSettled
-    const policies = policiesRef.status === "fulfilled" ? policiesRef.value : [];
-    const googleResults = googleRef.status === "fulfilled" && googleRef.value?.success 
-      ? googleRef.value.results || [] 
-      : [];
-
-
-    
-    // Build hybrid context for OpenAI
-    const hybridContext = buildHybridContext(policies, googleResults);
-    const hasPolicies = policies && policies.length > 0;
-    const hasExternalSources = googleResults.length > 0;
+    const hasContext = context.source !== "none";
 
     try {
-      // Use OpenAI to generate intelligent response with hybrid context (policies + Google)
-      let systemPrompt = `You are a helpful assistant for ${businessUnit}, a business unit of UACN.
+      let systemPrompt = hasContext
+        ? `You are a helpful assistant for ${businessUnit}, a business unit of UACN.
 
-You have been provided with information from TWO sources:
+You have been provided with information from company documents and/or external sources:
 
-1. **COMPANY POLICIES** (marked with 📋) - Official internal documents
-2. **EXTERNAL SOURCES** (marked with 🌐) - Information from Google Search
-
-${hybridContext || "No matching information found."}
+${context.hybridContextString}
 
 IMPORTANT INSTRUCTIONS:
-1. Prioritize company policies (📋) when answering questions - they are the official source of truth
-2. Use external sources (🌐) to provide additional context, best practices, or industry standards
-3. Clearly indicate which source you're referencing: e.g., "According to our policy..." or "Industry best practices suggest..."
-4. If company policies conflict with external sources, follow company policy
-5. Format responses clearly with bullet points, headers, and links where appropriate
-6. Always cite document sections and provide links to relevant policies when available
-7. For topics not covered in company policies, supplement with external sources while making the distinction clear
-8. Be professional, helpful, and concise
-9. Direct users to HR & Compliance for policy clarifications or disputes`;
-
-      // If no policies or external sources, use a different system prompt
-      if (!hasPolicies && !hasExternalSources) {
-        systemPrompt = `You are a helpful assistant for ${businessUnit}, a business unit of UACN.
+1. Prioritize company documents (📋) when answering - they are the official source of truth
+2. Use external sources (🌐) for additional context and best practices
+3. Clearly indicate which source you're referencing
+4. Format responses clearly with bullet points and headers where appropriate
+5. Be professional, helpful, and concise
+6. Direct users to HR & Compliance for policy clarifications or disputes`
+        : `You are a helpful assistant for ${businessUnit}, a business unit of UACN.
 
 The user asked a question that doesn't have specific information in company documents OR external sources.
 
 Politely explain that you couldn't find relevant information and direct them to HR & Compliance.
 Be helpful and professional.`;
-      }
 
-      // Use OpenAI to generate intelligent response
       aiResponse = await generateAIResponse(
         content,
-        hasPolicies ? (policies as any).map((p: any) => ({
-          title: p.title,
-          category: p.category,
-          content: p.content,
-          score: p.score || 0,
-        })) : [],
-        group.messages.map((m) => ({
-            role: m.role,
-            content: m.content,
-          })),
+        context.policies.map((p: any) => ({ title: p.title, category: p.category, content: p.content, score: p.score || 0 })),
+        group.messages.map((m) => ({ role: m.role, content: m.content })),
         businessUnit,
         systemPrompt
-        );
+      );
     } catch (error) {
       console.error("OpenAI error:", error);
-      // Fallback response if OpenAI fails
       aiResponse =
         `### Unable to Process Request\n\n` +
         `I apologize, but I'm having trouble processing your request right now.\n\n` +
@@ -412,106 +348,44 @@ conversationRouter.post("/:id/message/:index/edit", authMiddleware, async (req: 
     // Generate new AI response
     let aiResponse = "";
 
-    // Search for relevant policies - FILTERED BY BUSINESS UNIT
-    let searchQuery = content;
     const businessUnit = req.businessUnit;
-    
-    // HYBRID APPROACH: Search policies AND Google in parallel
-    const [policiesRef, googleRef] = await Promise.allSettled([
-      // Search internal policies
-      Policy.find(
-        {
-          businessUnit: businessUnit,
-          $text: { $search: searchQuery }
-        },
-        { score: { $meta: "textScore" } }
-      )
-        .sort({ score: { $meta: "textScore" } })
-        .limit(3)
-        .lean()
-        .catch(async () => {
-          // Fallback to regex search if full-text index unavailable
-          const regexPatterns = searchQuery
-            .split(/\s+/)
-            .filter((w: string) => w.length > 2);
+    const context = await buildContextForQuery(content, businessUnit!, req.grade || "");
 
-          return Policy.find({
-            businessUnit: businessUnit,
-            $or: [
-              { title: { $regex: regexPatterns.join("|"), $options: "i" } },
-              { content: { $regex: regexPatterns.join("|"), $options: "i" } },
-              {
-                category: {
-                  $regex: regexPatterns.join("|"),
-                  $options: "i"
-                }
-              }
-            ]
-          })
-            .limit(3)
-            .lean();
-        }),
-      
-      // Search Google in parallel
-      searchGoogle(searchQuery, 3)
-    ]);
+    if (context.accessDenied) {
+      const deniedMessage = { role: "assistant" as const, content: "You do not have access to the information required to answer this question. Please contact your HR or manager if you believe this is an error.", timestamp: new Date() };
+      group.messages.push(deniedMessage);
+      await userConversations.save();
+      const conversation = { _id: group._id, userId: req.userId, title: group.title, messages: group.messages, createdAt: group.createdAt, updatedAt: group.updatedAt };
+      return res.json({ userMessage: editedMessage, assistantMessage: deniedMessage, conversation });
+    }
 
-    // Extract results from Promise.allSettled
-    const policies = policiesRef.status === "fulfilled" ? policiesRef.value : [];
-    const googleResults = googleRef.status === "fulfilled" && googleRef.value?.success 
-      ? googleRef.value.results || [] 
-      : [];
-
-    const policyContext = (policies || []).map((p: any) => ({
-      title: p.title,
-      category: p.category,
-      content: p.content,
-      score: p.score || 0, // Include score for ranking in openaiService
-    }));
+    const hasContext = context.source !== "none";
 
     try {
-      // Build hybrid context for OpenAI
-      const hybridContext = buildHybridContext(policies, googleResults);
-      const hasPolicies = policies && policies.length > 0;
-      const hasExternalSources = googleResults.length > 0;
+      const systemPrompt = hasContext
+        ? `You are a helpful assistant for ${businessUnit}, a business unit of UACN.
 
-      let systemPrompt = `You are a helpful assistant for ${businessUnit}, a business unit of UACN.
+You have been provided with information from company documents and/or external sources:
 
-You have been provided with information from TWO sources:
-
-1. **COMPANY POLICIES** (marked with 📋) - Official internal documents
-2. **EXTERNAL SOURCES** (marked with 🌐) - Information from Google Search
-
-${hybridContext || "No matching information found."}
+${context.hybridContextString}
 
 IMPORTANT INSTRUCTIONS:
-1. Prioritize company policies (📋) when answering questions - they are the official source of truth
-2. Use external sources (🌐) to provide additional context, best practices, or industry standards
-3. Clearly indicate which source you're referencing: e.g., "According to our policy..." or "Industry best practices suggest..."
-4. If company policies conflict with external sources, follow company policy
-5. Format responses clearly with bullet points, headers, and links where appropriate
-6. Always cite document sections and provide links to relevant policies when available
-7. For topics not covered in company policies, supplement with external sources while making the distinction clear
-8. Be professional, helpful, and concise
-9. Direct users to HR & Compliance for policy clarifications or disputes`;
-
-      if (!hasPolicies && !hasExternalSources) {
-        systemPrompt = `You are a helpful assistant for ${businessUnit}, a business unit of UACN.
+1. Prioritize company documents (📋) when answering - they are the official source of truth
+2. Use external sources (🌐) for additional context and best practices
+3. Clearly indicate which source you're referencing
+4. Format responses clearly with bullet points and headers where appropriate
+5. Be professional, helpful, and concise
+6. Direct users to HR & Compliance for policy clarifications or disputes`
+        : `You are a helpful assistant for ${businessUnit}, a business unit of UACN.
 
 The user asked a question that doesn't have specific information in company documents OR external sources.
 
 Inform the user politely that you don't have information on this topic, and suggest they contact HR & Compliance.`;
-      }
 
       aiResponse = await generateAIResponse(
         content,
-        policyContext,
-        group.messages
-          .slice(0, -1)
-          .map((m) => ({
-            role: m.role,
-            content: m.content,
-          })),
+        context.policies.map((p: any) => ({ title: p.title, category: p.category, content: p.content, score: p.score || 0 })),
+        group.messages.slice(0, -1).map((m) => ({ role: m.role, content: m.content })),
         businessUnit,
         systemPrompt
       );
@@ -577,101 +451,52 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
     const userMessage = { role: "user" as const, content: content.trim(), timestamp: new Date() };
     group.messages.push(userMessage);
 
-    // Search for relevant policies - FILTERED BY BUSINESS UNIT
-    let searchQuery = content;
     const businessUnit = req.businessUnit;
-    
-    // HYBRID APPROACH: Search policies AND Google in parallel
-    const [policiesRef, googleRef] = await Promise.allSettled([
-      // Search internal policies
-      Policy.find(
-        {
-          businessUnit: businessUnit,
-          $text: { $search: searchQuery }
-        },
-        { score: { $meta: "textScore" } }
-      )
-        .sort({ score: { $meta: "textScore" } })
-        .limit(3)
-        .lean()
-        .catch(async () => {
-          // Fallback to regex search if full-text index unavailable
-          const regexPatterns = searchQuery
-            .split(/\s+/)
-            .filter((w: string) => w.length > 2);
+    const context = await buildContextForQuery(content, businessUnit!, req.grade || "");
 
-          return Policy.find({
-            businessUnit: businessUnit,
-            $or: [
-              { title: { $regex: regexPatterns.join("|"), $options: "i" } },
-              { content: { $regex: regexPatterns.join("|"), $options: "i" } },
-              {
-                category: {
-                  $regex: regexPatterns.join("|"),
-                  $options: "i"
-                }
-              }
-            ]
-          })
-            .limit(3)
-            .lean();
-        }),
-      
-      // Search Google in parallel
-      searchGoogle(searchQuery, 3)
-    ]);
+    const hasContext = context.source !== "none";
 
-    // Extract results from Promise.allSettled
-    const policies = policiesRef.status === "fulfilled" ? policiesRef.value : [];
-    const googleResults = googleRef.status === "fulfilled" && googleRef.value?.success 
-      ? googleRef.value.results || [] 
-      : [];
-
-    const policyContext = (policies || []).map((p: any) => ({
-      title: p.title,
-      category: p.category,
-      content: p.content,
-      score: p.score || 0,
-    }));
-
-    // Build hybrid context
-    const hybridContext = buildHybridContext(policies, googleResults);
-    const hasPolicies = policies && policies.length > 0;
-    const hasExternalSources = googleResults.length > 0;
-
-    let systemPrompt = `You are a helpful assistant for ${businessUnit}, a business unit of UACN.
-
-You have been provided with information from TWO sources:
-
-1. **COMPANY POLICIES** (marked with 📋) - Official internal documents
-2. **EXTERNAL SOURCES** (marked with 🌐) - Information from Google Search
-
-${hybridContext || "No matching information found."}
-
-IMPORTANT INSTRUCTIONS:
-1. Prioritize company policies (📋) when answering questions - they are the official source of truth
-2. Use external sources (🌐) to provide additional context, best practices, or industry standards
-3. Clearly indicate which source you're referencing: e.g., "According to our policy..." or "Industry best practices suggest..."
-4. If company policies conflict with external sources, follow company policy
-5. Format responses clearly with bullet points, headers, and links where appropriate
-6. Always cite document sections and provide links to relevant policies when available
-7. For topics not covered in company policies, supplement with external sources while making the distinction clear
-8. Be professional, helpful, and concise
-9. Direct users to HR & Compliance for policy clarifications or disputes`;
-
-    if (!hasPolicies && !hasExternalSources) {
-      systemPrompt = `You are a helpful assistant for ${businessUnit}, a business unit of UACN.
-
-The user asked a question that doesn't have specific information in company documents OR external sources.
-
-Inform the user politely that you don't have information on this topic, and suggest they contact HR & Compliance.`;
-    }
-
-    // Set up SSE headers
+    // Set up SSE headers before any writes
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
     res.setHeader("Access-Control-Allow-Origin", "*");
+
+    if (context.accessDenied) {
+      const deniedContent = "You do not have access to the information required to answer this question. Please contact your HR or manager if you believe this is an error.";
+      const deniedMessage = { role: "assistant" as const, content: deniedContent, timestamp: new Date() };
+      group.messages.push(deniedMessage);
+      if (group.messages.length === 2) {
+        try { group.title = await generateConversationTitle(content); } catch { /* ignore */ }
+      }
+      await userConversations.save();
+      const conversation = { _id: group._id, userId: req.userId, title: group.title, messages: group.messages, createdAt: group.createdAt, updatedAt: group.updatedAt };
+      res.write(`data: ${JSON.stringify({ done: true, fullResponse: deniedContent, conversation })}\n\n`);
+      res.end();
+      return;
+    }
+
+    const systemPrompt = hasContext
+      ? `You are a helpful assistant for ${businessUnit}, a business unit of UACN.
+
+You have been provided with information from company documents and/or external sources:
+
+${context.hybridContextString}
+
+IMPORTANT INSTRUCTIONS:
+1. Prioritize company documents (📋) when answering - they are the official source of truth
+2. Use external sources (🌐) for additional context and best practices
+3. Clearly indicate which source you're referencing
+4. Format responses clearly with bullet points and headers where appropriate
+5. Be professional, helpful, and concise
+6. Direct users to HR & Compliance for policy clarifications or disputes`
+      : `You are a helpful assistant for ${businessUnit}, a business unit of UACN.
+
+The user asked a question that doesn't have specific information in company documents OR external sources.
+
+Inform the user politely that you don't have information on this topic, and suggest they contact HR & Compliance.`;
+
+    const policyContext = context.policies.map((p: any) => ({ title: p.title, category: p.category, content: p.content, score: p.score || 0 }));
 
     let fullResponse = "";
 
@@ -680,12 +505,7 @@ Inform the user politely that you don't have information on this topic, and sugg
       const generator = streamAIResponse(
         content,
         policyContext,
-        group.messages
-          .slice(0, -1)
-          .map((m) => ({
-            role: m.role,
-            content: m.content,
-          })),
+        group.messages.slice(0, -1).map((m) => ({ role: m.role, content: m.content })),
         businessUnit,
         systemPrompt
       );

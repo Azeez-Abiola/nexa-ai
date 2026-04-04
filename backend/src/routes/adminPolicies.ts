@@ -49,7 +49,7 @@ adminPoliciesRouter.get("/", async (req: AuthenticatedRequest, res) => {
 // Create a new policy for the admin's business unit (text or from file)
 adminPoliciesRouter.post("/", upload.single("file"), async (req: AuthenticatedRequest, res) => {
   try {
-    const { title, category, content, tags } = req.body;
+    const { title, category, content, tags, allowedGrades } = req.body;
     const businessUnit = req.businessUnit;
     const file = req.file;
     const adminId = req.adminId;
@@ -114,11 +114,18 @@ adminPoliciesRouter.post("/", upload.single("file"), async (req: AuthenticatedRe
         .json({ error: "title, category and content (or file) are required" });
     }
 
+    const parsedAllowedGrades = Array.isArray(allowedGrades)
+      ? allowedGrades
+      : typeof allowedGrades === "string"
+      ? allowedGrades.split(",").map((g: string) => g.trim()).filter(Boolean)
+      : [];
+
     const policy = await Policy.create({
       title,
       category,
       content: policyContent,
       businessUnit: targetBU,
+      allowedGrades: parsedAllowedGrades,
       uploadedBy: {
         adminId: adminId || "unknown",
         adminEmail: adminEmail || "unknown",
@@ -147,7 +154,7 @@ adminPoliciesRouter.post("/", upload.single("file"), async (req: AuthenticatedRe
 adminPoliciesRouter.put("/:id", async (req: AuthenticatedRequest, res) => {
   try {
     const { id } = req.params;
-    const { title, category, content, tags } = req.body;
+    const { title, category, content, tags, allowedGrades } = req.body;
     const { businessUnit, isSuperAdmin } = req;
 
     if (!businessUnit) {
@@ -163,23 +170,30 @@ adminPoliciesRouter.put("/:id", async (req: AuthenticatedRequest, res) => {
       return res.status(403).json({ error: "Unauthorized: Cannot modify policy from another business unit" });
     }
 
-    const updated = await Policy.findByIdAndUpdate(
-      id,
-      {
-        title,
-        category,
-        content,
-        tags: Array.isArray(tags)
-          ? tags
-          : typeof tags === "string"
-          ? tags
-              .split(",")
-              .map((t: string) => t.trim())
-              .filter(Boolean)
-          : []
-      },
-      { new: true }
-    );
+    const updatedAllowedGrades = allowedGrades !== undefined
+      ? (Array.isArray(allowedGrades)
+          ? allowedGrades
+          : typeof allowedGrades === "string"
+          ? allowedGrades.split(",").map((g: string) => g.trim()).filter(Boolean)
+          : [])
+      : undefined;
+
+    const updateData: any = {
+      title,
+      category,
+      content,
+      tags: Array.isArray(tags)
+        ? tags
+        : typeof tags === "string"
+        ? tags.split(",").map((t: string) => t.trim()).filter(Boolean)
+        : []
+    };
+
+    if (updatedAllowedGrades !== undefined) {
+      updateData.allowedGrades = updatedAllowedGrades;
+    }
+
+    const updated = await Policy.findByIdAndUpdate(id, updateData, { new: true });
 
     res.json(updated);
   } catch (err) {

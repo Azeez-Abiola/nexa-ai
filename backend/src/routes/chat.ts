@@ -1,5 +1,4 @@
 import express from "express";
-import { Policy } from "../models/Policy";
 import { authMiddleware, AuthenticatedRequest } from "../middleware/auth";
 import {
   BUSINESS_UNITS,
@@ -7,12 +6,12 @@ import {
   formatBusinessUnit,
   getUACNInfo
 } from "../config/businessUnits";
-import { 
-  searchGoogle, 
-  formatSearchResultsForChat,
-  buildHybridContext 
+import {
+  searchGoogle,
+  formatSearchResultsForChat
 } from "../services/googleSearchService";
 import { streamAIResponse } from "../services/openaiService";
+import { buildContextForQuery } from "../utils/contextBuilder";
 
 export const chatRouter = express.Router();
 
@@ -56,18 +55,6 @@ const GREETING_PATTERNS = [
   /^(how are you|how's it going|how do you do)\b/i
 ];
 
-// Questions patterns to extract intent
-const INTENT_PATTERNS = {
-  leave: /\b(leave|vacation|time off|days off|holiday|absent)\b/i,
-  salary: /\b(salary|pay|compensation|wage|payroll|bonus|allowance)\b/i,
-  benefits: /\b(benefit|health|insurance|medical|dental|pension)\b/i,
-  attendance: /\b(attendance|present|attendance policy|check in)\b/i,
-  code_of_conduct: /\b(conduct|behavior|dress code|ethics|discipline)\b/i,
-  work_hours: /\b(work hours|working hours|office hours|schedule|shift)\b/i,
-  remote_work: /\b(remote|work from home|wfh|work-from-home)\b/i,
-  training: /\b(training|development|course|certification|learning)\b/i,
-  harassment: /\b(harassment|discrimination|bullying|toxic|respect)\b/i
-};
 
 // Function to detect if message is a greeting
 const isGreeting = (message: string): boolean => {
@@ -75,16 +62,6 @@ const isGreeting = (message: string): boolean => {
   return GREETING_PATTERNS.some((pattern) => pattern.test(trimmed));
 };
 
-// Function to extract intent keywords
-const extractIntents = (message: string): string[] => {
-  const intents: string[] = [];
-  for (const [intent, pattern] of Object.entries(INTENT_PATTERNS)) {
-    if (pattern.test(message)) {
-      intents.push(intent);
-    }
-  }
-  return intents;
-};
 
 // Greeting responses
 const getGreetingResponse = (businessUnit: string): string => {
@@ -150,153 +127,56 @@ chatRouter.post("/", authMiddleware, buRateLimiter, async (req: AuthenticatedReq
       });
     }
 
-    // Extract intent from message
-    const intents = extractIntents(userMessage);
-
-    // Build search query combining user message and intents
-    let searchQuery = userMessage;
-    if (intents.length > 0) {
-      searchQuery = `${userMessage} ${intents.join(" ")}`;
-    }
-
-    // HYBRID APPROACH: Search policies AND Google in parallel
-    console.log(`[Chat] Searching for: "${searchQuery}"`);
-    
-    const [policiesRef, googleRef] = await Promise.allSettled([
-      // Search internal policies
-      Policy.find(
-        {
-          businessUnit: businessUnit,
-          $text: { $search: searchQuery }
-        },
-        { score: { $meta: "textScore" } }
-      )
-        .sort({ score: { $meta: "textScore" } })
-        .limit(3)
-        .lean()
-        .catch(async () => {
-          // Fallback to regex search if full-text index unavailable
-          const regexPatterns = searchQuery
-            .split(/\s+/)
-            .filter((w) => w.length > 2);
-
-          return Policy.find({
-            businessUnit: businessUnit,
-            $or: [
-              { title: { $regex: regexPatterns.join("|"), $options: "i" } },
-              { content: { $regex: regexPatterns.join("|"), $options: "i" } },
-              {
-                category: {
-                  $regex: regexPatterns.join("|"),
-                  $options: "i"
-                }
-              }
-            ]
-          })
-            .limit(3)
-            .lean();
-        }),
-      
-      // Search Google in parallel
-      searchGoogle(searchQuery, 3)
-    ]);
-
-    // Extract results from Promise.allSettled
-    const policies = policiesRef.status === "fulfilled" ? policiesRef.value : [];
-    const googleResults = googleRef.status === "fulfilled" && googleRef.value?.success 
-      ? googleRef.value.results || [] 
-      : [];
-
-    console.log(`[Chat] Policies found: ${policies?.length || 0}`);
-    console.log(`[Chat] Google search status:`, googleRef.status);
-    console.log(`[Chat] Google search full response:`, googleRef.status === "fulfilled" ? JSON.stringify(googleRef.value).substring(0, 500) : googleRef.reason);
-    console.log(`[Chat] Google results found: ${googleResults?.length || 0}`);
-    if (googleRef.status === "rejected") {
-      console.error(`[Chat] Google search rejected:`, googleRef.reason);
-    } else if (googleRef.status === "fulfilled" && !googleRef.value?.success) {
-      console.warn(`[Chat] Google search failed:`, googleRef.value?.error);
-    }
-
     const buConfig = getBusinessUnitConfig(businessUnit);
     const buName = buConfig ? formatBusinessUnit(businessUnit) : businessUnit;
     const buAbbr = buConfig?.abbr || businessUnit;
 
-    // Build hybrid context for OpenAI
-    const hybridContext = buildHybridContext(policies, googleResults);
-    const hasPolicies = policies && policies.length > 0;
-    const hasExternalSources = googleResults.length > 0;
+    // Build context: RAG first, keyword fallback, Google in parallel
+    const context = await buildContextForQuery(userMessage, businessUnit, req.grade || "");
 
-    console.log(`[Chat] hasPolicies:`, hasPolicies);
-    console.log(`[Chat] hasExternalSources:`, hasExternalSources);
-    console.log(`[Chat] Will enter hybrid response:`, hasPolicies || hasExternalSources);
+    if (context.accessDenied) {
+      return res.json({
+        reply: "You do not have access to the information required to answer this question. Please contact your HR or manager if you believe this is an error."
+      });
+    }
 
-    if (hasPolicies || hasExternalSources) {
-      // Create system prompt that handles both sources
+    const hasContext = context.source !== "none";
+    const hasExternalSources = context.googleResults.length > 0;
+
+    if (hasContext) {
       const systemPrompt = `You are a helpful assistant for ${buName} (${buAbbr}), a business unit of UACN.
 
-You have been provided with information from TWO sources:
+You have been provided with information from company documents and/or external sources:
 
-1. **COMPANY POLICIES** (marked with 📋) - Official internal documents
-2. **EXTERNAL SOURCES** (marked with 🌐) - Information from Google Search
-
-${hybridContext}
+${context.hybridContextString}
 
 IMPORTANT INSTRUCTIONS:
-1. Prioritize company policies (📋) when answering questions - they are the official source of truth
+1. Prioritize company documents (📋) when answering questions - they are the official source of truth
 2. Use external sources (🌐) to provide additional context, best practices, or industry standards
-3. Clearly indicate which source you're referencing: e.g., "According to our policy..." or "Industry best practices suggest..."
-4. If company policies conflict with external sources, follow company policy
-5. Format responses clearly with bullet points, headers, and links where appropriate
-6. Always cite document sections and provide links to relevant policies
-7. For topics not covered in company policies, supplement with external sources while making the distinction clear
-8. Be professional, helpful, and concise
-9. Direct users to HR & Compliance for policy clarifications or disputes`;
+3. Clearly indicate which source you're referencing
+4. If company documents conflict with external sources, follow company documents
+5. Format responses clearly with bullet points and headers where appropriate
+6. Be professional, helpful, and concise
+7. Direct users to HR & Compliance for policy clarifications or disputes`;
 
       try {
         const reply = await callOpenAIAPI(systemPrompt, userMessage);
-        
-        // Append external sources footer if available
         let finalReply = reply;
         if (hasExternalSources) {
-          const externalSourcesFooter = formatSearchResultsForChat(googleResults);
-          finalReply += externalSourcesFooter;
-          finalReply += "\n\n💡 **Note:** External sources complement company policies but company policies take precedence.";
+          finalReply += context.googleFooter;
+          finalReply += "\n\n💡 **Note:** External sources complement company documents but company documents take precedence.";
         }
-
         return res.json({ reply: finalReply });
       } catch (error) {
-        // Fallback: Display both sources manually
-        let response = "";
-        
-        if (hasPolicies) {
-          response += `### Found Relevant ${policies.length > 1 ? "Documents" : "Document"}\n\n`;
-          policies.forEach((policy, idx) => {
-            response += `**${idx + 1}. ${policy.title}** (Company Policy)\n`;
-            response += `*Category: ${policy.category}*\n\n`;
-            response += `${policy.content}\n\n`;
-            if (idx < policies.length - 1) {
-              response += `---\n\n`;
-            }
-          });
-        }
-
-        if (hasExternalSources) {
-          if (hasPolicies) {
-            response += `\n---\n\n### Additional External Sources\n\n`;
-          } else {
-            response += `### External Information Found\n\n`;
-          }
-          
-          const externalSourcesFooter = formatSearchResultsForChat(googleResults);
-          response += externalSourcesFooter;
-        }
-
+        // Fallback: render context directly
+        let response = context.hybridContextString;
+        if (hasExternalSources) response += "\n\n" + context.googleFooter;
         response += `\n\n**Need More Help?**\n• Contact HR & Compliance for policy questions`;
         return res.json({ reply: response });
       }
     }
 
-    // No matching policies or external sources - provide helpful guidance
+    // No context found
     const noMatchSystemPrompt = `You are a helpful assistant for ${buName} (${buAbbr}), a business unit of UACN.
 
 The user asked a question that doesn't have specific information in company documents OR external sources.

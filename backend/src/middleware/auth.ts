@@ -5,6 +5,7 @@ export interface AuthenticatedRequest extends Request {
   userId?: string;
   email?: string;
   businessUnit?: string;
+  grade?: string;
   tenantId?: string;
   tenantSlug?: string;
   adminId?: string;
@@ -13,10 +14,8 @@ export interface AuthenticatedRequest extends Request {
   isSuperAdmin?: boolean;
 }
 
-const JWT_SECRET = process.env.NEXA_AI_JWT_SECRET || "your-secret-key-change-in-production";
-const ADMIN_JWT_SECRET =
-  process.env.NEXA_AI_ADMIN_JWT_SECRET ||
-  process.env.NEXA_AI_JWT_SECRET
+  const JWT_SECRET = process.env.NEXA_AI_JWT_SECRET!;
+  const ADMIN_JWT_SECRET = process.env.NEXA_AI_JWT_SECRET
 
 export const authMiddleware = (
   req: AuthenticatedRequest,
@@ -34,6 +33,7 @@ export const authMiddleware = (
     req.userId = decoded.userId;
     req.email = decoded.email;
     req.businessUnit = decoded.businessUnit;
+    req.grade = decoded.grade;
     req.tenantId = decoded.tenantId;
     req.tenantSlug = decoded.tenantSlug;
     next();

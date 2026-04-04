@@ -15,9 +15,13 @@ import { adminAuthRouter } from "./routes/adminAuth";
 import { conversationRouter } from "./routes/conversation";
 import { analyticsRouter } from "./routes/analytics";
 import { provisioningRouter } from "./routes/provisioning";
+import { adminDocumentsRouter } from "./routes/adminDocuments";
+import { adminAuditLogsRouter } from "./routes/adminAuditLogs";
 import { BusinessUnit } from "./models/BusinessUnit";
 import { getUACNInfo, formatBusinessUnit } from "./config/businessUnits";
 import { tenantMiddleware } from "./middleware/tenant";
+import logger from "./utils/logger";
+import { startWorker } from "./queue/documentWorker";
 
 const app = express();
 
@@ -39,8 +43,8 @@ app.use(tenantMiddleware);
 const frontendDist = path.join(__dirname, '..', '..', 'frontend', 'dist');
 const publicFolder = path.join(__dirname, '..', '..', 'public');
 
-console.log(`Frontend dist path: ${frontendDist}`);
-console.log(`Public folder path: ${publicFolder}`);
+logger.info(`Frontend dist path: ${frontendDist}`);
+logger.info(`Public folder path: ${publicFolder}`);
 
 // Serve static files with proper MIME types
 app.use('/assets', express.static(path.join(frontendDist, 'assets'), {
@@ -81,6 +85,8 @@ app.use("/api/v1/admin/auth", adminAuthRouter);
 app.use("/api/v1/conversations", conversationRouter);
 app.use("/api/v1/chat", chatRouter);
 app.use("/api/v1/admin/policies", adminPoliciesRouter);
+app.use("/api/v1/admin/documents", adminDocumentsRouter);
+app.use("/api/v1/admin/audit-logs", adminAuditLogsRouter);
 app.use("/api/v1/analytics", analyticsRouter);
 app.use("/api/v1/provisioning", provisioningRouter);
 
@@ -99,7 +105,7 @@ app.get("/api/v1/public/business-units", async (_req, res) => {
     
     res.json({ businessUnits });
   } catch (error) {
-    console.error("Get BU list error:", error);
+    logger.error("Get BU list error", { error });
     // Fallback to default business units if MongoDB fetch fails
     const fallbackUnits = [
       { value: "GCL", label: "Grand Cereals Limited (GCL)", name: "GCL" },
@@ -121,7 +127,7 @@ app.get("/api/v1/public/business-unit-names", async (_req, res) => {
     const names = buses.map(bu => bu.name);
     res.json({ names });
   } catch (error) {
-    console.error("Get BU names error:", error);
+    logger.error("Get BU names error", { error });
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -168,20 +174,21 @@ const initializeDefaultBUs = async () => {
       await bu.save();
     }
 
-    console.log("Business units initialized");
+    logger.info("Business units initialized");
   } catch (error) {
-    console.error("Error initializing business units:", error);
+    logger.error("Error initializing business units", { error });
   }
 };
 
 // Initialize MongoDB connection (will be used by both standalone and combined modes)
 mongoose.connect(mongoUri)
   .then(async () => {
-    console.log('MongoDB connected successfully');
+    logger.info("MongoDB connected successfully");
     await initializeDefaultBUs();
+    startWorker();
   })
   .catch((err) => {
-    console.error("MongoDB connection error:", err);
+    logger.error("MongoDB connection error", { error: err.message });
   });
 
 const port = parseInt(process.env.PORT || "4000", 10);
@@ -191,7 +198,7 @@ const port = parseInt(process.env.PORT || "4000", 10);
 if (process.env.NODE_ENV !== 'mounted' && !process.env.MOUNTED) {
   const host = process.env.HOST || "0.0.0.0";
   app.listen(port, host, () => {
-    console.log(`Nexa AI backend listening on ${host}:${port}`);
+    logger.info(`Nexa AI backend listening on ${host}:${port}`);
   });
 }
 
