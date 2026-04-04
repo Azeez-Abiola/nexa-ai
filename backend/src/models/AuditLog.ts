@@ -8,7 +8,10 @@ export type AuditEventType =
   | "rag_query"
   | "rag_retrieval_empty"
   | "rag_access_denied"
-  | "chunk_embedding_batch_completed";
+  | "chunk_embedding_batch_completed"
+  | "conversation_shared"
+  | "conversation_share_denied"
+  | "conversation_share_revoked";
 
 export interface AuditLogDocument extends Document {
   eventType: AuditEventType;
@@ -32,7 +35,10 @@ const AuditLogSchema = new Schema<AuditLogDocument>(
         "rag_query",
         "rag_retrieval_empty",
         "rag_access_denied",
-        "chunk_embedding_batch_completed"
+        "chunk_embedding_batch_completed",
+        "conversation_shared",
+        "conversation_share_denied",
+        "conversation_share_revoked"
       ],
       required: true
     },

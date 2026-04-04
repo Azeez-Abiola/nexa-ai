@@ -13,6 +13,7 @@ import { adminPoliciesRouter } from "./routes/adminPolicies";
 import { authRouter } from "./routes/auth";
 import { adminAuthRouter } from "./routes/adminAuth";
 import { conversationRouter } from "./routes/conversation";
+import { conversationSharingRouter } from "./routes/conversationSharing";
 import { analyticsRouter } from "./routes/analytics";
 import { provisioningRouter } from "./routes/provisioning";
 import { adminDocumentsRouter } from "./routes/adminDocuments";
@@ -83,6 +84,7 @@ app.get("/health", (_req, res) => {
 app.use("/api/v1/auth", authRouter);
 app.use("/api/v1/admin/auth", adminAuthRouter);
 app.use("/api/v1/conversations", conversationRouter);
+app.use("/api/v1/conversations", conversationSharingRouter);
 app.use("/api/v1/chat", chatRouter);
 app.use("/api/v1/admin/policies", adminPoliciesRouter);
 app.use("/api/v1/admin/documents", adminDocumentsRouter);
