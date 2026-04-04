@@ -68,8 +68,9 @@ export async function retrieveRelevantChunks(query: RAGQuery): Promise<RAGResult
         filter: {
           businessUnit: { $eq: query.businessUnit },
           $or: [
-            { allowedGrades: { $size: 0 } }, // empty = open to all grades
-            { allowedGrades: { $in: [query.userGrade] } } // or user's grade is listed
+            { allowedGrades: { $size: 0 } },              // empty = open to all grades
+            { allowedGrades: { $in: ["ALL"] } },           // explicitly granted to all
+            { allowedGrades: { $in: [query.userGrade] } }  // or user's grade is listed
           ]
         }
       }

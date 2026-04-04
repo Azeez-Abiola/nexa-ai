@@ -83,6 +83,34 @@ export async function sendAdminInviteEmail(
 }
 
 /**
+ * Notify a single employee that a new document is available in their knowledge base.
+ * Called in a fire-and-forget loop — never throws (errors are swallowed and logged).
+ */
+export async function sendDocumentAddedNotification(
+  email: string,
+  fullName: string,
+  businessUnit: string,
+  documentTitle: string,
+  documentType: string,
+  sensitivityLevel: string,
+  uploadedBy: string
+): Promise<void> {
+  try {
+    const html = await renderTemplate("document-added", {
+      fullName,
+      businessUnit,
+      documentTitle,
+      documentType,
+      sensitivityLevel,
+      uploadedBy
+    });
+    await sendEmail(email, `[${businessUnit}] New document added to your Nexa AI knowledge base`, html);
+  } catch (error) {
+    console.error(`[EmailService] Failed to send document-added notification to ${email}:`, error);
+  }
+}
+
+/**
  * Send welcome email after successful email verification
  */
 export async function sendWelcomeEmail(email: string, fullName: string): Promise<void> {

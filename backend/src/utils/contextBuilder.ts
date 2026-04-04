@@ -24,9 +24,10 @@ function filterPoliciesByGrade(policies: any[], userGrade?: string): { accessibl
   const accessible: any[] = [];
   const restricted: any[] = [];
   for (const policy of policies) {
-    if (!policy.allowedGrades || policy.allowedGrades.length === 0 || !userGrade) {
+    const grades: string[] = policy.allowedGrades ?? [];
+    if (grades.length === 0 || grades.includes("ALL") || !userGrade) {
       accessible.push(policy);
-    } else if (policy.allowedGrades.includes(userGrade)) {
+    } else if (grades.includes(userGrade)) {
       accessible.push(policy);
     } else {
       restricted.push(policy);

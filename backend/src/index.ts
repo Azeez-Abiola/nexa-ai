@@ -19,6 +19,7 @@ import { provisioningRouter } from "./routes/provisioning";
 import { adminDocumentsRouter } from "./routes/adminDocuments";
 import { adminAuditLogsRouter } from "./routes/adminAuditLogs";
 import { BusinessUnit } from "./models/BusinessUnit";
+import { EMPLOYEE_GRADES } from "./models/User";
 import { getUACNInfo, formatBusinessUnit } from "./config/businessUnits";
 import { tenantMiddleware } from "./middleware/tenant";
 import logger from "./utils/logger";
@@ -120,6 +121,12 @@ app.get("/api/v1/public/business-units", async (_req, res) => {
     ];
     res.json({ businessUnits: fallbackUnits });
   }
+});
+
+// Public endpoint: employee grades for registration form
+// Returns the real grades only — "ALL" is a document access-control value, not an employee grade
+app.get("/api/v1/public/grades", (_req, res) => {
+  res.json({ grades: EMPLOYEE_GRADES });
 });
 
 // Get business unit names only (for C-Panel sidebar)

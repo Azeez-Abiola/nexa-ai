@@ -2,11 +2,13 @@ import express from "express";
 import multer from "multer";
 import { RagDocument } from "../models/RagDocument";
 import { DocumentChunk } from "../models/DocumentChunk";
+import { User } from "../models/User";
 import { adminAuthMiddleware, AuthenticatedRequest } from "../middleware/auth";
 import { uploadDocument, deleteDocument } from "../services/cloudinaryService";
 import { cleanupDocumentChunks } from "../services/documentProcessingService";
 import { documentQueue } from "../queue/documentQueue";
 import { logDocumentUpload } from "../services/auditService";
+import { sendDocumentAddedNotification } from "../services/emailService";
 import logger from "../utils/logger";
 
 export const adminDocumentsRouter = express.Router();
@@ -116,11 +118,17 @@ adminDocumentsRouter.post("/", upload.single("file"), async (req: AuthenticatedR
       return res.status(400).json({ error: "SUPERADMIN must specify a businessUnit" });
     }
 
-    const parsedGrades = Array.isArray(allowedGrades)
+    const ALL_GRADES = ["Executive", "Senior VP", "VP", "Associate", "Senior Analyst", "Analyst"];
+    const rawGrades: string[] = Array.isArray(allowedGrades)
       ? allowedGrades
       : typeof allowedGrades === "string" && allowedGrades.trim()
       ? allowedGrades.split(",").map((g: string) => g.trim()).filter(Boolean)
       : [];
+
+    // "ALL" is stored as-is; anything else is validated against known grades
+    const parsedGrades = rawGrades.includes("ALL")
+      ? ["ALL"]
+      : rawGrades.filter((g) => ALL_GRADES.includes(g));
 
     // Upload to Cloudinary
     const { publicId, secureUrl } = await uploadDocument(
@@ -177,6 +185,49 @@ adminDocumentsRouter.post("/", upload.single("file"), async (req: AuthenticatedR
       fileSize: file.size,
       mimeType: file.mimetype,
       cloudinaryPublicId: publicId
+    });
+
+    // Fire-and-forget: notify eligible employees that a new document is in their knowledge base.
+    // Only fires when specific grades are selected — "ALL" is an access-control flag, not a broadcast trigger.
+    // Runs after the response is sent so it never delays the upload flow.
+    setImmediate(async () => {
+      try {
+        // No specific audience selected → nothing to notify
+        if (parsedGrades.length === 0 || parsedGrades.includes("ALL")) return;
+
+        const userFilter: Record<string, any> = {
+          businessUnit: targetBU,
+          emailVerified: true,
+          grade: { $in: parsedGrades }
+        };
+
+        const recipients = await User.find(userFilter).select("email fullName").lean();
+
+        await Promise.allSettled(
+          recipients.map((user) =>
+            sendDocumentAddedNotification(
+              user.email,
+              user.fullName,
+              targetBU!,
+              title,
+              documentType,
+              sensitivityLevel,
+              adminName || "Your administrator"
+            )
+          )
+        );
+
+        logger.info("[AdminDocuments] Document-added notifications dispatched", {
+          documentId: doc._id,
+          recipientCount: recipients.length,
+          businessUnit: targetBU
+        });
+      } catch (err) {
+        logger.error("[AdminDocuments] Failed to dispatch document-added notifications", {
+          error: (err as Error).message,
+          documentId: doc._id
+        });
+      }
     });
 
     logger.info("[AdminDocuments] Document uploaded and queued", {

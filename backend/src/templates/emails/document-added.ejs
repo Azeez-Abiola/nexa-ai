@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>New Document Added to Your Knowledge Base</title>
+</head>
+<body style="margin:0;padding:0;background:#f0f0f0;font-family:Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f0f0;padding:32px 0;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;border-radius:8px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.08);">
+
+          <!-- Header -->
+          <tr>
+            <td style="background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);padding:40px 20px;text-align:center;">
+              <h1 style="color:#ffffff;margin:0;font-size:24px;font-weight:700;">New Document Available</h1>
+              <p style="color:rgba(255,255,255,0.85);margin:8px 0 0;font-size:14px;">Your Nexa AI Knowledge Base has been updated</p>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="background:#f9f9f9;padding:40px 32px;">
+              <p style="color:#333;font-size:16px;margin:0 0 12px;">Hi <%= fullName %>,</p>
+              <p style="color:#555;font-size:15px;line-height:1.6;margin:0 0 24px;">
+                A new document has been added to your <strong><%= businessUnit %></strong> knowledge base on Nexa AI and is now available for you to reference.
+              </p>
+
+              <!-- Document details card -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:28px;">
+                <tr>
+                  <td style="padding:20px 24px;">
+                    <p style="color:#999;font-size:11px;text-transform:uppercase;letter-spacing:0.08em;margin:0 0 4px;">Document Title</p>
+                    <p style="color:#111;font-size:17px;font-weight:700;margin:0 0 16px;"><%= documentTitle %></p>
+
+                    <table width="100%" cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td width="50%" style="padding-bottom:12px;">
+                          <p style="color:#999;font-size:11px;text-transform:uppercase;letter-spacing:0.08em;margin:0 0 2px;">Type</p>
+                          <p style="color:#374151;font-size:14px;font-weight:600;margin:0;text-transform:capitalize;"><%= documentType %></p>
+                        </td>
+                        <td width="50%" style="padding-bottom:12px;">
+                          <p style="color:#999;font-size:11px;text-transform:uppercase;letter-spacing:0.08em;margin:0 0 2px;">Access Level</p>
+                          <p style="color:#374151;font-size:14px;font-weight:600;margin:0;text-transform:capitalize;"><%= sensitivityLevel %></p>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td colspan="2">
+                          <p style="color:#999;font-size:11px;text-transform:uppercase;letter-spacing:0.08em;margin:0 0 2px;">Uploaded By</p>
+                          <p style="color:#374151;font-size:14px;font-weight:600;margin:0;"><%= uploadedBy %></p>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="color:#555;font-size:15px;line-height:1.6;margin:0 0 28px;">
+                You can now ask Nexa AI questions about this document directly in your dashboard.
+              </p>
+
+              <p style="color:#999;font-size:12px;margin:0;line-height:1.5;">
+                You're receiving this because this document was made available to your employee grade in <strong><%= businessUnit %></strong>.<br/>
+                If you have questions, please contact your administrator.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background:#f0f0f0;padding:20px;text-align:center;">
+              <p style="color:#aaa;font-size:12px;margin:0;">&copy; <%= new Date().getFullYear() %> Nexa AI. All rights reserved.</p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

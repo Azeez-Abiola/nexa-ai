@@ -45,7 +45,7 @@ const RagDocumentSchema = new Schema<RagDocumentDocument>(
     },
     allowedGrades: {
       type: [String],
-      enum: ["Executive", "Senior VP", "VP", "Associate", "Senior Analyst", "Analyst"],
+      enum: ["ALL", "Executive", "Senior VP", "VP", "Associate", "Senior Analyst", "Analyst"],
       default: []
     },
     uploadedBy: {
