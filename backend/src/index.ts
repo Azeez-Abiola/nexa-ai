@@ -4,6 +4,8 @@ import dotenv from "dotenv";
 dotenv.config();
 
 import express from "express";
+import swaggerUi from "swagger-ui-express";
+import { swaggerSpec } from "./config/swagger";
 import cors from "cors";
 import mongoose from "mongoose";
 import { json } from "body-parser";
@@ -82,6 +84,16 @@ app.get("/health", (_req, res) => {
   res.json({ status: "ok" });
 });
 
+// ─── Swagger API Docs ─────────────────────────────────────────────────────────
+app.use("/api/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+  customSiteTitle: "Nexa AI API Docs",
+  swaggerOptions: { persistAuthorization: true }
+}));
+app.get("/api/docs.json", (_req, res) => {
+  res.setHeader("Content-Type", "application/json");
+  res.send(swaggerSpec);
+});
+
 app.use("/api/v1/auth", authRouter);
 app.use("/api/v1/admin/auth", adminAuthRouter);
 app.use("/api/v1/conversations", conversationRouter);
@@ -144,7 +156,7 @@ app.get("/api/v1/public/business-unit-names", async (_req, res) => {
 // SPA fallback: serve index.html for any non-API GET path (enables client-side routes like /admin)
 app.get('*', (req, res, next) => {
   if (req.method !== 'GET') return next();
-  if (req.path.startsWith('/api/v1')) return next();
+  if (req.path.startsWith('/api/')) return next();
   if (req.path === '/super-admin') return next(); // handled above
   // Don't serve index.html for asset files
   if (req.path.startsWith('/assets') || req.path.includes('.')) return next();

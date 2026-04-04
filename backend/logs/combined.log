@@ -11,3 +11,10 @@
 {"level":"info","message":"MongoDB connected successfully","timestamp":"2026-04-04T19:03:17.469Z"}
 {"level":"info","message":"Business units initialized","timestamp":"2026-04-04T19:03:22.086Z"}
 {"level":"info","message":"[Worker] Document processing worker started","timestamp":"2026-04-04T19:03:22.089Z"}
+{"level":"info","message":"Frontend dist path: /Users/joshmacbook/UAC/nexa-ai/frontend/dist","timestamp":"2026-04-04T19:46:01.988Z"}
+{"level":"info","message":"Public folder path: /Users/joshmacbook/UAC/nexa-ai/public","timestamp":"2026-04-04T19:46:01.992Z"}
+{"level":"info","message":"Nexa AI backend listening on 0.0.0.0:4000","timestamp":"2026-04-04T19:46:02.022Z"}
+{"level":"info","message":"[Redis] Connected","timestamp":"2026-04-04T19:46:02.029Z"}
+{"level":"info","message":"MongoDB connected successfully","timestamp":"2026-04-04T19:46:13.418Z"}
+{"level":"info","message":"Business units initialized","timestamp":"2026-04-04T19:46:18.495Z"}
+{"level":"info","message":"[Worker] Document processing worker started","timestamp":"2026-04-04T19:46:18.498Z"}
