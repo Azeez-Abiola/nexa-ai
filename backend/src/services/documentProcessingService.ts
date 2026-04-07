@@ -6,6 +6,8 @@ import { generateEmbeddingBatch } from "./embeddingService";
 import { logProcessingStarted, logProcessingCompleted, logProcessingFailed } from "./auditService";
 import { extractTextFromPdf } from "../utils/pdfParser";
 import { extractTextFromDocx } from "../utils/docxParser";
+import { extractTextFromXlsx } from "../utils/xlsxParser";
+import { extractTextFromPptx } from "../utils/pptxParser";
 import logger from "../utils/logger";
 
 export interface ProcessingJob {
@@ -35,6 +37,12 @@ async function extractText(buffer: Buffer, mimeType: string): Promise<string> {
   }
   if (mimeType === "text/plain") {
     return buffer.toString("utf-8");
+  }
+  if (mimeType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") {
+    return extractTextFromXlsx(buffer);
+  }
+  if (mimeType === "application/vnd.openxmlformats-officedocument.presentationml.presentation") {
+    return extractTextFromPptx(buffer);
   }
   throw new Error(`Unsupported mimeType: ${mimeType}`);
 }

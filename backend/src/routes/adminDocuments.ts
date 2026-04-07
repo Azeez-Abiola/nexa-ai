@@ -21,13 +21,15 @@ const upload = multer({
     const allowed = [
       "application/pdf",
       "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
       "text/plain",
       "text/csv"
     ];
     if (allowed.includes(file.mimetype)) {
       cb(null, true);
     } else {
-      cb(new Error("Only PDF, DOCX, TXT, and CSV files are allowed"));
+      cb(new Error("Only PDF, DOCX, XLSX, PPTX, TXT, and CSV files are allowed"));
     }
   }
 });
