@@ -1,34 +1,68 @@
-{
-  "fields": [
-    {
-      "type": "vector",
-      "path": "embedding",
-      "numDimensions": 1536,
-      "similarity": "cosine"
-    },
-    {
-      "type": "filter",
-      "path": "businessUnit"
-    },
-    {
-      "type": "filter",
-      "path": "allowedGrades"
-    },
-    {
-      "type": "filter",
-      "path": "sensitivityLevel"
-    },
-    {
-      "type": "filter",
-      "path": "documentId"
-    },
-    {
-      "type": "filter",
-      "path": "createdAt"
-    },
-    {
-      "type": "filter",
-      "path": "metadata.documentTitle"
+[
+  {
+    "_comment": "Index for admin-uploaded RAG documents (DocumentChunk collection). Collection: documentchunks. Filters by businessUnit, allowedGrades, and sensitivityLevel for multi-tenant access control.",
+    "name": "document_chunks_vector_index",
+    "type": "vectorSearch",
+    "definition": {
+      "fields": [
+        {
+          "type": "vector",
+          "path": "embedding",
+          "numDimensions": 1536,
+          "similarity": "cosine"
+        },
+        {
+          "type": "filter",
+          "path": "businessUnit"
+        },
+        {
+          "type": "filter",
+          "path": "allowedGrades"
+        },
+        {
+          "type": "filter",
+          "path": "sensitivityLevel"
+        },
+        {
+          "type": "filter",
+          "path": "documentId"
+        },
+        {
+          "type": "filter",
+          "path": "createdAt"
+        },
+        {
+          "type": "filter",
+          "path": "metadata.documentTitle"
+        }
+      ]
     }
-  ]
-}
+  },
+  {
+    "_comment": "Index for user-uploaded session documents (UserDocumentChunk collection). Collection: userdocumentchunks. Filters strictly by userId and chatSessionId to enforce per-session isolation before any context is passed to the LLM.",
+    "name": "user_document_chunks_vector_index",
+    "type": "vectorSearch",
+    "definition": {
+      "fields": [
+        {
+          "type": "vector",
+          "path": "embedding",
+          "numDimensions": 1536,
+          "similarity": "cosine"
+        },
+        {
+          "type": "filter",
+          "path": "userId"
+        },
+        {
+          "type": "filter",
+          "path": "chatSessionId"
+        },
+        {
+          "type": "filter",
+          "path": "documentId"
+        }
+      ]
+    }
+  }
+]

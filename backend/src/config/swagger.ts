@@ -97,6 +97,37 @@ const options: swaggerJsdoc.Options = {
             createdAt: { type: "string", format: "date-time" }
           }
         },
+        UserDocument: {
+          type: "object",
+          description: "A document uploaded by an employee within a specific chat session. Processed asynchronously into vector embeddings for session-scoped RAG retrieval.",
+          properties: {
+            _id: { type: "string" },
+            userId: { type: "string" },
+            chatSessionId: { type: "string", description: "The conversation group ID this document belongs to" },
+            fileName: { type: "string", example: "Q3-report.pdf" },
+            fileType: { type: "string", example: "application/pdf" },
+            fileSize: { type: "number", description: "File size in bytes" },
+            fileUrl: { type: "string", description: "Cloudinary URL (not exposed publicly)" },
+            status: {
+              type: "string",
+              enum: ["pending", "processing", "ready", "failed"],
+              description: "pending → processing → ready (or failed). Users can query the document once status is 'ready'."
+            },
+            processingError: { type: "string", nullable: true },
+            totalChunks: { type: "number", description: "Number of vector chunks produced after processing" },
+            createdAt: { type: "string", format: "date-time" },
+            updatedAt: { type: "string", format: "date-time" }
+          }
+        },
+        UploadedDocumentResult: {
+          type: "object",
+          description: "Outcome of a single file upload attempt within a chat message request.",
+          properties: {
+            fileName: { type: "string" },
+            documentId: { type: "string", description: "ID of the created UserDocument record (empty string on failure)" },
+            status: { type: "string", enum: ["pending", "failed"], description: "'pending' means upload succeeded and processing was queued; 'failed' means the upload itself failed." }
+          }
+        },
         AuditLog: {
           type: "object",
           properties: {
@@ -132,6 +163,7 @@ const options: swaggerJsdoc.Options = {
       { name: "Admin Auth", description: "Admin registration, login, user management, and password management" },
       { name: "Conversations", description: "Manage conversation threads and messages" },
       { name: "Conversation Sharing", description: "Share conversations with colleagues in the same business unit" },
+      { name: "Session Documents", description: "Upload and manage documents scoped to a single chat session. Uploaded files are processed asynchronously into vector embeddings and used for RAG retrieval when the user asks questions in that session." },
       { name: "Chat", description: "Stateless chat endpoints (public and authenticated)" },
       { name: "Admin Policies", description: "CRUD for keyword-search policy documents" },
       { name: "Admin Documents", description: "Upload and manage RAG knowledge-base documents" },
@@ -631,13 +663,38 @@ const options: swaggerJsdoc.Options = {
       "/conversations/{id}/message": {
         post: {
           tags: ["Conversations"],
-          summary: "Send a message and get an AI response",
-          description: "Appends the user message, calls the AI (with RAG context), saves the assistant response, and returns both.",
+          summary: "Send a message (with optional file upload) and get an AI response",
+          description: `Accepts **multipart/form-data** (to attach files) or **application/json** (text-only, backward-compatible).
+
+**File upload behaviour:**
+- Supported formats: PDF, DOCX, XLSX, PPTX, TXT, CSV (max 10 MB per file, up to 5 per request, 10 per session).
+- Uploaded files are stored in Cloudinary and queued for async processing (chunking + embedding).
+- Once processing is complete (status = \`ready\`), the AI will automatically use them as context when answering questions in this session.
+- If a file is still processing, the AI is informed and will tell the user to retry shortly.
+
+**multipart field names:**
+- \`message\` — the user's text (required unless uploading files only)
+- \`files\` — one or more files (optional)
+
+**Fallback:** When called with \`application/json\`, the field name \`content\` is also accepted (original behaviour preserved).`,
           security: [{ bearerAuth: [] }],
-          parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+          parameters: [{ name: "id", in: "path", required: true, description: "Conversation group ID", schema: { type: "string" } }],
           requestBody: {
             required: true,
             content: {
+              "multipart/form-data": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    message: { type: "string", description: "The user's text message (required unless uploading files only)" },
+                    files: {
+                      type: "array",
+                      items: { type: "string", format: "binary" },
+                      description: "PDF, DOCX, XLSX, PPTX, TXT, or CSV files (max 10 MB each, max 5 per request)"
+                    }
+                  }
+                }
+              },
               "application/json": {
                 schema: {
                   type: "object",
@@ -648,7 +705,27 @@ const options: swaggerJsdoc.Options = {
             }
           },
           responses: {
-            "200": { description: "userMessage, assistantMessage, and full updated conversation returned" },
+            "200": {
+              description: "userMessage, assistantMessage, full conversation, and upload results returned",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      userMessage: { $ref: "#/components/schemas/ChatMessage" },
+                      assistantMessage: { $ref: "#/components/schemas/ChatMessage" },
+                      uploadedDocuments: {
+                        type: "array",
+                        items: { $ref: "#/components/schemas/UploadedDocumentResult" },
+                        description: "Present only when files were attached to the request"
+                      },
+                      conversation: { $ref: "#/components/schemas/ConversationGroup" }
+                    }
+                  }
+                }
+              }
+            },
+            "400": { description: "Missing content/file, unsupported file type, or session document limit exceeded" },
             "404": { description: "Conversation not found" }
           }
         }
@@ -657,20 +734,86 @@ const options: swaggerJsdoc.Options = {
       "/conversations/{id}/message-stream": {
         post: {
           tags: ["Conversations"],
-          summary: "Stream an AI response (Server-Sent Events)",
-          description: "Returns a text/event-stream. Each `data:` event is a JSON object with `chunk` and `fullResponse`. A final event includes `done: true` and the full `conversation` object.",
+          summary: "Stream an AI response (Server-Sent Events) — with optional file upload",
+          description: `Same contract as \`POST /conversations/{id}/message\` but streams the AI response token-by-token via **Server-Sent Events**.
+
+Each \`data:\` event is a JSON object:
+- \`{ chunk, fullResponse }\` — incremental token
+- \`{ done: true, fullResponse, conversation, uploadedDocuments? }\` — final event with full data
+
+Accepts **multipart/form-data** (with files) or **application/json** (text-only).`,
           security: [{ bearerAuth: [] }],
-          parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+          parameters: [{ name: "id", in: "path", required: true, description: "Conversation group ID", schema: { type: "string" } }],
           requestBody: {
             required: true,
             content: {
+              "multipart/form-data": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    message: { type: "string", description: "The user's text message" },
+                    files: {
+                      type: "array",
+                      items: { type: "string", format: "binary" },
+                      description: "PDF, DOCX, XLSX, PPTX, TXT, or CSV files (max 10 MB each, max 5 per request)"
+                    }
+                  }
+                }
+              },
               "application/json": {
                 schema: { type: "object", required: ["content"], properties: { content: { type: "string" } } }
               }
             }
           },
           responses: {
-            "200": { description: "SSE stream — Content-Type: text/event-stream" }
+            "200": { description: "SSE stream — Content-Type: text/event-stream" },
+            "400": { description: "Missing content/file, unsupported file type, or session document limit exceeded" }
+          }
+        }
+      },
+
+      "/conversations/{id}/documents": {
+        get: {
+          tags: ["Session Documents"],
+          summary: "List documents uploaded to a chat session",
+          description: "Returns all documents the authenticated user has uploaded to the specified conversation session, sorted newest first. Internal Cloudinary keys are never exposed.",
+          security: [{ bearerAuth: [] }],
+          parameters: [{ name: "id", in: "path", required: true, description: "Conversation group ID", schema: { type: "string" } }],
+          responses: {
+            "200": {
+              description: "Array of session documents",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      documents: {
+                        type: "array",
+                        items: { $ref: "#/components/schemas/UserDocument" }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "401": { description: "Unauthorized" }
+          }
+        }
+      },
+
+      "/conversations/{id}/documents/{docId}": {
+        delete: {
+          tags: ["Session Documents"],
+          summary: "Delete a session document",
+          description: "Permanently deletes the document record, all its vector chunks from the database, and the file from Cloudinary. The user must own the document and it must belong to the specified session.",
+          security: [{ bearerAuth: [] }],
+          parameters: [
+            { name: "id", in: "path", required: true, description: "Conversation group ID", schema: { type: "string" } },
+            { name: "docId", in: "path", required: true, description: "UserDocument ID", schema: { type: "string" } }
+          ],
+          responses: {
+            "200": { description: "Document deleted successfully", content: { "application/json": { schema: { type: "object", properties: { success: { type: "boolean" } } } } } },
+            "404": { description: "Document not found or does not belong to this user/session" }
           }
         }
       },

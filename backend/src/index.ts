@@ -26,6 +26,8 @@ import { getUACNInfo, formatBusinessUnit } from "./config/businessUnits";
 import { tenantMiddleware } from "./middleware/tenant";
 import logger from "./utils/logger";
 import { startWorker } from "./queue/documentWorker";
+import { startUserDocumentWorker } from "./queue/userDocumentWorker";
+import { userDocumentsRouter } from "./routes/userDocuments";
 
 const app = express();
 
@@ -98,6 +100,7 @@ app.use("/api/v1/auth", authRouter);
 app.use("/api/v1/admin/auth", adminAuthRouter);
 app.use("/api/v1/conversations", conversationRouter);
 app.use("/api/v1/conversations", conversationSharingRouter);
+app.use("/api/v1/conversations", userDocumentsRouter);
 app.use("/api/v1/chat", chatRouter);
 app.use("/api/v1/admin/policies", adminPoliciesRouter);
 app.use("/api/v1/admin/documents", adminDocumentsRouter);
@@ -207,6 +210,7 @@ mongoose.connect(mongoUri)
     logger.info("MongoDB connected successfully");
     await initializeDefaultBUs();
     startWorker();
+    startUserDocumentWorker();
   })
   .catch((err) => {
     logger.error("MongoDB connection error", { error: err.message });
