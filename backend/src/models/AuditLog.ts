@@ -9,6 +9,8 @@ export type AuditEventType =
   | "rag_retrieval_empty"
   | "rag_access_denied"
   | "chunk_embedding_batch_completed"
+  | "conversation_shared"
+  | "conversation_share_denied"
   | "conversation_share_revoked"
   | "admin_login"
   | "admin_logout"

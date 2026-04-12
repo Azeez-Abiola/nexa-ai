@@ -72,6 +72,8 @@ export async function shareConversation(
     logEvent("conversation_share_denied", {
       userId: senderUserId,
       businessUnit: senderBusinessUnit,
+      action: "Share Denied",
+      details: `Cross-BU share attempt to ${recipient.email} blocked`,
       metadata: {
         conversationGroupId,
         recipientEmail: recipient.email,
@@ -114,6 +116,8 @@ export async function shareConversation(
   logEvent("conversation_shared", {
     userId: senderUserId,
     businessUnit: senderBusinessUnit,
+    action: "Conversation Shared",
+    details: `Shared conversation "${group.title}" with ${recipient.email}`,
     metadata: {
       shareId: share._id.toString(),
       conversationGroupId,
@@ -209,6 +213,8 @@ export async function revokeShare(
   logEvent("conversation_share_revoked", {
     userId: requestingUserId,
     businessUnit: share.businessUnit,
+    action: "Share Revoked",
+    details: `Revoked share ${shareId} from user ${share.sharedWithUserId.toString()}`,
     metadata: {
       shareId,
       conversationGroupId: share.conversationGroupId.toString(),

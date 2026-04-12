@@ -293,7 +293,7 @@ adminAuthRouter.post("/verify-email", async (req: Request<{}, {}, { email: strin
     await admin.save();
 
     try {
-      await sendWelcomeEmail(admin.email, admin.fullName);
+      await sendWelcomeEmail(admin.email, admin.fullName, admin.businessUnit);
     } catch (emailError) {
       console.error("Failed to send welcome email:", emailError);
     }
