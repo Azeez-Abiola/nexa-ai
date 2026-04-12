@@ -8,7 +8,7 @@ import { BusinessUnit } from "../models/BusinessUnit";
 import { AdminUser } from "../models/AdminUser";
 import { AdminInvite } from "../models/AdminInvite";
 import { superAdminMiddleware, AuthenticatedRequest } from "../middleware/auth";
-import { sendAdminInviteEmail } from "../services/emailService";
+import { sendTenantCredentialsEmail } from "../services/emailService";
 
 export const provisioningRouter = express.Router();
 
@@ -55,7 +55,7 @@ provisioningRouter.post(
   logoUpload.single("logo"),
   async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const { name, label, slug, contactEmail, emailDomain } = req.body;
+      const { name, label, slug, contactEmail, colorCode } = req.body;
 
       if (!name || !label || !slug) {
         return res.status(400).json({ error: "name, label and slug are required" });
@@ -82,8 +82,42 @@ provisioningRouter.post(
         slug: slug.toLowerCase(),
         logo: logoPath,
         contactEmail: contactEmail || undefined,
+        colorCode: colorCode || "#ed0000",
         isActive: true
       });
+
+      // If contactEmail is provided, auto-create an Admin account
+      let autoAdmin = null;
+      if (contactEmail) {
+        const existingAdmin = await AdminUser.findOne({ email: contactEmail.toLowerCase() });
+        if (!existingAdmin) {
+          const autoPassword = crypto.randomBytes(6).toString("hex"); // e.g. "a1b2c3d4e5f6"
+          const hashedPassword = await bcryptjs.hash(autoPassword, 10);
+          
+          await AdminUser.create({
+            email: contactEmail.toLowerCase(),
+            fullName: label + " Administrator",
+            businessUnit: name,
+            password: hashedPassword,
+            emailVerified: true
+          });
+
+          // Send email with credentials
+          try {
+            const { sendTenantCredentialsEmail } = require("../services/emailService");
+            await sendTenantCredentialsEmail(
+              contactEmail.toLowerCase(),
+              label + " Administrator",
+              name,
+              tenant.slug,
+              autoPassword
+            );
+            autoAdmin = { email: contactEmail.toLowerCase(), passwordGenerated: true };
+          } catch (emailError) {
+            console.error("Auto-admin email failed:", emailError);
+          }
+        }
+      }
 
       res.status(201).json({
         message: "Tenant created successfully",
@@ -94,7 +128,8 @@ provisioningRouter.post(
           slug: tenant.slug,
           logo: tenant.logo,
           subdomain: `${tenant.slug}.nexa.ai`
-        }
+        },
+        autoAdmin
       });
     } catch (error) {
       console.error("Create tenant error:", error);
@@ -102,6 +137,7 @@ provisioningRouter.post(
     }
   }
 );
+
 
 // PUT /provisioning/tenants/:id — update tenant
 provisioningRouter.put(
@@ -111,7 +147,7 @@ provisioningRouter.put(
   async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { id } = req.params;
-      const { label, slug, contactEmail, isActive } = req.body;
+      const { label, slug, contactEmail, isActive, colorCode } = req.body;
 
       const tenant = await BusinessUnit.findById(id);
       if (!tenant) return res.status(404).json({ error: "Tenant not found" });
@@ -127,6 +163,7 @@ provisioningRouter.put(
 
       if (label) tenant.label = label;
       if (contactEmail !== undefined) tenant.contactEmail = contactEmail;
+      if (colorCode !== undefined) tenant.colorCode = colorCode;
       if (isActive !== undefined) tenant.isActive = isActive === "true" || isActive === true;
       if (req.file) tenant.logo = `/logos/${req.file.filename}`;
 
@@ -163,50 +200,62 @@ provisioningRouter.post("/invite", superAdminMiddleware, async (req: Authenticat
       return res.status(409).json({ error: "An admin account already exists with this email" });
     }
 
-    // Cancel any existing pending invite for this email + BU
-    await AdminInvite.updateMany(
-      { email: email.toLowerCase(), businessUnit, status: "pending" },
-      { status: "expired" }
-    );
+    // Auto-generate a secure random password
+    const autoPassword = crypto.randomBytes(6).toString("hex"); // e.g. "a1b2c3d4e5f6"
+    const hashedPassword = await bcryptjs.hash(autoPassword, 10);
 
-    // Generate invite token (raw sent in email, hashed stored in DB)
-    const rawToken = crypto.randomBytes(32).toString("hex");
-    const hashedToken = hashToken(rawToken);
+    // Create the admin account directly — status is active immediately
+    const admin = await AdminUser.create({
+      email: email.toLowerCase(),
+      fullName,
+      businessUnit,
+      password: hashedPassword,
+      emailVerified: true // Superadmin-created accounts are pre-verified
+    });
 
-    const invite = await AdminInvite.create({
+    // Also create an AdminInvite record for auditing/logging (status: accepted)
+    await AdminInvite.create({
       email: email.toLowerCase(),
       fullName,
       businessUnit,
       tenantId: tenant.tenantId,
-      token: hashedToken,
-      status: "pending",
+      status: "accepted",
       invitedBy: req.email!,
-      expiresAt: new Date(Date.now() + 48 * 60 * 60 * 1000) // 48 hours
+      expiresAt: new Date(), // Already accepted
+      token: "DIRECT-PROVISIONED"
     });
 
-    // Send invite email
+    // Send the credentials email with the auto-generated password
     try {
-      await sendAdminInviteEmail(email.toLowerCase(), fullName, businessUnit, tenant.slug, rawToken);
+      await sendTenantCredentialsEmail(
+        email.toLowerCase(),
+        fullName,
+        businessUnit,
+        tenant.slug,
+        autoPassword
+      );
     } catch (emailError) {
-      console.error("Failed to send invite email:", emailError);
-      // Roll back invite if email fails
-      await AdminInvite.findByIdAndDelete(invite._id);
-      return res.status(500).json({ error: "Failed to send invite email. Please try again." });
+      console.error("Failed to send credentials email:", emailError);
+      // We don't roll back the user creation here as the account is already active, 
+      // but we inform the superadmin so they can manually reset or track.
+      return res.status(500).json({ 
+        message: `Admin account created for ${email}, but credentials email failed.`,
+        error: "Failed to send email. You may need to manually reset the password."
+      });
     }
 
     res.status(201).json({
-      message: `Invite sent to ${email}`,
-      invite: {
-        id: invite._id,
-        email: invite.email,
-        fullName: invite.fullName,
-        businessUnit: invite.businessUnit,
-        status: invite.status,
-        expiresAt: invite.expiresAt
+      message: `Admin account created and credentials sent to ${email}`,
+      admin: {
+        id: admin._id,
+        email: admin.email,
+        fullName: admin.fullName,
+        businessUnit: admin.businessUnit,
+        status: "active"
       }
     });
   } catch (error) {
-    console.error("Send invite error:", error);
+    console.error("Direct admin creation error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });

@@ -1,6 +1,6 @@
 import { BiPaperPlane } from "react-icons/bi";
 import classes from "./chatbot.module.css";
-import logo from "/logo.png";
+import logo from "/1879-22.png";
 import LastChat from "./LastChat";
 
 const ChatBotHome = ({ onChangeTab }: { onChangeTab: (tab: string) => void }) => {
@@ -13,7 +13,7 @@ const ChatBotHome = ({ onChangeTab }: { onChangeTab: (tab: string) => void }) =>
         style={{ fontWeight: 600, color: "white", fontSize: "1.5rem" }}
       >
         Hello{" "}
-        <span style={{ color: "#ED0000" }}>
+        <span style={{ color: "var(--brand-color, #ed0000)" }}>
           there
         </span>
         , <br /> How can I help?

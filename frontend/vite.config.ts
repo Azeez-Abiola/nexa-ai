@@ -2,7 +2,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import path from "path";
 
-const backendHost = process.env.BACKEND_HOST || "0.0.0.0";
+const backendHost = process.env.BACKEND_HOST || "localhost";
 const backendPort = process.env.BACKEND_PORT || "4000";
 const backendUrl = `http://${backendHost}:${backendPort}`;
 
@@ -15,16 +15,12 @@ export default defineConfig({
       "/api": {
         target: backendUrl,
         changeOrigin: true,
-        logLevel: 'error',
-        onError: (err, _req, _res) => {
-          console.log('[Proxy] Backend not ready yet, retrying on next request...');
-        }
       },
-      "/super-admin": {
+      "/logos": {
         target: backendUrl,
         changeOrigin: true,
       },
-      "/c-panel.html": {
+      "/1879-22.png": {
         target: backendUrl,
         changeOrigin: true,
       }

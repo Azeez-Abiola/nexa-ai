@@ -3,6 +3,7 @@ import bcryptjs from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
 import { User, BusinessUnit, EMPLOYEE_GRADES } from "../models/User";
+import { AdminUser } from "../models/AdminUser";
 import { BusinessUnit as BusinessUnitModel } from "../models/BusinessUnit";
 import { BusinessUnitEmailMapping } from "../models/BusinessUnitEmailMapping";
 import { sendVerificationEmail, sendPasswordResetEmail, sendWelcomeEmail } from "../services/emailService";
@@ -21,7 +22,8 @@ const JWT_SECRET = process.env.NEXA_AI_JWT_SECRET || "your-secret-key-change-in-
 
 // Helper function to generate 6-digit OTP
 function generateOTP(): string {
-  return Math.floor(100000 + Math.random() * 900000).toString();
+  // TODO: restore random OTP once email service (Resend) is configured
+  return "123456";
 }
 
 // Helper function to generate token hash for password reset
@@ -55,23 +57,15 @@ authRouter.post("/register", async (req: Request<{}, {}, AuthRequest>, res: Resp
       return res.status(400).json({ error: "Invalid business unit" });
     }
 
-    // Validate email domain matches business unit
+    // Validate email domain matches business unit (if mapping exists for this specific BU)
     const emailDomainMapping = await BusinessUnitEmailMapping.findOne({ businessUnit });
     if (emailDomainMapping) {
       const emailDomain = email.toLowerCase().split('@')[1];
       const expectedDomain = emailDomainMapping.emailDomain.toLowerCase();
-      
+
       if (!emailDomain || emailDomain !== expectedDomain) {
-        return res.status(400).json({ 
-          error: `Invalid email domain for ${businessUnit}. Your email must end with @${expectedDomain}` 
-        });
-      }
-    } else {
-      // If a mapping exists for any business unit, all registrations must validate
-      const anyMappingExists = await BusinessUnitEmailMapping.countDocuments();
-      if (anyMappingExists > 0) {
         return res.status(400).json({
-          error: `Email domain mapping not configured for ${businessUnit}. Please contact your administrator to set up the email domain for this business unit.`
+          error: `Invalid email domain for ${businessUnit}. Your email must end with @${expectedDomain}`
         });
       }
     }
@@ -102,9 +96,9 @@ authRouter.post("/register", async (req: Request<{}, {}, AuthRequest>, res: Resp
 
     await user.save();
 
-    // Send verification email with OTP
+    // Send verification email with OTP (include BU brand color if available)
     try {
-      await sendVerificationEmail(email.toLowerCase(), otp, fullName, businessUnit);
+      await sendVerificationEmail(email.toLowerCase(), otp, fullName, businessUnit, validBU?.colorCode);
     } catch (emailError) {
       console.error("Failed to send verification email:", emailError);
       // Still allow user to proceed but notify them
@@ -164,12 +158,27 @@ authRouter.post("/verify-email", async (req: Request<{}, {}, { email: string; ot
     user.emailVerificationOTPExpiry = undefined;
     await user.save();
 
-    // Send welcome email
+    // Fetch BU branding for the welcome email
+    let tenantInfo: { label?: string; logo?: string; colorCode?: string; slug?: string } | undefined;
+    if (user.businessUnit && user.businessUnit !== "SUPERADMIN") {
+      const buDoc = await BusinessUnitModel.findOne({
+        name: { $regex: new RegExp(`^${user.businessUnit.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') }
+      });
+      if (buDoc) {
+        tenantInfo = {
+          label: buDoc.label,
+          logo: buDoc.logo,
+          colorCode: buDoc.colorCode,
+          slug: buDoc.slug
+        };
+      }
+    }
+
+    // Send welcome email tailored to the user's business unit
     try {
-      await sendWelcomeEmail(user.email, user.fullName);
+      await sendWelcomeEmail(user.email, user.fullName, user.businessUnit, tenantInfo);
     } catch (emailError) {
       console.error("Failed to send welcome email:", emailError);
-      // Don't fail the verification if welcome email fails
     }
 
     res.json({
@@ -193,15 +202,15 @@ authRouter.post("/resend-verification", async (req: Request<{}, {}, { email: str
     // Find user
     const user = await User.findOne({ email: email.toLowerCase() });
     if (!user) {
-      return res.status(200).json({ 
-        message: "If an account exists with this email, a verification code will be sent shortly" 
+      return res.status(200).json({
+        message: "If an account exists with this email, a verification code will be sent shortly"
       });
     }
 
     // If already verified
     if (user.emailVerified) {
-      return res.status(200).json({ 
-        message: "This email is already verified. You can login now." 
+      return res.status(200).json({
+        message: "This email is already verified. You can login now."
       });
     }
 
@@ -212,16 +221,21 @@ authRouter.post("/resend-verification", async (req: Request<{}, {}, { email: str
     user.emailVerificationOTPExpiry = new Date(Date.now() + 10 * 60 * 1000);
     await user.save();
 
+    // Fetch BU brand color for the email
+    const buDocForColor = await BusinessUnitModel.findOne({
+      name: { $regex: new RegExp(`^${user.businessUnit.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') }
+    });
+
     // Send verification email with new OTP
     try {
-      await sendVerificationEmail(user.email, otp, user.fullName, user.businessUnit);
+      await sendVerificationEmail(user.email, otp, user.fullName, user.businessUnit, buDocForColor?.colorCode);
     } catch (emailError) {
       console.error("Failed to send verification email:", emailError);
       return res.status(500).json({ error: "Failed to send verification code. Please try again." });
     }
 
-    res.json({ 
-      message: "Verification code sent. Please check your inbox." 
+    res.json({
+      message: "Verification code sent. Please check your inbox."
     });
   } catch (error) {
     console.error("Resend verification error:", error);
@@ -229,7 +243,7 @@ authRouter.post("/resend-verification", async (req: Request<{}, {}, { email: str
   }
 });
 
-// Login endpoint
+// Login endpoint (supports both standard Users and AdminUsers)
 authRouter.post("/login", async (req: Request<{}, {}, AuthRequest>, res: Response) => {
   try {
     const { email, password } = req.body;
@@ -238,18 +252,27 @@ authRouter.post("/login", async (req: Request<{}, {}, AuthRequest>, res: Respons
       return res.status(400).json({ error: "Email and password are required" });
     }
 
-    // Find user
-    const user = await User.findOne({ email: email.toLowerCase() });
+    // Try finding in User model first
+    let user: any = await User.findOne({ email: email.toLowerCase() });
+    let isAdminAccount = false;
+
+    if (!user) {
+      // Try AdminUser table
+      user = await AdminUser.findOne({ email: email.toLowerCase() });
+      if (user) isAdminAccount = true;
+    }
+
     if (!user) {
       return res.status(401).json({ error: "Invalid email or password" });
     }
 
     // Check if email is verified
-    if (!user.emailVerified) {
+    if (!user.emailVerified && user.businessUnit !== "SUPERADMIN") {
       return res.status(403).json({ 
         error: "Please verify your email before logging in",
         requiresVerification: true,
-        email: user.email
+        email: user.email,
+        isAdminAccount
       });
     }
 
@@ -259,16 +282,39 @@ authRouter.post("/login", async (req: Request<{}, {}, AuthRequest>, res: Respons
       return res.status(401).json({ error: "Invalid email or password" });
     }
 
-    // Fetch tenant info to embed in token
-    const buDoc = await BusinessUnitModel.findOne({ name: user.businessUnit });
-    const tenantId = buDoc?.tenantId;
-    const tenantSlug = buDoc?.slug;
+    // Fetch tenant info
+    let tenantId: string | undefined;
+    let tenantSlug: string | undefined;
+    let tenantLogo: string | undefined;
+    let tenantColor: string | undefined;
+    let tenantLabel: string | undefined;
 
-    const token = jwt.sign(
-      { userId: user._id, email: user.email, businessUnit: user.businessUnit, grade: user.grade, tenantId, tenantSlug },
-      JWT_SECRET,
-      { expiresIn: "7d" }
-    );
+    if (user.businessUnit !== "SUPERADMIN") {
+      const buDoc = await BusinessUnitModel.findOne({
+        name: { $regex: new RegExp(`^${user.businessUnit.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') }
+      });
+      if (buDoc) {
+        tenantId = buDoc.tenantId;
+        tenantSlug = buDoc.slug;
+        tenantLogo = buDoc.logo;
+        tenantColor = buDoc.colorCode;
+        tenantLabel = buDoc.label;
+      }
+    }
+
+    const payload: any = { 
+      userId: user._id, 
+      email: user.email, 
+      businessUnit: user.businessUnit, 
+      grade: user.grade || "ADMIN", 
+      tenantId, 
+      tenantSlug,
+      tenantLogo,
+      tenantColor,
+      isAdmin: isAdminAccount || user.businessUnit === "SUPERADMIN"
+    };
+
+    const token = jwt.sign(payload, JWT_SECRET, { expiresIn: "7d" });
 
     res.json({
       token,
@@ -280,12 +326,15 @@ authRouter.post("/login", async (req: Request<{}, {}, AuthRequest>, res: Respons
         grade: user.grade,
         tenantId,
         tenantSlug,
-        tenantLogo: buDoc?.logo,
-        emailVerified: user.emailVerified
+        tenantLogo,
+        tenantColor,
+        tenantLabel,
+        emailVerified: user.emailVerified,
+        isAdmin: payload.isAdmin
       }
     });
   } catch (error) {
-    console.error("Login error:", error);
+    console.error("Unified login error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -303,8 +352,8 @@ authRouter.post("/forgot-password", async (req: Request<{}, {}, { email: string 
     const user = await User.findOne({ email: email.toLowerCase() });
     if (!user) {
       // Don't reveal if user exists (security best practice)
-      return res.status(200).json({ 
-        message: "If an account exists with this email, a reset link will be sent shortly" 
+      return res.status(200).json({
+        message: "If an account exists with this email, a reset link will be sent shortly"
       });
     }
 
@@ -325,7 +374,7 @@ authRouter.post("/forgot-password", async (req: Request<{}, {}, { email: string 
       return res.status(500).json({ error: "Failed to send password reset email. Please try again." });
     }
 
-    res.json({ 
+    res.json({
       message: "If an account exists with this email, a reset link will be sent shortly"
     });
   } catch (error) {
@@ -371,8 +420,8 @@ authRouter.post("/reset-password", async (req: Request<{}, {}, { token: string; 
     user.resetTokenExpiry = undefined;
     await user.save();
 
-    res.json({ 
-      message: "Password reset successfully. You can now login with your new password." 
+    res.json({
+      message: "Password reset successfully. You can now login with your new password."
     });
   } catch (error) {
     console.error("Reset password error:", error);

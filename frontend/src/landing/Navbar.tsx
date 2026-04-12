@@ -21,35 +21,67 @@ const Navbar = () => {
       initial={{ y: -20, opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
       transition={{ duration: 0.6 }}
-      className="fixed top-0 left-0 right-0 z-50 glass-card border-t-0 rounded-none border-x-0"
+      className="fixed top-4 left-0 right-0 z-50 px-6"
     >
-      <div className="container mx-auto flex items-center justify-between h-16 px-6">
-        <a href="#" className="flex items-center gap-2">
-          <div className="w-8 h-8 md:w-14 md:h-14 rounded-lg flex items-center justify-center">
-            <img src="/logo.png" alt="Nexa AI Logo" className="w-6 h-6 md:w-12 md:h-12 object-contain" />
+      <div className="container mx-auto bg-white/70 backdrop-blur-md border border-border/40 rounded-3xl shadow-sm">
+        <div className="flex items-center justify-between h-20 px-8">
+          <a href="#" className="flex items-center gap-2">
+            <div className="flex items-center justify-center">
+              <img src="/1879-22.png" alt="Nexa AI Logo" className="w-10 h-10 object-contain" />
+            </div>
+            <span className="font-bold text-xl text-[#1A1A1A] tracking-tight">nexa.ai</span>
+          </a>
+
+          <div className="hidden md:flex items-center gap-10">
+            {navLinks.map((l) => (
+              <a key={l.href} href={l.href} className="text-[15px] font-semibold text-muted-foreground hover:text-primary transition-colors">
+                {l.label}
+              </a>
+            ))}
           </div>
-          <span className="font-bold text-lg text-foreground tracking-tight">Nexa AI</span>
-        </a>
 
-        <div className="hidden md:flex items-center gap-8">
-          {navLinks.map((l) => (
-            <a key={l.href} href={l.href} className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-              {l.label}
-            </a>
-          ))}
+          <div className="hidden md:flex items-center gap-4">
+            <ThemeToggle />
+            {localStorage.getItem('nexa-token') ? (
+              <>
+                 <Button 
+                    variant="ghost" 
+                    className="font-bold text-[#1A1A1A]" 
+                    onClick={() => {
+                      const userStr = localStorage.getItem('nexa-user');
+                      if (userStr) {
+                        const user = JSON.parse(userStr);
+                        if (user.businessUnit === 'SUPERADMIN' || user.grade === 'ADMIN' || user.isAdmin) {
+                          window.location.href = "/admin/dashboard";
+                        } else {
+                          navigate("/user-chat");
+                        }
+                      }
+                    }}
+                  >
+                    Dashboard
+                  </Button>
+                  <Button 
+                    className="rounded-full px-8 font-bold shadow-lg shadow-primary/10 bg-primary"
+                    onClick={() => navigate("/user-chat")}
+                  >
+                    Go to Chat
+                  </Button>
+              </>
+            ) : (
+              <>
+                <Button variant="ghost" className="font-bold text-[#1A1A1A]" onClick={() => navigate("/login")}>
+                  Sign In
+                </Button>
+                <Button className="rounded-full px-8 font-bold shadow-lg shadow-primary/10 bg-primary">Contact</Button>
+              </>
+            )}
+          </div>
+
+          <button onClick={() => setMobileOpen(!mobileOpen)} className="md:hidden text-foreground">
+            {mobileOpen ? <X size={20} /> : <Menu size={20} />}
+          </button>
         </div>
-
-        <div className="hidden md:flex items-center gap-3">
-          <ThemeToggle />
-          <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground" onClick={() => navigate("/login")}>
-            Sign In
-          </Button>
-          <Button size="sm">Request Demo</Button>
-        </div>
-
-        <button onClick={() => setMobileOpen(!mobileOpen)} className="md:hidden text-foreground">
-          {mobileOpen ? <X size={20} /> : <Menu size={20} />}
-        </button>
       </div>
 
       <AnimatePresence>

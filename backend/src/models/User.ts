@@ -1,6 +1,6 @@
 import mongoose, { Schema, Document } from "mongoose";
 
-export type BusinessUnit = "GCL" | "LSF" | "CAP" | "UFL" | "CHI" | "UAC-Restaurants" | "UPDC" | "UACN";
+export type BusinessUnit = string;
 
 export type EmployeeGrade =
   | "Executive"
@@ -40,7 +40,6 @@ const UserSchema = new Schema<UserDocument>(
     fullName: { type: String, required: true },
     businessUnit: {
       type: String,
-      enum: ["GCL", "LSF", "CAP", "UFL", "CHI", "UAC-Restaurants", "UPDC"],
       required: true,
       index: true
     },

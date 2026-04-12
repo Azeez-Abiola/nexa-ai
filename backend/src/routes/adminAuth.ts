@@ -224,7 +224,7 @@ adminAuthRouter.post("/login", async (req: Request<{}, {}, AdminAuthRequest>, re
 
     const token = jwt.sign(
       {
-        adminId: admin._id,
+        adminId: admin._id.toString(),
         email: admin.email,
         fullName: admin.fullName,
         businessUnit: admin.businessUnit,
@@ -236,6 +236,17 @@ adminAuthRouter.post("/login", async (req: Request<{}, {}, AdminAuthRequest>, re
       { expiresIn: "7d" }
     );
 
+    // Fetch BU document again for full branding info
+    let tenantColor: string | undefined;
+    let tenantLabel: string | undefined;
+    if (admin.businessUnit !== "SUPERADMIN") {
+      const buDoc = await BusinessUnitModel.findOne({ name: admin.businessUnit });
+      if (buDoc) {
+        tenantColor = buDoc.colorCode;
+        tenantLabel = buDoc.label;
+      }
+    }
+
     res.json({
       token,
       admin: {
@@ -246,6 +257,8 @@ adminAuthRouter.post("/login", async (req: Request<{}, {}, AdminAuthRequest>, re
         tenantId,
         tenantSlug,
         tenantLogo,
+        tenantColor,
+        tenantLabel,
         emailVerified: admin.emailVerified
       }
     });
@@ -404,7 +417,6 @@ adminAuthRouter.get("/admins", superAdminMiddleware, async (_req: AuthenticatedR
   }
 });
 
-// Get users by BU — BU admins see own BU only; SUPERADMIN can query any
 adminAuthRouter.get("/users", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { isSuperAdmin, businessUnit: tokenBU } = req;
@@ -415,12 +427,6 @@ adminAuthRouter.get("/users", adminAuthMiddleware, async (req: AuthenticatedRequ
       return res.status(400).json({ error: "businessUnit query parameter is required" });
     }
 
-    const validBUs = await BusinessUnitModel.find().select("name");
-    const validBUNames = validBUs.map((bu: any) => bu.name);
-    if (!validBUNames.includes(targetBU)) {
-      return res.status(400).json({ error: "Invalid business unit" });
-    }
-
     const users = await User.find(
       { businessUnit: targetBU },
       { password: 0, resetToken: 0, resetTokenExpiry: 0 }
@@ -429,6 +435,282 @@ adminAuthRouter.get("/users", adminAuthMiddleware, async (req: AuthenticatedRequ
     res.json({ users });
   } catch (error) {
     console.error("Get users error:", error);
+    res.status(500).json({ error: "Internal server error", message: error instanceof Error ? error.message : "Unknown error" });
+  }
+});
+
+// Create User — BU admins can create users for their BU
+adminAuthRouter.post("/users", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { email, password, fullName } = req.body;
+    const { businessUnit } = req;
+
+    if (!email || !password || !fullName || !businessUnit) {
+      return res.status(400).json({ error: "Email, password, and fullName are required" });
+    }
+
+    const existingUser = await User.findOne({ email: email.toLowerCase() });
+    if (existingUser) {
+      return res.status(409).json({ error: "User already exists" });
+    }
+
+    const hashedPassword = await bcryptjs.hash(password, 10);
+    const user = new User({
+      email: email.toLowerCase(),
+      password: hashedPassword,
+      fullName,
+      businessUnit,
+      isActive: true
+    });
+
+    await user.save();
+    res.status(201).json({ message: "User created successfully", user: { id: user._id, email: user.email, fullName: user.fullName } });
+  } catch (error) {
+    console.error("Create user error:", error);
     res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Delete User — BU admins can delete users from their BU
+adminAuthRouter.delete("/users/:id", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { businessUnit, isSuperAdmin } = req;
+
+    const user = await User.findById(id);
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    if (!isSuperAdmin && user.businessUnit !== businessUnit) {
+      return res.status(403).json({ error: "Access denied: User belongs to another business unit" });
+    }
+
+    await User.findByIdAndDelete(id);
+    res.json({ message: "User deleted successfully" });
+  } catch (error) {
+    console.error("Delete user error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Update Profile — BU admins can update their BU logo, label, or color
+adminAuthRouter.put("/profile", adminAuthMiddleware, logoUpload.single("logo"), async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { businessUnit, adminId } = req;
+    const { label, colorCode, fullName, name, slug } = req.body;
+
+    if (!adminId) {
+      console.error("Profile update rejected: No adminId in request. Identity context:", { businessUnit, reqAdminId: req.adminId });
+      return res.status(401).json({ error: "Authentication session has expired. Please log in again." });
+    }
+
+    if (!businessUnit || businessUnit === "SUPERADMIN") {
+      console.warn("Profile update rejected: SUPERADMIN or no BU. Context:", { businessUnit, adminId });
+      return res.status(403).json({ error: "Only business unit admins can update profiles via this route" });
+    }
+
+    let buDoc = await BusinessUnitModel.findOne({ name: { $regex: new RegExp(`^${businessUnit.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } });
+    if (!buDoc) {
+      // BU document doesn't exist yet (admin was created without one) — bootstrap it
+      const newSlug = slug || businessUnit.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+      buDoc = await BusinessUnitModel.create({
+        name: businessUnit,
+        label: label || businessUnit,
+        slug: newSlug,
+        colorCode: colorCode || '#ed0000',
+        logo: req.file ? `/logos/${req.file.filename}` : undefined,
+        isActive: true
+      });
+    }
+
+    if (label) buDoc.label = label;
+    if (colorCode) buDoc.colorCode = colorCode;
+    if (slug) buDoc.slug = slug.toLowerCase().replace(/\s+/g, '-');
+
+    // Acronym update with cascading identity shift
+    const oldName = buDoc.name;
+    if (name && name !== oldName) {
+      // Check for acronym collisions first
+      const existing = await BusinessUnitModel.findOne({ name });
+      if (existing) return res.status(409).json({ error: "This business acronym is already registered by another unit" });
+
+      buDoc.name = name;
+      await AdminUser.updateMany({ businessUnit: oldName }, { businessUnit: name });
+    }
+
+    if (req.file) buDoc.logo = `/logos/${req.file.filename}`;
+
+    await buDoc.save();
+
+    // Personal identity update
+    let updatedAdmin = null;
+    if (fullName) {
+      updatedAdmin = await AdminUser.findByIdAndUpdate(adminId, { fullName }, { new: true });
+    }
+
+    res.json({
+      message: "Infrastructure profile updated",
+      businessUnit: buDoc,
+      admin: updatedAdmin
+    });
+  } catch (error: any) {
+    console.error("Infrastructure Profile Update Failure:", error);
+    res.status(500).json({
+      error: "An internal diagnostic error occurred during profile synchronization",
+      details: error.message
+    });
+  }
+});
+
+// Change Password — Admin can change their own password
+adminAuthRouter.put("/change-password", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { adminId } = req;
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword || newPassword.length < 6) {
+      return res.status(400).json({ error: "Current password and new password (min 6 chars) are required" });
+    }
+
+    const admin = await AdminUser.findById(adminId);
+    if (!admin) return res.status(404).json({ error: "Admin not found" });
+
+    const passwordMatch = await bcryptjs.compare(currentPassword, admin.password);
+    if (!passwordMatch) {
+      return res.status(401).json({ error: "Invalid current password" });
+    }
+
+    admin.password = await bcryptjs.hash(newPassword, 10);
+    await admin.save();
+
+    res.json({ message: "Password updated successfully" });
+  } catch (error) {
+    console.error("Change password error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+// Toggle Admin Status — SUPERADMIN only
+adminAuthRouter.patch("/:id/toggle-status", superAdminMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const admin = await AdminUser.findById(id);
+    if (!admin) return res.status(404).json({ error: "Admin not found" });
+
+    if (admin.businessUnit === "SUPERADMIN" && admin.email === "abiolaazeez@gmail.com") {
+      return res.status(403).json({ error: "Cannot deactivate primary superadmin" });
+    }
+
+    admin.isActive = !admin.isActive;
+    await admin.save();
+
+    res.json({ message: `Admin ${admin.isActive ? "activated" : "deactivated"} successfully`, isActive: admin.isActive });
+  } catch (error) {
+    console.error("Toggle admin status error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Create Admin Direct — SUPERADMIN only
+adminAuthRouter.post("/create-direct", superAdminMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { email, password, fullName, businessUnit } = req.body;
+
+    if (!email || !password || !fullName || !businessUnit) {
+      return res.status(400).json({ error: "All fields are required" });
+    }
+
+    const existingAdmin = await AdminUser.findOne({ email: email.toLowerCase() });
+    if (existingAdmin) return res.status(409).json({ error: "Admin already exists" });
+
+    const hashedPassword = await bcryptjs.hash(password, 10);
+    const admin = new AdminUser({
+      email: email.toLowerCase(),
+      password: hashedPassword,
+      fullName,
+      businessUnit,
+      emailVerified: true, // Direct creation usually bypasses OTP
+      isActive: true
+    });
+
+    await admin.save();
+    res.status(201).json({ message: "Admin created successfully", admin: { id: admin._id, email: admin.email, fullName: admin.fullName, businessUnit: admin.businessUnit } });
+  } catch (error) {
+    console.error("Direct admin creation error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Email Domain Mappings — SUPERADMIN only
+adminAuthRouter.get("/email-domains", superAdminMiddleware, async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    const domains = await BusinessUnitEmailMapping.find().sort({ emailDomain: 1 });
+    res.json({ domains: domains.map(d => ({ _id: d._id, domain: d.emailDomain, businessUnit: d.businessUnit })) });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to fetch domains" });
+  }
+});
+
+adminAuthRouter.post("/email-domains", superAdminMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { domain, businessUnit } = req.body;
+    if (!domain || !businessUnit) return res.status(400).json({ error: "Domain and Business Unit required" });
+
+    const existing = await BusinessUnitEmailMapping.findOne({ emailDomain: domain.toLowerCase() });
+    if (existing) return res.status(409).json({ error: "Domain is already mapped" });
+
+    await BusinessUnitEmailMapping.create({
+      businessUnit,
+      emailDomain: domain.toLowerCase()
+    });
+    res.status(201).json({ message: "Domain mapping created" });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to create domain mapping" });
+  }
+});
+
+adminAuthRouter.delete("/email-domains/:id", superAdminMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    await BusinessUnitEmailMapping.findByIdAndDelete(id);
+    res.json({ message: "Domain mapping deleted" });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to delete domain mapping" });
+  }
+});
+
+// Email Domain Mappings — SUPERADMIN only
+adminAuthRouter.get("/email-domains", superAdminMiddleware, async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    const domains = await BusinessUnitEmailMapping.find().sort({ emailDomain: 1 });
+    res.json({ domains: domains.map(d => ({ _id: d._id, domain: d.emailDomain, businessUnit: d.businessUnit })) });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to fetch domains" });
+  }
+});
+
+adminAuthRouter.post("/email-domains", superAdminMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { domain, businessUnit } = req.body;
+    if (!domain || !businessUnit) return res.status(400).json({ error: "Domain and Business Unit required" });
+
+    const existing = await BusinessUnitEmailMapping.findOne({ emailDomain: domain.toLowerCase() });
+    if (existing) return res.status(409).json({ error: "Domain is already mapped" });
+
+    await BusinessUnitEmailMapping.create({
+      businessUnit,
+      emailDomain: domain.toLowerCase()
+    });
+    res.status(201).json({ message: "Domain mapping created" });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to create domain mapping" });
+  }
+});
+
+adminAuthRouter.delete("/email-domains/:id", superAdminMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    await BusinessUnitEmailMapping.findByIdAndDelete(id);
+    res.json({ message: "Domain mapping deleted" });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to delete domain mapping" });
   }
 });

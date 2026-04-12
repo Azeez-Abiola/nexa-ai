@@ -54,13 +54,19 @@ export const adminAuthMiddleware = (
   }
 
   try {
-    const decoded = jwt.verify(token, ADMIN_JWT_SECRET!) as any;
+    const secret = process.env.NEXA_AI_JWT_SECRET;
+    if (!secret) {
+      console.error("CRITICAL: NEXA_AI_JWT_SECRET is not defined in environment variables");
+      return res.status(500).json({ error: "Server configuration error" });
+    }
+    
+    const decoded = jwt.verify(token, secret) as any;
 
     if (!decoded.isAdmin) {
       return res.status(403).json({ error: "Admin access required" });
     }
 
-    req.adminId = decoded.adminId;
+    req.adminId = (decoded.adminId || decoded.userId)?.toString();
     req.email = decoded.email;
     req.fullName = decoded.fullName;
     req.businessUnit = decoded.businessUnit;
@@ -70,6 +76,7 @@ export const adminAuthMiddleware = (
     req.isSuperAdmin = decoded.businessUnit === "SUPERADMIN";
     next();
   } catch (error: any) {
+    console.error("Admin token verification failed:", error.message);
     res.status(401).json({ error: "Invalid or expired admin token" });
   }
 };

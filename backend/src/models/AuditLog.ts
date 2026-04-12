@@ -9,15 +9,23 @@ export type AuditEventType =
   | "rag_retrieval_empty"
   | "rag_access_denied"
   | "chunk_embedding_batch_completed"
-  | "conversation_shared"
-  | "conversation_share_denied"
-  | "conversation_share_revoked";
+  | "conversation_share_revoked"
+  | "admin_login"
+  | "admin_logout"
+  | "user_created"
+  | "user_deleted"
+  | "policy_updated"
+  | "policy_created"
+  | "policy_deleted";
 
 export interface AuditLogDocument extends Document {
   eventType: AuditEventType;
   userId?: string;
   adminId?: string;
+  adminEmail?: string;
   businessUnit: string;
+  action: string;
+  details: string;
   documentId?: Types.ObjectId;
   metadata: Record<string, any>;
   createdAt: Date;
@@ -38,13 +46,23 @@ const AuditLogSchema = new Schema<AuditLogDocument>(
         "chunk_embedding_batch_completed",
         "conversation_shared",
         "conversation_share_denied",
-        "conversation_share_revoked"
+        "conversation_share_revoked",
+        "admin_login",
+        "admin_logout",
+        "user_created",
+        "user_deleted",
+        "policy_updated",
+        "policy_created",
+        "policy_deleted"
       ],
       required: true
     },
     userId: { type: String, default: null },
     adminId: { type: String, default: null },
+    adminEmail: { type: String, default: null },
     businessUnit: { type: String, required: true },
+    action: { type: String, required: true },
+    details: { type: String, required: true },
     documentId: { type: Schema.Types.ObjectId, default: null },
     metadata: { type: Schema.Types.Mixed, default: {} }
   },

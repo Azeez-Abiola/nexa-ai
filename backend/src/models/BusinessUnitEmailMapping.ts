@@ -12,13 +12,13 @@ const businessUnitEmailMappingSchema = new Schema<IBusinessUnitEmailMapping>(
     businessUnit: {
       type: String,
       required: true,
-      unique: true,
       trim: true,
       index: true
     },
     emailDomain: {
       type: String,
       required: true,
+      unique: true,
       trim: true,
       lowercase: true
     }

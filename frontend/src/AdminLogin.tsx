@@ -260,7 +260,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess }) => {
           <div className={styles.formWrapper}>
             {!isRegistering && (
               <div className={styles.logoWrapper}>
-                <img src="/logo.png" alt="Nexa AI Logo" className={styles.logoTop} />
+                <img src="/1879-22.png" alt="Nexa AI Logo" className={styles.logoTop} />
               </div>
             )}
             <div className={styles.card}>

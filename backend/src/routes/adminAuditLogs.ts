@@ -32,7 +32,8 @@ adminAuditLogsRouter.get("/", async (req: AuthenticatedRequest, res) => {
 
     res.json({ logs, total, page, limit });
   } catch (err) {
-    logger.error("[AuditLogs] Query error", { error: (err as Error).message });
-    res.status(500).json({ error: "Failed to query audit logs" });
+    console.error("[AuditLogs] CRITICAL ERROR:", err);
+    logger.error("[AuditLogs] Query error", { error: (err as Error).message, stack: (err as Error).stack });
+    res.status(500).json({ error: "Failed to query audit logs", details: (err as Error).message });
   }
 });

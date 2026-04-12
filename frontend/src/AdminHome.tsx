@@ -64,7 +64,7 @@ export const AdminHome: React.FC<AdminHomeProps> = ({ onEnter, admin }) => {
   return (
     <div className={styles.homeContainer}>
       <div className={styles.logoContainer}>
-        <img src="/logo.png" alt="Nexa AI Logo" style={{ width: "60px", height: "60px", objectFit: "contain" }} />
+        <img src="/1879-22.png" alt="Nexa AI Logo" style={{ width: "60px", height: "60px", objectFit: "contain" }} />
       </div>
 
       {/* Avatar and Text Section - Side by side */}
@@ -82,10 +82,13 @@ export const AdminHome: React.FC<AdminHomeProps> = ({ onEnter, admin }) => {
         <div className={styles.textSection}>
           <div className={styles.textContent}>
             <h1 className={styles.title}>
-              {displayedTitle}
-              {stage !== "done" && stage === "title" && (
-                <span className={styles.cursor} />
-              )}
+              <div className="flex items-center gap-4 mb-2">
+                <img src="/1879-22.png" alt="1879 Logo" className="w-12 h-12 object-contain" />
+                <span>{displayedTitle}</span>
+                {stage !== "done" && stage === "title" && (
+                  <span className={styles.cursor} />
+                )}
+              </div>
             </h1>
             {stage !== "title" && (
               <p className={styles.description}>

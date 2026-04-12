@@ -9,6 +9,7 @@ export interface IBusinessUnit extends Document {
   logo?: string;
   isActive: boolean;
   contactEmail?: string;
+  colorCode?: string;
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -50,6 +51,10 @@ const businessUnitSchema = new Schema<IBusinessUnit>(
     contactEmail: {
       type: String,
       trim: true
+    },
+    colorCode: {
+      type: String,
+      default: "#ed0000"
     }
   },
   { timestamps: true }

@@ -20,25 +20,37 @@ analyticsRouter.get("/dashboard", adminAuthMiddleware, async (req: Authenticated
     const { businessUnit, isSuperAdmin } = req;
     const buFilter = isSuperAdmin ? {} : { businessUnit };
 
-    const [totalUsers, totalAdmins, totalConversations, totalPolicies] = await Promise.all([
+    const [totalUsers, totalAdmins, totalConversations, totalPolicies, totalTenants, totalDocs] = await Promise.all([
       User.countDocuments(buFilter),
       AdminUser.countDocuments(isSuperAdmin ? {} : { businessUnit }),
       Conversation.countDocuments(buFilter),
       Policy.countDocuments(buFilter),
+      BusinessUnit.countDocuments(isSuperAdmin ? {} : { name: businessUnit }),
+      import("../models/RagDocument").then(m => m.RagDocument.countDocuments(buFilter))
     ]);
 
-    res.json({ totalUsers, totalAdmins, totalConversations, totalPolicies });
+    res.json({ totalUsers, totalAdmins, totalConversations, totalPolicies, totalTenants, totalDocs });
   } catch (error) {
     console.error("Dashboard stats error:", error);
-    res.status(500).json({ error: "Internal server error" });
+    res.status(500).json({ error: "Internal server error", message: error instanceof Error ? error.message : "Unknown error" });
   }
 });
 
-// Stats by business unit — SUPERADMIN only
-analyticsRouter.get("/business-units", superAdminMiddleware, async (_req: AuthenticatedRequest, res: Response) => {
+// Stats by business unit — any admin can view, but filtered for non-superadmins
+analyticsRouter.get("/business-units", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const busFromDB = await BusinessUnit.find().select("name").lean();
-    const buNames = busFromDB.map((bu: any) => bu.name);
+    const { businessUnit, isSuperAdmin } = req;
+    
+    // Get list of BUs allowed for this user
+    let buNames: string[] = [];
+    if (isSuperAdmin) {
+      const busFromDB = await BusinessUnit.find().select("name").lean();
+      buNames = busFromDB.map((bu: any) => bu.name);
+    } else if (businessUnit) {
+      buNames = [businessUnit];
+    } else {
+      return res.json({ stats: [] });
+    }
 
     const stats = await Promise.all(
       buNames.map(async (bu: string) => {
@@ -55,7 +67,7 @@ analyticsRouter.get("/business-units", superAdminMiddleware, async (_req: Authen
     res.json({ stats });
   } catch (error) {
     console.error("BU stats error:", error);
-    res.status(500).json({ error: "Internal server error" });
+    res.status(500).json({ error: "Internal server error", message: error instanceof Error ? error.message : "Unknown error" });
   }
 });
 
@@ -82,13 +94,35 @@ analyticsRouter.get("/popular-policies", adminAuthMiddleware, async (req: Authen
 analyticsRouter.get("/chat-activity", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { businessUnit, isSuperAdmin } = req;
-    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const { startDate, endDate, bu, user } = req.query;
 
-    const matchStage: Record<string, any> = { createdAt: { $gte: sevenDaysAgo } };
-    if (!isSuperAdmin) matchStage.businessUnit = businessUnit;
+    const query: Record<string, any> = {};
+
+    // Date range filter
+    if (startDate || endDate) {
+      query.createdAt = {};
+      if (startDate) query.createdAt.$gte = new Date(startDate as string);
+      if (endDate) query.createdAt.$lte = new Date(endDate as string);
+    } else {
+      // Default to last 7 days if no dates provided
+      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      query.createdAt = { $gte: sevenDaysAgo };
+    }
+
+    // BU filter
+    if (isSuperAdmin) {
+      if (bu) query.businessUnit = bu;
+    } else {
+      query.businessUnit = businessUnit;
+    }
+
+    // User filter
+    if (user) {
+      query.userId = user;
+    }
 
     const dailyActivity = await Conversation.aggregate([
-      { $match: matchStage },
+      { $match: query },
       {
         $group: {
           _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
@@ -101,6 +135,88 @@ analyticsRouter.get("/chat-activity", adminAuthMiddleware, async (req: Authentic
     res.json({ dailyActivity });
   } catch (error) {
     console.error("Chat activity error:", error);
+    res.status(500).json({ error: "Internal server error", message: error instanceof Error ? error.message : "Unknown error" });
+  }
+});
+
+// Top users by engagement — any admin, scoped to BU for non-superadmins
+analyticsRouter.get("/top-users", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { businessUnit, isSuperAdmin } = req;
+    const { limit = 5 } = req.query;
+    
+    const filter = isSuperAdmin ? {} : { businessUnit };
+    
+    const topUsers = await Conversation.aggregate([
+      { $match: filter },
+      { $group: { _id: "$userId", count: { $sum: 1 } } },
+      { $sort: { count: -1 } },
+      { $limit: Number(limit) },
+      // Join with Users to get metadata
+      {
+        $lookup: {
+          from: "users",
+          localField: "_id",
+          foreignField: "_id",
+          as: "userDetails"
+        }
+      },
+      { $unwind: "$userDetails" },
+      {
+        $project: {
+          name: "$userDetails.fullName",
+          email: "$userDetails.email",
+          conversations: "$count"
+        }
+      }
+    ]);
+
+    res.json({ topUsers });
+  } catch (error) {
+    console.error("Top users error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Audit activity metrics — for the intensity chart
+analyticsRouter.get("/audit-activity", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { businessUnit, isSuperAdmin } = req;
+    const { AuditLog } = await import("../models/AuditLog");
+    
+    const filter = isSuperAdmin ? {} : { businessUnit };
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    
+    const stats = await AuditLog.aggregate([
+      { 
+        $match: { 
+          ...filter,
+          createdAt: { $gte: sevenDaysAgo }
+        } 
+      },
+      {
+        $group: {
+          _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
+          count: { $sum: 1 }
+        }
+      },
+      { $sort: { _id: 1 } }
+    ]);
+
+    // Format for frontend (Mon, Tue...)
+    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const formattedStats = stats.map(s => {
+      const date = new Date(s._id);
+      return {
+        day: days[date.getDay()],
+        count: s.count,
+        date: s._id
+      };
+    });
+
+    res.json({ auditActivity: formattedStats });
+  } catch (error) {
+    console.error("Audit activity error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });

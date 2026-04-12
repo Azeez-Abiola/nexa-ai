@@ -77,9 +77,8 @@ const cPanelFile = path.join(publicFolder, 'c-panel.html');
 app.get('/', (_req, res) => res.sendFile(frontendIndex));
 app.get('/index.html', (_req, res) => res.sendFile(frontendIndex));
 
-// Super-admin control panel — canonical route
-app.get('/super-admin', (_req, res) => res.sendFile(cPanelFile));
-// Redirect old direct file access to the canonical route
+// Super-admin control panel redirected to React SPA
+// app.get('/super-admin', (_req, res) => res.sendFile(cPanelFile));
 app.get('/c-panel.html', (_req, res) => res.redirect(301, '/super-admin'));
 
 app.get("/health", (_req, res) => {
@@ -151,8 +150,11 @@ app.get("/api/v1/public/business-unit-names", async (_req, res) => {
     const names = buses.map(bu => bu.name);
     res.json({ names });
   } catch (error) {
-    logger.error("Get BU names error", { error });
-    res.status(500).json({ error: "Internal server error" });
+    logger.error("Get BU names error", { 
+      message: error instanceof Error ? error.message : "Unknown error",
+      stack: error instanceof Error ? error.stack : undefined
+    });
+    res.status(500).json({ error: "Internal server error", details: error instanceof Error ? error.message : "Database error" });
   }
 });
 
@@ -160,7 +162,6 @@ app.get("/api/v1/public/business-unit-names", async (_req, res) => {
 app.get('*', (req, res, next) => {
   if (req.method !== 'GET') return next();
   if (req.path.startsWith('/api/')) return next();
-  if (req.path === '/super-admin') return next(); // handled above
   // Don't serve index.html for asset files
   if (req.path.startsWith('/assets') || req.path.includes('.')) return next();
   res.sendFile(frontendIndex);
@@ -204,16 +205,39 @@ const initializeDefaultBUs = async () => {
   }
 };
 
-// Initialize MongoDB connection (will be used by both standalone and combined modes)
-mongoose.connect(mongoUri)
+// Initialize MongoDB connection options for better resilience
+const mongooseOptions = {
+  connectTimeoutMS: 30000,
+  socketTimeoutMS: 45000,
+  serverSelectionTimeoutMS: 30000,
+  heartbeatFrequencyMS: 10000,
+  maxPoolSize: 10
+};
+
+// Initialize MongoDB connection
+mongoose.connect(mongoUri, mongooseOptions)
   .then(async () => {
     logger.info("MongoDB connected successfully");
     await initializeDefaultBUs();
-    startWorker();
-    startUserDocumentWorker();
+    
+    // Check Redis availability before starting workers
+    const { redisConnection } = require("./queue/connection");
+    redisConnection.ping()
+      .then(() => {
+        logger.info("[Redis] Connection verified, starting workers");
+        startWorker();
+        startUserDocumentWorker();
+      })
+      .catch((err: any) => {
+        logger.warn("[Redis] Not available, skipping background workers", { error: err.message });
+      });
   })
   .catch((err) => {
-    logger.error("MongoDB connection error", { error: err.message });
+    logger.error("MongoDB critical connection error", { 
+      message: err.message,
+      code: err.code,
+      name: err.name
+    });
   });
 
 const port = parseInt(process.env.PORT || "4000", 10);

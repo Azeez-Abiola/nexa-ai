@@ -41,8 +41,8 @@ adminPoliciesRouter.get("/", async (req: AuthenticatedRequest, res) => {
     const policies = await Policy.find(filter).sort({ createdAt: -1 }).lean();
     res.json(policies);
   } catch (err) {
-    console.error("Error listing policies", err);
-    res.status(500).json({ error: "Failed to list policies" });
+    console.error("Error listing policies:", err);
+    res.status(500).json({ error: "Failed to list policies", details: (err as Error).message });
   }
 });
 

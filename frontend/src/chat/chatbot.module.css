@@ -1,7 +1,7 @@
 :root {
     --black: #000000;
     --white: #ffffff;
-    --red: #ED0000;
+    --red: var(--brand-color, #ED0000);
     --gray-mid: #6b7280;
     --gray-light: #f3f4f6;
     --error-light: #fecaca;

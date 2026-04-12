@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&family=Sen:wght@400;700;800&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -99,11 +99,16 @@
 
   body {
     @apply bg-background text-foreground antialiased;
-    font-family: 'Inter', system-ui, sans-serif;
+    font-family: 'Sen', 'Inter', system-ui, sans-serif;
   }
 
-  h1, h2, h3, h4, h5, h6 {
-    font-family: 'Inter', system-ui, sans-serif;
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: 'Sen', 'Inter', system-ui, sans-serif;
     font-weight: 700;
   }
 
@@ -413,7 +418,7 @@ body {
 .message-action-btn:hover {
   transform: scale(1.15);
   background: rgba(237, 0, 0, 0.1);
-  color: #ed0000;
+  color: var(--brand-color, #ed0000);
 }
 
 .message-edit-btn {
@@ -553,6 +558,7 @@ body {
     transform: scale(0.8);
     opacity: 0;
   }
+
   to {
     transform: scale(1);
     opacity: 0.9;
@@ -583,6 +589,7 @@ body {
     opacity: 0;
     transform: translateY(10px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -612,12 +619,14 @@ body {
 }
 
 @keyframes bounce {
+
   0%,
   80%,
   100% {
     transform: scale(0.8);
     opacity: 0.5;
   }
+
   40% {
     transform: scale(1);
     opacity: 1;
@@ -659,7 +668,7 @@ body {
   line-height: 1.5;
   min-height: 48px;
   max-height: 200px;
-  caret-color: #ed0000;
+  caret-color: var(--brand-color, #ed0000);
 }
 
 .chat-input::placeholder {
@@ -679,7 +688,7 @@ body {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  background: linear-gradient(135deg, #ed0000 0%, #c41e3a 100%);
+  background: linear-gradient(135deg, var(--brand-color, #ed0000) 0%, #c41e3a 100%);
   color: white;
   font-size: 18px;
   flex-shrink: 0;
@@ -1031,9 +1040,9 @@ body {
   }
 
   .chat-subtitle {
-  font-size: 11px;
-  opacity: 0.8;
-}
+    font-size: 11px;
+    opacity: 0.8;
+  }
 
 
   .chat-messages {
@@ -1074,7 +1083,7 @@ body {
     border-radius: 6px;
   }
 
-    .send-btn {
+  .send-btn {
     padding: 8px;
     font-size: 12px;
     min-width: 40px;
@@ -1138,4 +1147,411 @@ body {
     font-size: 11px;
     line-height: 1.2;
   }
+}
+
+/* ==========================================
+   ADMIN & SUPER ADMIN DASHBOARD DARK MODE
+   Uses same dark palette as the user chat UI
+   ========================================== */
+.admin-dark {
+  color-scheme: dark;
+  background-color: #1a1a1a !important;
+  color: #f9fafb;
+
+  --background: 220 20% 4%;
+  --foreground: 210 30% 96%;
+  --card: 220 18% 8%;
+  --card-foreground: 210 30% 96%;
+  --popover: 220 18% 8%;
+  --popover-foreground: 210 30% 96%;
+  --primary: 0 100% 46%;
+  --primary-foreground: 220 20% 4%;
+  --secondary: 220 16% 24%;
+  --secondary-foreground: 210 30% 92%;
+  --muted: 220 14% 18%;
+  --muted-foreground: 210 15% 72%;
+  --accent: 0 85% 38%;
+  --accent-foreground: 220 20% 4%;
+  --destructive: 0 84.2% 60.2%;
+  --destructive-foreground: 210 40% 98%;
+  --border: 220 14% 20%;
+  --input: 220 14% 20%;
+  --ring: 0 100% 46%;
+}
+
+/* ── White backgrounds → dark surfaces ── */
+.admin-dark .bg-white {
+  background-color: #2a2a2a !important;
+}
+.admin-dark .bg-white\/80,
+.admin-dark .bg-white\/50,
+.admin-dark .bg-white\/40 {
+  background-color: rgba(42, 42, 42, 0.85) !important;
+}
+
+/* ── Slate backgrounds → dark shades ── */
+.admin-dark .bg-slate-50 {
+  background-color: #333 !important;
+}
+.admin-dark .bg-slate-50\/50,
+.admin-dark .bg-slate-50\/30 {
+  background-color: #2e2e2e !important;
+}
+.admin-dark .bg-slate-100 {
+  background-color: #3a3a3a !important;
+}
+
+/* ── Tinted backgrounds ── */
+.admin-dark .bg-rose-50\/50,
+.admin-dark .bg-rose-50 {
+  background-color: rgba(237, 0, 0, 0.08) !important;
+}
+.admin-dark .bg-emerald-50 {
+  background-color: rgba(16, 185, 129, 0.12) !important;
+}
+.admin-dark .bg-red-50,
+.admin-dark .bg-red-50\/20,
+.admin-dark .bg-red-50\/30 {
+  background-color: rgba(239, 68, 68, 0.12) !important;
+}
+.admin-dark .bg-blue-50,
+.admin-dark .bg-blue-50\/50 {
+  background-color: rgba(59, 130, 246, 0.12) !important;
+}
+
+/* ── Text color overrides ── */
+.admin-dark .text-slate-950,
+.admin-dark .text-slate-900 {
+  color: #f9fafb !important;
+}
+.admin-dark .text-slate-800 {
+  color: #f3f4f6 !important;
+}
+.admin-dark .text-slate-700 {
+  color: #e5e7eb !important;
+}
+.admin-dark .text-slate-600 {
+  color: #d1d5db !important;
+}
+.admin-dark .text-slate-500 {
+  color: #9ca3af !important;
+}
+.admin-dark .text-slate-400 {
+  color: #6b7280 !important;
+}
+.admin-dark .text-slate-300 {
+  color: #4b5563 !important;
+}
+.admin-dark .text-slate-200 {
+  color: #3f3f3f !important;
+}
+
+/* ── Border color overrides ── */
+.admin-dark .border-slate-50 {
+  border-color: #333 !important;
+}
+.admin-dark .border-slate-100 {
+  border-color: #3f3f3f !important;
+}
+.admin-dark .border-slate-200 {
+  border-color: #3f3f3f !important;
+}
+.admin-dark .border-white {
+  border-color: #3f3f3f !important;
+}
+.admin-dark .border-emerald-200,
+.admin-dark .border-emerald-100 {
+  border-color: rgba(16, 185, 129, 0.25) !important;
+}
+.admin-dark .border-red-200,
+.admin-dark .border-red-100,
+.admin-dark .border-red-50 {
+  border-color: rgba(239, 68, 68, 0.25) !important;
+}
+.admin-dark .border-rose-100 {
+  border-color: rgba(237, 0, 0, 0.2) !important;
+}
+
+/* ── Shadow overrides ── */
+.admin-dark .shadow-2xl,
+.admin-dark .shadow-xl,
+.admin-dark .shadow-lg,
+.admin-dark .shadow-md,
+.admin-dark .shadow-sm {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4) !important;
+}
+.admin-dark .shadow-slate-200\/50,
+.admin-dark .shadow-slate-100\/50 {
+  --tw-shadow-color: transparent !important;
+}
+
+/* ── Ring overrides ── */
+.admin-dark .ring-slate-100,
+.admin-dark .ring-1.ring-slate-100 {
+  --tw-ring-color: #3f3f3f !important;
+}
+.admin-dark .ring-rose-100 {
+  --tw-ring-color: rgba(237, 0, 0, 0.2) !important;
+}
+
+/* ── Input, textarea, select ── */
+.admin-dark input:not([type="file"]):not([type="color"]):not([type="range"]):not([type="checkbox"]):not([type="radio"]),
+.admin-dark textarea,
+.admin-dark select {
+  background-color: #333 !important;
+  color: #f9fafb !important;
+  border-color: #3f3f3f !important;
+}
+.admin-dark input::placeholder,
+.admin-dark textarea::placeholder {
+  color: #6b7280 !important;
+}
+
+/* ── Table ── */
+.admin-dark th {
+  color: #6b7280 !important;
+  background-color: #2e2e2e !important;
+}
+.admin-dark td {
+  border-color: #333 !important;
+}
+.admin-dark tr {
+  border-color: #333 !important;
+}
+.admin-dark tbody tr:hover {
+  background-color: #333 !important;
+}
+
+/* ── Dialogs, Sheets, and Popovers ── */
+.admin-dark [role="dialog"],
+.admin-dark [data-radix-popper-content-wrapper] > div {
+  background-color: #2a2a2a !important;
+  border-color: #3f3f3f !important;
+  color: #f9fafb !important;
+}
+.admin-dark [role="dialog"] p,
+.admin-dark [role="dialog"] .text-muted-foreground {
+  color: #9ca3af !important;
+}
+
+/* ── Skeleton ── */
+.admin-dark [data-slot="skeleton"],
+.admin-dark .animate-pulse > * {
+  background-color: #333 !important;
+}
+
+/* ── Recharts ── */
+.admin-dark .recharts-cartesian-grid line {
+  stroke: #3f3f3f !important;
+}
+.admin-dark .recharts-text {
+  fill: #6b7280 !important;
+}
+.admin-dark .recharts-default-tooltip {
+  background-color: #2a2a2a !important;
+  border-color: #3f3f3f !important;
+  color: #f9fafb !important;
+}
+
+/* ── Badge overrides ── */
+.admin-dark .bg-emerald-50 .text-emerald-700,
+.admin-dark .bg-emerald-50 .text-emerald-600 {
+  color: #34d399 !important;
+}
+.admin-dark .text-emerald-700 {
+  color: #34d399 !important;
+}
+.admin-dark .text-red-600,
+.admin-dark .text-rose-600 {
+  color: #f87171 !important;
+}
+.admin-dark .text-blue-600 {
+  color: #60a5fa !important;
+}
+
+/* ── Dark mode scrollbar ── */
+.admin-dark *::-webkit-scrollbar-track {
+  background: #1a1a1a;
+}
+.admin-dark *::-webkit-scrollbar-thumb {
+  background: #3f3f3f;
+  border-radius: 10px;
+}
+.admin-dark *::-webkit-scrollbar-thumb:hover {
+  background: #4f4f4f;
+}
+
+/* ── Tabs ── */
+.admin-dark .bg-slate-100[role="tablist"],
+.admin-dark [role="tablist"] {
+  background-color: #333 !important;
+}
+.admin-dark [role="tab"][data-state="active"] {
+  background-color: #2a2a2a !important;
+  color: #f9fafb !important;
+}
+.admin-dark [role="tab"]:not([data-state="active"]) {
+  color: #9ca3af !important;
+}
+
+/* ── Focus ring overrides ── */
+.admin-dark .focus\:ring-rose-50:focus,
+.admin-dark .focus\:bg-white:focus {
+  background-color: #333 !important;
+}
+.admin-dark .focus-visible\:ring-ring {
+  --tw-ring-color: var(--brand-color) !important;
+}
+
+/* ── Hover bg-white overrides ── */
+.admin-dark .hover\:bg-white:hover {
+  background-color: #333 !important;
+}
+.admin-dark .hover\:bg-slate-50:hover {
+  background-color: #333 !important;
+}
+.admin-dark .hover\:bg-slate-100:hover {
+  background-color: #3a3a3a !important;
+}
+
+/* ── Group hover text overrides ── */
+.admin-dark .group-hover\:bg-white {
+  background-color: #333 !important;
+}
+
+/* ── Dark bg elements keep their original styling ── */
+.admin-dark .bg-slate-900 {
+  background-color: #1a1a1a !important;
+}
+.admin-dark .bg-\[\#ed0000\],
+.admin-dark .bg-\[var\(--brand-color\)\] {
+  /* Keep brand colors as-is */
+}
+
+/* ===== tailwindcss-animate polyfill (package not in node_modules) ===== */
+@keyframes enter {
+  from {
+    opacity: var(--tw-enter-opacity, 1);
+    transform: translate3d(var(--tw-enter-translate-x, 0), var(--tw-enter-translate-y, 0), 0) scale3d(var(--tw-enter-scale, 1), var(--tw-enter-scale, 1), var(--tw-enter-scale, 1)) rotate(var(--tw-enter-rotate, 0));
+  }
+}
+
+@keyframes exit {
+  to {
+    opacity: var(--tw-exit-opacity, 1);
+    transform: translate3d(var(--tw-exit-translate-x, 0), var(--tw-exit-translate-y, 0), 0) scale3d(var(--tw-exit-scale, 1), var(--tw-exit-scale, 1), var(--tw-exit-scale, 1)) rotate(var(--tw-exit-rotate, 0));
+  }
+}
+
+.animate-in {
+  animation-name: enter;
+  animation-duration: 500ms;
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  --tw-enter-opacity: 0;
+}
+
+.animate-out {
+  animation-name: exit;
+  animation-duration: 300ms;
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  --tw-exit-opacity: 0;
+}
+
+.fade-in-0 {
+  --tw-enter-opacity: 0;
+}
+
+.fade-out-0 {
+  --tw-exit-opacity: 0;
+}
+
+.slide-in-from-top {
+  --tw-enter-translate-y: -100%;
+}
+
+.slide-in-from-bottom {
+  --tw-enter-translate-y: 100%;
+}
+
+.slide-in-from-left {
+  --tw-enter-translate-x: -100%;
+}
+
+.slide-in-from-right {
+  --tw-enter-translate-x: 100%;
+}
+
+.slide-out-to-top {
+  --tw-exit-translate-y: -100%;
+}
+
+.slide-out-to-bottom {
+  --tw-exit-translate-y: 100%;
+}
+
+.slide-out-to-left {
+  --tw-exit-translate-x: -100%;
+}
+
+.slide-out-to-right {
+  --tw-exit-translate-x: 100%;
+}
+
+.slide-in-from-bottom-4 {
+  --tw-enter-translate-y: 1rem;
+}
+
+.slide-in-from-right-4 {
+  --tw-enter-translate-x: 1rem;
+}
+
+.slide-in-from-top-2 {
+  --tw-enter-translate-y: -0.5rem;
+}
+
+.fade-in {
+  --tw-enter-opacity: 0;
+}
+
+.duration-300 {
+  animation-duration: 300ms;
+}
+
+.duration-700 {
+  animation-duration: 700ms;
+}
+
+/* Enhanced state-based selectors for Shadcn Sheet */
+[data-state="open"].animate-in {
+  animation-name: enter;
+  --tw-enter-opacity: 0;
+}
+
+[data-state="closed"].animate-out {
+  animation-name: exit;
+  --tw-exit-opacity: 0;
+}
+
+[data-state="open"].slide-in-from-right {
+  --tw-enter-translate-x: 100%;
+}
+
+[data-state="closed"].slide-out-to-right {
+  --tw-exit-translate-x: 100%;
+}
+
+[data-state="open"].slide-in-from-bottom {
+  --tw-enter-translate-y: 100%;
+}
+
+[data-state="closed"].slide-out-to-bottom {
+  --tw-exit-translate-y: 100%;
+}
+
+[data-state="open"].fade-in {
+  --tw-enter-opacity: 0;
+}
+
+[data-state="closed"].fade-out {
+  --tw-exit-opacity: 0;
 }

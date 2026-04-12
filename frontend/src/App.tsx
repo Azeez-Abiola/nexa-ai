@@ -1,14 +1,23 @@
 import React, { useState, useEffect, useRef } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import axios from "axios";
-import { BiPaperPlane, BiPencil } from "react-icons/bi";
-import { MdPushPin } from "react-icons/md";
-import { FiLogOut, FiDownload, FiTrash2 } from "react-icons/fi";
+import {
+  BiPaperPlane, BiPencil, BiHomeAlt, BiHistory, BiLibrary, BiGridAlt,
+  BiUserCircle, BiCog, BiMessageSquareAdd, BiSearch, BiImage, BiCodeBlock,
+  BiBoltCircle, BiShareAlt, BiHelpCircle, BiChevronDown, BiSidebar,
+  BiUpArrowAlt, BiMessageRounded, BiPlus, BiDotsHorizontalRounded,
+  BiPaperclip, BiMicrophone, BiMoon, BiSun
+} from "react-icons/bi";
+import { MdPushPin, MdAutoAwesome } from "react-icons/md";
+import { FiLogOut, FiDownload, FiTrash2, FiExternalLink } from "react-icons/fi";
 import { useLocation } from "react-router-dom";
 import { Admin } from "./Admin";
 import { Login } from "./Login";
 import { Home } from "./Home";
 import NewLandingPage from "./landing";
 import { AcceptInvite } from "./AcceptInvite";
+import SuperAdminMain from "./super-admin/SuperAdminMain";
+import SuperAdminLogin from "./super-admin/pages/SuperAdminLogin";
 import { parseMarkdown } from "./utils/parseMarkdown";
 import LoginLoadingScreen from "./components/LoginLoadingScreen";
 import { exportConversationToDocx, exportConversationToPdf, generateExportFilename } from "./utils/chatExport";
@@ -43,36 +52,31 @@ export const App: React.FC = () => {
 
   // Initialize auth states from localStorage to prevent flash
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
-    const savedToken = localStorage.getItem("token");
+    const savedToken = localStorage.getItem("nexa-token");
     return !!savedToken;
   });
   const [user, setUser] = useState<User | null>(() => {
-    const savedUser = localStorage.getItem("user");
+    const savedUser = localStorage.getItem("nexa-user");
     return savedUser ? JSON.parse(savedUser) : null;
   });
-  const [token, setToken] = useState<string | null>(() => localStorage.getItem("token"));
+  const [token, setToken] = useState<string | null>(() => localStorage.getItem("nexa-token"));
   const [isLoading, setIsLoading] = useState(() => {
-    // Show loading screen if authenticated or auth is in progress
-    const savedToken = localStorage.getItem("token");
+    // Only show loading screen if user IS authenticated (need to hydrate state)
+    // or if auth is actively in progress (OAuth callback)
+    const savedToken = localStorage.getItem("nexa-token");
     const authInProgress = localStorage.getItem("authInProgress");
-    return !savedToken || authInProgress === "true";
+    if (authInProgress === "true") return true;
+    // If there's a token, we need to load user data — show loading
+    // If there's NO token, we're unauthenticated — go straight to landing (no loading)
+    return !!savedToken;
   });
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [showLanding, setShowLanding] = useState(() => {
-    // Show Landing if user is not authenticated
-    const savedToken = localStorage.getItem("token");
-    return !savedToken;
-  });
-  const [showHome, setShowHome] = useState(() => {
-    // Don't show Home initially, show Landing first
-    return false;
-  });
   const [isConversationsLoading, setIsConversationsLoading] = useState(() => {
     // If authenticated, we need to load conversations
     const savedToken = localStorage.getItem("token");
     return !!savedToken;
   });
-  
+
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [currentConversation, setCurrentConversation] = useState<Conversation | null>(null);
   const [input, setInput] = useState("");
@@ -88,6 +92,8 @@ export const App: React.FC = () => {
   const [contextMenuConversation, setContextMenuConversation] = useState<string | null>(null);
   const [renamingConversationId, setRenamingConversationId] = useState<string | null>(null);
   const [renamingTitle, setRenamingTitle] = useState("");
+  const [suggestions, setSuggestions] = useState<{ title: string; category: string; prompt: string }[]>([]);
+  const [isSuggestionsLoading, setIsSuggestionsLoading] = useState(false);
   const [pinnedConversations, setPinnedConversations] = useState<Set<string>>(() => {
     try {
       const saved = localStorage.getItem("pinnedConversations");
@@ -98,9 +104,28 @@ export const App: React.FC = () => {
   });
   // Admin is a separate page at /admin
   const [view, setView] = useState<View>("chat");
+  const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    return (localStorage.getItem('nexa-theme') as 'light' | 'dark') || 'light';
+  });
+
+  const toggleTheme = () => {
+    const newTheme = theme === 'light' ? 'dark' : 'light';
+    setTheme(newTheme);
+    localStorage.setItem('nexa-theme', newTheme);
+  };
+  const [isHistoryCollapsed, setIsHistoryCollapsed] = useState(false);
+  const [isHomeRecentCollapsed, setIsHomeRecentCollapsed] = useState(false);
+  const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
+  const [isRecording, setIsRecording] = useState(false);
+  const recognitionRef = useRef<any>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLElement>(null);
-  const isAdminPage = typeof window !== "undefined" && (window.location.pathname === "/admin" || window.location.pathname === "/admin" || window.location.pathname.includes('/admin'));
+  const isAdminPage = location.pathname.startsWith('/admin');
+  const isSuperAdminPage = location.pathname.startsWith('/super-admin');
+  const isChatPage = location.pathname === '/user-chat';
   const userInitials = user
     ? `${user.fullName?.split(' ').map(n => n[0]).join('').toUpperCase() || ""}`
     : "";
@@ -111,9 +136,9 @@ export const App: React.FC = () => {
 
     const attemptScroll = (attempt: number = 0) => {
       if (!messagesContainerRef.current) return;
-      
+
       const { scrollHeight, scrollTop, clientHeight } = messagesContainerRef.current;
-      
+
       // Only scroll if we haven't already (or force is true)
       if (force || scrollTop + clientHeight < scrollHeight - 10) {
         messagesContainerRef.current.scrollTop = scrollHeight;
@@ -149,20 +174,24 @@ export const App: React.FC = () => {
     return false;
   };
 
-  // Initialize auth from localStorage
   useEffect(() => {
     const initApp = async () => {
-      const savedToken = localStorage.getItem("token");
-      const savedUser = localStorage.getItem("user");
+      const savedToken = localStorage.getItem("nexa-token");
+      const savedUser = localStorage.getItem("nexa-user");
 
       if (savedToken && savedUser) {
         setToken(savedToken);
         setUser(JSON.parse(savedUser));
         setIsAuthenticated(true);
-        
+
         // Set axios default header
         axios.defaults.headers.common["Authorization"] = `Bearer ${savedToken}`;
-        
+
+        const userData = JSON.parse(savedUser);
+        if (userData.tenantColor) {
+          document.documentElement.style.setProperty('--brand-color', userData.tenantColor);
+        }
+
         // Wait for backend to be ready before loading conversations
         const backendReady = await waitForBackend();
         if (backendReady) {
@@ -177,13 +206,15 @@ export const App: React.FC = () => {
           })();
           if (!isAdmin) {
             loadingStartTimeRef.current = Date.now();
+            // Redirect authenticated users to /user-chat if they're on / or /login
+            if (window.location.pathname === "/" || window.location.pathname === "/login") {
+              window.history.replaceState(null, "", "/user-chat");
+            }
             loadConversations(savedToken);
           } else {
-            // If admin, ensure we're on admin page
+            // If admin, we don't force redirect on load anymore
+            // The navbar will provide access to the control panel
             setIsConversationsLoading(false);
-            if (!window.location.pathname.includes('/admin')) {
-              window.location.href = '/nexa-ai/admin';
-            }
           }
         } else {
           console.error("Could not connect to backend");
@@ -202,10 +233,16 @@ export const App: React.FC = () => {
   useEffect(() => {
     if (isAdminPage) {
       document.title = "Nexa AI - Admin";
+    } else if (isSuperAdminPage) {
+      document.title = "Nexa AI - Control Panel";
+    } else if (isChatPage) {
+      document.title = "Nexa AI - Chat";
+    } else if (location.pathname === "/login") {
+      document.title = "Nexa AI - Sign In";
     } else {
-      document.title = "Nexa AI - User";
+      document.title = "Nexa AI";
     }
-  }, [isAdminPage]);
+  }, [isAdminPage, isSuperAdminPage, isChatPage, location.pathname]);
 
   // Scroll to bottom when messages change or conversation changes
   useEffect(() => {
@@ -224,21 +261,49 @@ export const App: React.FC = () => {
     }
   }, [currentConversation?._id]);
 
-  const loadConversations = async (authToken: string) => {
+  // Fetch suggestions based on business unit
+  useEffect(() => {
+    const fetchSuggestions = async () => {
+      if (!user?.businessUnit || !isAuthenticated) return;
+
+      try {
+        setIsSuggestionsLoading(true);
+        const { data } = await axios.get(`/api/v1/chat/suggestions?businessUnit=${encodeURIComponent(user.businessUnit)}`);
+        if (data.suggestions) {
+          setSuggestions(data.suggestions);
+        }
+      } catch (error) {
+        console.error("Failed to fetch suggestions:", error);
+        // Fallback suggestions
+        setSuggestions([
+          { category: "Strategy", title: "Develop a market expansion plan for our business unit", prompt: "Help me create a market expansion plan..." },
+          { category: "Efficiency", title: "Identify bottlenecks in our current workflow", prompt: "Analyze our workflow and identify bottlenecks..." },
+          { category: "Innovation", title: "Suggest 3 new features for our primary product", prompt: "Give me 3 innovative feature ideas..." }
+        ]);
+      } finally {
+        setIsSuggestionsLoading(false);
+      }
+    };
+
+    fetchSuggestions();
+  }, [user?.businessUnit, isAuthenticated]);
+
+  async function loadConversations(authToken: string) {
+    setIsConversationsLoading(true);
     try {
       const { data } = await axios.get<{ conversations: Conversation[] }>(
         "/api/v1/conversations",
         { headers: { Authorization: `Bearer ${authToken}` } }
       );
       setConversations(data.conversations);
-      
+
       if (data.conversations.length > 0) {
         // Try to restore the last viewed conversation
         const savedConversationId = localStorage.getItem("lastConversationId");
         const lastConversation = savedConversationId
           ? data.conversations.find(c => c._id === savedConversationId)
           : null;
-        
+
         // Use the last viewed conversation if it still exists, otherwise use the first one
         setCurrentConversation(lastConversation || data.conversations[0]);
       }
@@ -248,7 +313,7 @@ export const App: React.FC = () => {
       // Ensure loading state displays for at least 3 seconds
       const elapsedTime = Date.now() - (loadingStartTimeRef.current || Date.now());
       const remainingTime = Math.max(0, 3000 - elapsedTime);
-      
+
       if (remainingTime > 0) {
         setTimeout(() => {
           setIsConversationsLoading(false);
@@ -263,14 +328,24 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleLogin = async (authToken: string, authUser: User) => {
-    loadingStartTimeRef.current = Date.now();
+  const handleLogin = async (authToken: string, authUser: any) => {
+    localStorage.setItem("nexa-token", authToken);
+    localStorage.setItem("nexa-user", JSON.stringify(authUser));
     setToken(authToken);
     setUser(authUser);
     setIsAuthenticated(true);
-    setIsConversationsLoading(true);
-    axios.defaults.headers.common["Authorization"] = `Bearer ${authToken}`;
-    await loadConversations(authToken);
+
+    // Role-based redirection
+    if (authUser.businessUnit === 'SUPERADMIN') {
+      window.location.href = "/super-admin/dashboard";
+    } else if (authUser.isAdmin) {
+      window.location.href = "/admin/dashboard";
+    } else {
+      window.history.pushState(null, "", "/user-chat");
+      setIsConversationsLoading(true);
+      axios.defaults.headers.common["Authorization"] = `Bearer ${authToken}`;
+      await loadConversations(authToken);
+    }
   };
 
   const handleLogout = () => {
@@ -278,8 +353,8 @@ export const App: React.FC = () => {
   };
 
   const confirmLogout = () => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
+    localStorage.removeItem("nexa-token");
+    localStorage.removeItem("nexa-user");
     setIsAuthenticated(false);
     setUser(null);
     setToken(null);
@@ -287,6 +362,8 @@ export const App: React.FC = () => {
     setCurrentConversation(null);
     delete axios.defaults.headers.common["Authorization"];
     setLogoutConfirmOpen(false);
+    // Navigate back to the landing page
+    window.history.replaceState(null, "", "/");
   };
 
   const handleExportAsDocx = async () => {
@@ -320,7 +397,7 @@ export const App: React.FC = () => {
         {},
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      
+
       setConversations([data.conversation, ...conversations]);
       setCurrentConversation(data.conversation);
       setInput("");
@@ -345,7 +422,7 @@ export const App: React.FC = () => {
 
       const updated = conversations.filter((c) => c._id !== conversationToDelete);
       setConversations(updated);
-      
+
       // If the deleted conversation was selected, switch to the first remaining one
       if (currentConversation?._id === conversationToDelete) {
         setCurrentConversation(updated.length > 0 ? updated[0] : null);
@@ -569,12 +646,65 @@ export const App: React.FC = () => {
     return finalConversation;
   };
 
+  const startVoiceRecording = () => {
+    if (!('webkitSpeechRecognition' in window)) {
+      alert("Speech recognition is not supported in this browser.");
+      return;
+    }
+
+    if (isRecording) {
+      recognitionRef.current?.stop();
+      setIsRecording(false);
+      return;
+    }
+
+    const SpeechRecognition = (window as any).webkitSpeechRecognition;
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+
+    recognition.onstart = () => setIsRecording(true);
+    recognition.onend = () => setIsRecording(false);
+    recognition.onerror = (event: any) => {
+      console.error("Speech recognition error:", event.error);
+      setIsRecording(false);
+    };
+
+    recognition.onresult = (event: any) => {
+      let interimTranscript = '';
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
+        if (event.results[i].isFinal) {
+          setInput(prev => prev + (prev ? ' ' : '') + event.results[i][0].transcript);
+        } else {
+          interimTranscript += event.results[i][0].transcript;
+        }
+      }
+    };
+
+    recognition.start();
+    recognitionRef.current = recognition;
+  };
+
+  const handleFileAttach = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    setAttachedFiles(prev => [...prev, ...files]);
+    // Reset inputs so same file can be selected again if removed
+    if (fileInputRef.current) fileInputRef.current.value = "";
+    if (imageInputRef.current) imageInputRef.current.value = "";
+  };
+
+  const removeAttachedFile = (index: number) => {
+    setAttachedFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
   const handleSend = async () => {
     const trimmed = input.trim();
     if (!trimmed || loading || !token) return;
 
-    // Clear input immediately
+    // Clear input and attachments immediately
     setInput("");
+    setAttachedFiles([]);
 
     // If no conversation exists, create one first
     if (!currentConversation) {
@@ -585,7 +715,7 @@ export const App: React.FC = () => {
       );
       setCurrentConversation(createData.data.conversation);
       setConversations([createData.data.conversation, ...conversations]);
-      
+
       // Add user message to local state immediately
       const userMsg: Message = { role: "user", content: trimmed, timestamp: new Date() };
       const updatedConv = { ...createData.data.conversation, messages: [userMsg] };
@@ -595,7 +725,7 @@ export const App: React.FC = () => {
       // Stream AI response
       try {
         const finalConversation = await streamResponse(createData.data.conversation._id, trimmed);
-        
+
         // Use the final conversation data from the stream response
         if (finalConversation) {
           setCurrentConversation(finalConversation);
@@ -621,7 +751,7 @@ export const App: React.FC = () => {
     // Stream AI response
     try {
       const finalConversation = await streamResponse(currentConversation._id, trimmed);
-      
+
       // Use the final conversation data from the stream response
       if (finalConversation) {
         setCurrentConversation(finalConversation);
@@ -644,7 +774,36 @@ export const App: React.FC = () => {
     }
   };
 
-  if (isLoading) {
+  // ─── Route-based rendering (independent of main app auth) ───
+
+  // Handle Super Admin routing separately (has its own auth flow)
+  if (isSuperAdminPage) {
+    if (location.pathname === '/super-admin/login') {
+      return <SuperAdminLogin />;
+    }
+    return <SuperAdminMain theme={theme} toggleTheme={toggleTheme} />;
+  }
+
+  // Handle Business Admin routing separately
+  if (isAdminPage) {
+    return <SuperAdminMain theme={theme} toggleTheme={toggleTheme} />; // We'll update this component to handle /admin vs /super-admin
+  }
+
+  // Invite acceptance page — always public, no auth required
+  if (location.pathname === "/accept-invite") {
+    return <AcceptInvite />;
+  }
+
+  // If user is visiting the old admin URL, redirect to new one
+  if (isAdminPage) {
+    window.location.href = "/admin/dashboard";
+    return null;
+  }
+
+  // ─── Main app loading / auth flow ───
+
+  // Show loading spinner only while hydrating authenticated state
+  if (isLoading && isAuthenticated) {
     return (
       <div style={{
         width: "100%",
@@ -661,47 +820,44 @@ export const App: React.FC = () => {
     );
   }
 
-  // If authenticated and still loading conversations, show loading screen
-  if (isAuthenticated && isConversationsLoading) {
+  // If authenticated and still loading conversations on chat page, show loading screen
+  if (isAuthenticated && isConversationsLoading && isChatPage) {
     return <LoginLoadingScreen userType="user" />;
   }
 
-  // Invite acceptance page — always public, no auth required
-  if (location.pathname === "/accept-invite") {
-    return <AcceptInvite />;
+  // /login — always shows login form; redirects to /user-chat if already authenticated
+  if (location.pathname === "/login") {
+    if (isAuthenticated) {
+      window.history.replaceState(null, "", "/user-chat");
+      // fall through to chat rendering below
+    } else {
+      return <Login onLoginSuccess={handleLogin} />;
+    }
   }
 
-  // If user is visiting the admin URL, render Admin immediately (public page)
-  if (isAdminPage) {
-    return (
-      <div style={{ height: "100dvh", background: "#ffffff" }}>
-        <Admin />
-      </div>
-    );
+  // / — always shows the landing page (homepage)
+  if (location.pathname === "/") {
+    if (isAuthenticated) {
+      // Authenticated user visiting homepage — redirect to chat
+      window.history.replaceState(null, "", "/user-chat");
+      // fall through to chat rendering below
+    } else {
+      return <NewLandingPage />;
+    }
   }
 
-  // If user is visiting the login URL and not authenticated, show Login component
-  if (!isAuthenticated && location.pathname === "/login") {
-    return <Login onLoginSuccess={handleLogin} />;
+  // /user-chat — requires authentication
+  if (location.pathname === "/user-chat") {
+    if (!isAuthenticated) {
+      window.history.replaceState(null, "", "/login");
+      return <Login onLoginSuccess={handleLogin} />;
+    }
+    // Authenticated — render chat interface below
   }
 
-  // Show landing page if user is not authenticated and hasn't clicked to view home
-  if (isAuthenticated === false && isLoading === false && showLanding) {
-    return <NewLandingPage />;
-  }
-
-  // Show home page if user is not authenticated and explicitly wants to see it
-  if (isAuthenticated === false && isLoading === false && showHome) {
-    return (
-      <Home
-        onEnter={() => setShowHome(false)}
-        user={user}
-      />
-    );
-  }
-
+  // Any other unmatched route for unauthenticated users → landing page
   if (!isAuthenticated) {
-    return <Login onLoginSuccess={handleLogin} />;
+    return <NewLandingPage />;
   }
 
   const toggleSidebar = () => setSidebarOpen(!sidebarOpen);
@@ -709,1024 +865,1703 @@ export const App: React.FC = () => {
   return (
     <>
       {isLoading && <LoginLoadingScreen userType={isAdminPage ? "admin" : "user"} />}
-      <div className="ufl-root">
-      <aside className={`sidebar ${sidebarOpen ? 'sidebar-open' : ''}`}>
-        <div className="sidebar-header">
-          <button className="new-chat-btn" onClick={() => {
-            handleNewChat();
-            if (window.innerWidth <= 768) setSidebarOpen(false);
-          }}>
-            + New chat
-          </button>
-        </div>
+      <div className={`ufl-root ${theme === 'dark' ? 'dark-theme' : ''}`}>
+        <aside className={`sidebar ${sidebarOpen ? 'sidebar-open' : ''}`}>
+          <div className="sidebar-header-main">
+            <div className="sidebar-logo">
+              <div className="logo-icon-wrapper">
+                <img src="/1879-22.png" alt="Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+              </div>
+              <span className="logo-text">Nexa</span>
+            </div>
+          </div>
 
-        <div className="sidebar-conversations">
-          <div className="sidebar-conversations-label">Conversations</div>
-          {conversations.length === 0 ? (
-            <div className="sidebar-empty">No conversations yet</div>
-          ) : (
-            (() => {
-              const sorted = [...conversations].sort((a, b) => {
-                const aPinned = pinnedConversations.has(a._id);
-                const bPinned = pinnedConversations.has(b._id);
-                if (aPinned !== bPinned) return aPinned ? -1 : 1;
-                return 0;
-              });
-              return sorted.map((conv) => (
-              <div
-                key={conv._id}
-                className={`sidebar-conversation ${
-                  currentConversation?._id === conv._id ? "active" : ""
-                } ${pinnedConversations.has(conv._id) ? "pinned" : ""}`}
-                onClick={() => {
-                  setCurrentConversation(conv);
-                  if (window.innerWidth <= 768) setSidebarOpen(false);
-                }}
-              >
-                <div className="conv-main">
-                  {renamingConversationId === conv._id ? (
-                    <input
-                      type="text"
-                      className="rename-input"
-                      value={renamingTitle}
-                      onChange={(e) => setRenamingTitle(e.target.value)}
-                      onBlur={confirmRenameConversation}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') confirmRenameConversation();
-                        if (e.key === 'Escape') {
-                          setRenamingConversationId(null);
-                          setRenamingTitle("");
-                        }
-                      }}
-                      onClick={(e) => e.stopPropagation()}
-                      autoFocus
-                    />
-                  ) : (
+          <div className="new-chat-container">
+            <button className="new-chat-btn-v2" onClick={handleNewChat}>
+              <BiPlus size={20} />
+              <span>New Chat</span>
+              <span className="shortcut-key">⌥ N</span>
+            </button>
+          </div>
+
+          <div className="sidebar-conversations-v2">
+            <div
+              className="sidebar-section-label retractable"
+              onClick={() => setIsHistoryCollapsed(!isHistoryCollapsed)}
+            >
+              <span>Recent</span>
+              <BiChevronDown style={{ transform: isHistoryCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }} />
+            </div>
+            {!isHistoryCollapsed && (
+              conversations.length === 0 ? (
+                <div className="sidebar-empty">No conversations yet</div>
+              ) : (
+                (() => {
+                  const sorted = [...conversations].sort((a, b) => {
+                    const aPinned = pinnedConversations.has(a._id);
+                    const bPinned = pinnedConversations.has(b._id);
+                    if (aPinned !== bPinned) return aPinned ? -1 : 1;
+                    return 0;
+                  });
+                  // Only show top 7 or so, with a "Show more"
+                  return (
                     <>
-                      <div className="conv-title" title={conv.title}>
-                        {pinnedConversations.has(conv._id) && <MdPushPin className="pin-icon" size={14} />}
-                        {conv.title}
-                      </div>
-                      <div className="conv-date">
-                        {new Date(conv.updatedAt).toLocaleDateString()}
-                      </div>
+                      <AnimatePresence initial={false}>
+                        {sorted.slice(0, 10).map((conv) => (
+                          <motion.div
+                            layout
+                            key={conv._id}
+                            initial={{ opacity: 0, x: -20 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            exit={{ opacity: 0, x: 20 }}
+                            transition={{ duration: 0.3 }}
+                            className={`sidebar-conversation-v2 ${currentConversation?._id === conv._id ? "active" : ""
+                              } ${pinnedConversations.has(conv._id) ? "pinned" : ""}`}
+                            onClick={() => {
+                              setCurrentConversation(conv);
+                              if (window.innerWidth <= 768) setSidebarOpen(false);
+                            }}
+                          >
+                            {pinnedConversations.has(conv._id) && (
+                              <MdPushPin size={16} className="pin-active-icon mr-2 flex-shrink-0" />
+                            )}
+                            <div className="conv-title-v2">{conv.title}</div>
+                            <button
+                              className="conv-menu-btn visible"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setActiveMenuId(activeMenuId === conv._id ? null : conv._id);
+                              }}
+                            >
+                              <BiDotsHorizontalRounded size={18} />
+                            </button>
+                            {activeMenuId === conv._id && (
+                              <div className="conv-dropdown">
+                                <button onClick={(e) => {
+                                  handlePinConversation(conv._id, e as any);
+                                  setActiveMenuId(null);
+                                }}>
+                                  {pinnedConversations.has(conv._id) ? "Unpin" : "Pin"}
+                                </button>
+                                <button onClick={(e) => {
+                                  handleContextMenuDelete(conv._id, e as any);
+                                  setActiveMenuId(null);
+                                }}>
+                                  Delete
+                                </button>
+                              </div>
+                            )}
+                          </motion.div>
+                        ))}
+                      </AnimatePresence>
                     </>
-                  )}
+                  );
+                })())
+            )}
+            {!isHistoryCollapsed && conversations.length > 10 && (
+              <div className="show-more-btn">
+                <BiChevronDown size={18} />
+                <span>Show more</span>
+              </div>
+            )}
+          </div>
+
+          <div className="sidebar-footer-actions">
+            <button className="theme-toggle-btn" onClick={toggleTheme}>
+              {theme === 'light' ? <BiMoon size={18} /> : <BiSun size={18} />}
+              <span>{theme === 'light' ? 'Dark Mode' : 'Light Mode'}</span>
+            </button>
+            <button className="sidebar-logout-btn" onClick={() => setLogoutConfirmOpen(true)}>
+              <FiLogOut size={18} />
+              <span>Logout</span>
+            </button>
+          </div>
+
+          <div className="user-profile-v2">
+            <div className="user-avatar-v2">
+              {userInitials || "U"}
+            </div>
+            <div className="user-info-v2">
+              <div className="user-email-v2">{user?.email}</div>
+            </div>
+            <BiChevronDown size={18} />
+          </div>
+        </aside>
+
+        <main className="chat-layout" onClick={() => {
+          if (sidebarOpen && typeof window !== 'undefined' && window.innerWidth <= 768) {
+            setSidebarOpen(false);
+          }
+        }}>
+          <header className="chat-header-v2">
+            <div className="header-left-v2">
+              {/* Sidebar toggle removed per user request */}
+            </div>
+            <div className="header-brand-v2">
+              <span className="brand-name-v2" style={{ color: '#111827' }}>Nexa</span>
+            </div>
+            <div className="header-actions-v2">
+              <button className="header-action-btn-v2">
+                <BiHelpCircle size={18} />
+                <span>Help</span>
+              </button>
+            </div>
+          </header>
+
+          <section className="chat-content-v2">
+            {!currentConversation?.messages.length && !loading ? (
+              <div className="chat-home-v2">
+                <div className="home-greeting-wrapper-v2">
+                  <h2 className="welcome-name-v2">Welcome, {user?.fullName?.split(' ')[0] || 'there'}!</h2>
+                  <h1 className="home-greeting-v2">
+                    How can <span className="red-accent">Nexa</span> help you today?
+                  </h1>
                 </div>
-                <div
-                  className="conv-menu-container"
-                  onMouseEnter={() => setContextMenuOpen(true)}
-                  onMouseLeave={() => {
-                    setContextMenuOpen(false);
-                    setContextMenuConversation(null);
-                  }}
-                >
-                  <button
-                    className="conv-menu-btn"
-                    onClick={(e) => handleConversationMenu(conv._id, e)}
-                    title="More options"
+
+                <div className="suggestion-cards-top">
+                  {suggestions.slice(0, 3).map((s, i) => (
+                    <div key={i} className="suggestion-card-v2" onClick={() => {
+                      setInput(s.prompt);
+                    }}>
+                      <div className="suggestion-icon-wrapper">
+                        {i === 0 ? <BiBoltCircle size={24} color="var(--brand-color, #ed0000)" /> :
+                          i === 1 ? <BiCodeBlock size={24} color="var(--brand-color, #ed0000)" /> :
+                            <BiSearch size={24} color="var(--brand-color, #ed0000)" />}
+                      </div>
+                      <div className="suggestion-content-text">
+                        <div className="suggestion-category">{s.category}</div>
+                        <div className="suggestion-title">{s.title}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="main-input-container-v2">
+                  {/* Attached Files Preview */}
+                  {attachedFiles.length > 0 && (
+                    <div className="attached-files-preview">
+                      {attachedFiles.map((file, i) => (
+                        <div key={i} className="attached-file-chip">
+                          <span className="file-name">{file.name}</span>
+                          <button className="remove-file-btn" onClick={() => removeAttachedFile(i)}>✕</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {/* Border Drawing Animation SVG */}
+                  <svg className="border-beam-svg" preserveAspectRatio="none">
+                    <defs>
+                      <linearGradient id="beamGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                        <stop offset="0%" stopColor="transparent" />
+                        <stop offset="50%" stopColor="var(--brand-color, #ed0000)" />
+                        <stop offset="100%" stopColor="#ff7b7b" />
+                      </linearGradient>
+                    </defs>
+                    <rect
+                      className="border-beam-rect"
+                      x="0" y="0" rx="20" ry="20"
+                      width="100%" height="100%"
+                      stroke="url(#beamGradient)"
+                      vectorEffect="non-scaling-stroke"
+                    />
+                  </svg>
+                  <textarea
+                    className="main-textarea-v2"
+                    placeholder="How can Nexa help you today?"
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    rows={3}
+                  />
+                  <div className="input-footer-v2">
+                    <div className="input-toolbar-icons">
+                      <input
+                        type="file"
+                        ref={imageInputRef}
+                        style={{ display: 'none' }}
+                        accept="image/*"
+                        multiple
+                        onChange={handleFileAttach}
+                      />
+                      <input
+                        type="file"
+                        ref={fileInputRef}
+                        style={{ display: 'none' }}
+                        accept="*"
+                        multiple
+                        onChange={handleFileAttach}
+                      />
+                      <button className="input-tool-btn" onClick={() => imageInputRef.current?.click()} title="Add image">
+                        <BiPlus />
+                      </button>
+                      <button className="input-tool-btn" onClick={() => fileInputRef.current?.click()} title="Attach file">
+                        <BiPaperclip />
+                      </button>
+                      <button
+                        className={`input-tool-btn ${isRecording ? 'recording' : ''}`}
+                        onClick={startVoiceRecording}
+                        title="Voice record"
+                      >
+                        <BiMicrophone style={{ color: isRecording ? 'var(--brand-color, #ed0000)' : 'inherit' }} />
+                      </button>
+                    </div>
+                    <button
+                      className="send-btn-v2"
+                      onClick={handleSend}
+                      disabled={!input.trim() || loading}
+                    >
+                      <BiUpArrowAlt size={24} />
+                    </button>
+                  </div>
+                </div>
+
+                <p className="collaborate-text-v2">Collaborate with Nexa using documents, images and more</p>
+
+                <div className="recent-chats-section-v2">
+                  <div
+                    className="section-header-v2 clickable"
+                    onClick={() => setIsHomeRecentCollapsed(!isHomeRecentCollapsed)}
                   >
-                    ...
-                  </button>
-                  {contextMenuOpen && contextMenuConversation === conv._id && (
-                    <div className="context-menu-dropdown" onClick={(e) => e.stopPropagation()}>
-                      <button 
-                        className="context-menu-item"
-                        onClick={(e) => handlePinConversation(conv._id, e)}
-                      >
-                        <MdPushPin size={16} />
-                        {pinnedConversations.has(conv._id) ? "Unpin chat" : "Pin chat"}
-                      </button>
-                      <button 
-                        className="context-menu-item delete"
-                        onClick={(e) => handleContextMenuDelete(conv._id, e)}
-                      >
-                        <FiTrash2 size={16} />
-                        Delete
-                      </button>
+                    <BiHistory size={18} />
+                    <span>Your Recent chats</span>
+                    <BiChevronDown size={18} style={{ transform: isHomeRecentCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }} />
+                  </div>
+                  {!isHomeRecentCollapsed && (
+                    <div className="recent-cards-v2">
+                      {conversations.slice(0, 3).map((conv, idx) => (
+                        <div key={conv._id} className="recent-card-v2" onClick={() => setCurrentConversation(conv)}>
+                          <BiMessageRounded size={18} color="var(--brand-color, #ed0000)" />
+                          <div className="recent-card-title-v2">{conv.title}</div>
+                          <div className="recent-card-time-v2">{idx === 0 ? "recent" : "earlier"}</div>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
               </div>
-            ))
-            })()
-          )}
-        </div>
-
-        <div className="sidebar-footer">
-          <div className="user-info">
-            <div className="user-name">
-              {user?.fullName}
-            </div>
-            <div className="user-email">{user?.businessUnit}</div>
-          </div>
-          <button className="logout-btn" onClick={handleLogout}>
-            <FiLogOut className="logout-btn-icon" />
-            Logout
-          </button>
-        </div>
-      </aside>
-
-      <main className="chat-layout" onClick={() => {
-        if (sidebarOpen && typeof window !== 'undefined' && window.innerWidth <= 768) {
-          setSidebarOpen(false);
-        }
-      }}>
-        <header className="chat-header">
-          <button className="hamburger-btn" onClick={toggleSidebar}>
-            <span className="hamburger-line"></span>
-            <span className="hamburger-line"></span>
-            <span className="hamburger-line"></span>
-          </button>
-          <div className="chat-header-left">
-            <div className="chat-title">{user?.businessUnit} GPT</div>
-            <div className="chat-subtitle">Ask anything about {user?.businessUnit} documents and guidelines</div>
-          </div>
-          <div className="chat-header-right">
-            <div className="header-user-info">
-              <div className="header-user-name">{user?.fullName}</div>
-              <div className="header-user-email">{user?.email}</div>
-            </div>
-            <button className={`header-tab active`}>Chat</button>
-          </div>
-        </header>
-
-        <>
-
-            <section className="chat-messages" ref={messagesContainerRef}>
-              {!currentConversation?.messages.length && !loading ? (
-                <div className="chat-empty-state">
-                  <div className="empty-logo">
-                    <img src="/avatar-1.png" alt="Nexa AI" />
-                  </div>
-                  <h1 className="empty-title">What's on your mind today?</h1>
-                  <p className="empty-subtitle">Ask anything about {user?.businessUnit} company documents, policies, procedures, and guidelines</p>
-                </div>
-              ) : (
-                <>
-                  {currentConversation?.messages.map((m, idx) => (
-                    <div key={idx}>
-                      {regeneratingMessageIndex === idx ? (
-                        <div className="message-row assistant">
-                          <div className="bubble typing">
-                            <span className="dot"></span>
-                            <span className="dot"></span>
-                            <span className="dot"></span>
-                          </div>
-                        </div>
-                      ) : (
-                        <div
-                          className={`message-row ${
-                            m.role === "assistant" ? "assistant" : "user"
-                          }`}
-                        >
-                          {m.role === "user" && (
-                            <div className="avatar">
-                              <span className="avatar-user">{userInitials || "U"}</span>
-                            </div>
-                          )}
-                          <div className="bubble">
-                            {m.content.split("\n").map((line, lineIdx) => (
-                              <p key={lineIdx}>{parseMarkdown(line)}</p>
-                            ))}
-                          </div>
-                          {m.role === "user" && (
-                            <div className="message-actions">
-                              <button
-                                className="message-action-btn"
-                                onClick={() => handleEditMessage(idx, m.content)}
-                                title="Edit message"
-                              >
-                                <BiPencil size={18} />
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      )}
+            ) : (
+              <div className="messages-container-v2" ref={messagesContainerRef}>
+                {currentConversation?.messages.map((m, idx) => (
+                  <div key={idx} className={`message-row-v2 ${m.role}`}>
+                    <div className="message-avatar-v2">
+                      {m.role === 'assistant' ? (
+                        <img src="/avatar-1.png" alt="Nexa" className="bot-avatar-img" />
+                      ) : null}
                     </div>
-                  ))}
-                </>
-              )}
-              {loading && (
-                <div className="message-row assistant">
-                  <div className="bubble typing">
-                    <span className="dot"></span>
-                    <span className="dot"></span>
-                    <span className="dot"></span>
+                    <div className="message-bubble-v2">
+                      {m.content.split("\n").map((line, lIdx) => (
+                        <p key={lIdx}>{parseMarkdown(line)}</p>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              )}
-              <div ref={messagesEndRef} />
-            </section>
+                ))}
+                {loading && (
+                  <div className="message-row-v2 assistant">
+                    <div className="message-avatar-v2">
+                      <BiBoltCircle size={18} />
+                    </div>
+                    <div className="message-content-v2">
+                      <div className="typing-v2">
+                        <span className="dot-v2"></span>
+                        <span className="dot-v2"></span>
+                        <span className="dot-v2"></span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                <div ref={messagesEndRef} />
+              </div>
+            )}
+          </section>
 
-            <footer className="chat-input-wrapper">
-              <div className="chat-input-inner">
+          {(currentConversation?.messages.length > 0 || loading) && (
+            <footer className="footer-input-v2">
+              <div className="footer-input-container-v2">
+                <button className="footer-tool-btn"><BiPlus /></button>
+                <button className="footer-tool-btn"><BiPaperclip /></button>
+                <button className="footer-tool-btn"><BiMicrophone /></button>
                 <textarea
-                  rows={1}
-                  className="chat-input"
+                  className="footer-textarea-v2"
                   placeholder="Send a message..."
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
+                  rows={1}
                 />
                 <button
-                  className="send-btn"
+                  className="footer-send-btn-v2"
                   onClick={handleSend}
-                  disabled={loading || !input.trim()}
+                  disabled={!input.trim() || loading}
                 >
-                  <BiPaperPlane size={20} />
+                  <BiUpArrowAlt size={20} />
                 </button>
               </div>
-              <div className="chat-hint">
-                {user?.businessUnit} GPT may not always be accurate. Verify critical information
-                with HR or Compliance.
-              </div>
+              <p className="footer-disclaimer-v2">Nexa may display inaccurate info, so please double check the response</p>
             </footer>
-          </>
-      </main>
+          )}
+        </main>
 
-      <style>{`
-        .hamburger-btn {
-          display: none;
+        {/* Modals */}
+        {logoutConfirmOpen && (
+          <div className="modal-overlay-v2">
+            <div className="modal-card-v2">
+              <div className="modal-header-v2">
+                <h3>Sign Out</h3>
+                <p>Are you sure you want to sign out of your Nexa account?</p>
+              </div>
+              <div className="modal-footer-v2">
+                <button className="modal-btn-v2 secondary" onClick={() => setLogoutConfirmOpen(false)}>Cancel</button>
+                <button className="modal-btn-v2 primary danger" onClick={confirmLogout}>Sign Out</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {deleteConfirmOpen && (
+          <div className="modal-overlay-v2">
+            <div className="modal-card-v2">
+              <div className="modal-header-v2">
+                <h3>Delete Conversation</h3>
+                <p>This action cannot be undone. All messages in this chat will be permanently removed.</p>
+              </div>
+              <div className="modal-footer-v2">
+                <button className="modal-btn-v2 secondary" onClick={() => setDeleteConfirmOpen(false)}>Cancel</button>
+                <button className="modal-btn-v2 primary danger" onClick={confirmDeleteConversation}>Delete</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {editModalOpen && (
+          <div className="modal-overlay-v2">
+            <div className="modal-card-v2">
+              <div className="modal-header-v2">
+                <h3>Edit Message</h3>
+                <p>Updating this message will regenerate the AI response.</p>
+              </div>
+              <textarea
+                className="modal-textarea-v2"
+                value={editingContent}
+                onChange={(e) => setEditingContent(e.target.value)}
+              />
+              <div className="modal-footer-v2">
+                <button className="modal-btn-v2 secondary" onClick={() => setEditModalOpen(false)}>Cancel</button>
+                <button className="modal-btn-v2 primary" onClick={handleSaveEdit}>Save Changes</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
+
+        .ufl-root {
+          display: flex;
+          height: 100dvh;
+          background: #fdfdfd;
+          color: #111827;
+          font-family: 'Outfit', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+          overflow: hidden;
+        }
+
+        /* Custom Brand Scrollbar */
+        *::-webkit-scrollbar {
+          width: 6px;
+          height: 6px;
+        }
+        *::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        *::-webkit-scrollbar-thumb {
+          background: var(--brand-color, #ed0000)20;
+          border-radius: 10px;
+        }
+        *::-webkit-scrollbar-thumb:hover {
+          background: var(--brand-color, #ed0000)50;
+        }
+
+        /* Sidebar V2 */
+        .sidebar {
+          width: 280px;
+          background: #f3f4f6;
+          display: flex;
           flex-direction: column;
-          gap: 5px;
-          background: none;
+          padding: 16px;
+          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+          border-right: 1px solid #e5e7eb;
+          z-index: 50;
+        }
+
+        .sidebar-header-main {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 8px 4px 24px;
+        }
+
+        .sidebar-logo {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+        }
+
+        .logo-icon-wrapper {
+          width: 32px;
+          height: 32px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          overflow: hidden;
+        }
+
+        .logo-text {
+          font-weight: 600;
+          font-size: 16px;
+          color: var(--brand-color, #ed0000);
+        }
+
+        .sidebar-toggle-btn {
+          background: transparent;
           border: none;
+          color: #6b7280;
           cursor: pointer;
-          padding: 8px;
-          margin-right: 10px;
-          z-index: 1002;
+          padding: 4px;
+          border-radius: 4px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
         }
 
-        .hamburger-line {
-          width: 24px;
-          height: 3px;
-          background: #333;
-          border-radius: 2px;
-          transition: all 0.3s;
+        .sidebar-toggle-btn:hover {
+          background: #e5e7eb;
+          color: #111827;
         }
 
-        .sidebar-conversations {
+        .new-chat-container {
+          padding-bottom: 24px;
+        }
+
+        .new-chat-btn-v2 {
+          width: 100%;
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          padding: 10px 14px;
+          background: #fdfdfd;
+          border: 1px solid #e5e7eb;
+          border-radius: 10px;
+          color: #111827;
+          font-size: 14px;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.2s;
+        }
+
+        .new-chat-btn-v2:hover {
+          background: #f9fafb;
+          border-color: #d1d5db;
+        }
+
+        .shortcut-key {
+          margin-left: auto;
+          font-size: 12px;
+          color: #9ca3af;
+          background: #f3f4f6;
+          padding: 2px 6px;
+          border-radius: 4px;
+          border: 1px solid #e5e7eb;
+        }
+
+        .sidebar-conversations-v2 {
           flex: 1;
           overflow-y: auto;
-          padding: 10px 0;
-          border-bottom: 1px solid #e0e0e0;
-          -webkit-overflow-scrolling: touch;
-          touch-action: pan-y;
+          margin-bottom: 16px;
         }
 
-        .sidebar-conversations-label {
+        .sidebar-section-label {
           font-size: 12px;
           font-weight: 600;
-          color: #999;
-          padding: 10px 12px;
-          text-transform: uppercase;
-          font-family: Georgia, serif;
-        }
-
-        .sidebar-empty {
-          padding: 20px 12px;
-          text-align: center;
-          color: #999;
-          font-size: 13px;
-          font-family: Georgia, serif;
-        }
-
-        .sidebar-conversation {
-          padding: 12px;
-          margin: 4px 8px;
-          border-radius: 6px;
-          cursor: pointer;
-          transition: background 0.2s;
+          color: #6b7280;
+          margin-bottom: 12px;
+          padding: 0 4px;
           display: flex;
-          justify-content: space-between;
           align-items: center;
-          gap: 8px;
+          justify-content: space-between;
+        }
+
+        .sidebar-section-label.retractable {
+          cursor: pointer;
+          user-select: none;
+        }
+
+        .sidebar-section-label.retractable:hover, .section-header-v2.clickable:hover {
+          color: var(--brand-color, #ed0000);
+        }
+
+        .section-header-v2.clickable {
+          cursor: pointer;
+          user-select: none;
+        }
+
+        .sidebar-conversation-v2 {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          padding: 8px 12px;
+          border-radius: 8px;
+          color: #4b5563;
+          font-size: 14px;
+          cursor: pointer;
+          margin-bottom: 4px;
+          transition: all 0.2s;
           position: relative;
         }
 
-        .sidebar-conversation:hover {
-          background: #f5f5f5;
+        .sidebar-conversation-v2:hover {
+          background: #e5e7eb;
         }
 
-        .sidebar-conversation.active {
-          background: #e8e8ff;
-        }
-
-        .sidebar-conversation.pinned {
-          background: #fff5e6;
-          border-left: 3px solid #ed0000;
-        }
-
-        .sidebar-conversation.pinned.active {
-          background: #ffeccc;
-        }
-
-        .sidebar-conversation.pinned:hover {
-          background: #fff9f0;
-        }
-
-        .conv-main {
-          flex: 1;
-          min-width: 0;
-        }
-
-        .conv-title {
-          font-size: 14px;
+        .sidebar-conversation-v2.active {
+          background: #e5e7eb;
+          color: var(--brand-color, #ed0000);
           font-weight: 500;
-          color: #333;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          font-family: Georgia, serif;
-        }
-
-        .pin-icon {
-          font-size: 12px;
-          flex-shrink: 0;
-        }
-
-        .conv-date {
-          font-size: 12px;
-          color: #999;
-          margin-top: 4px;
-          font-family: Georgia, serif;
         }
 
         .conv-menu-btn {
-          flex-shrink: 0;
-          width: 32px;
-          height: 32px;
-          border: none;
+          opacity: 1;
+          margin-left: auto;
           background: transparent;
-          color: #999;
-          font-size: 18px;
+          border: none;
+          color: #6b7280;
           cursor: pointer;
+          padding: 4px;
           border-radius: 4px;
           display: flex;
           align-items: center;
           justify-content: center;
           transition: all 0.2s;
-          opacity: 1;
-          font-weight: bold;
         }
 
-        .sidebar-conversation:hover .conv-menu-btn {
-          background: #f0f0f0;
-          color: #ed0000;
+        .conv-menu-btn:hover {
+          background: #d1d5db;
+          color: var(--brand-color, #ed0000);
         }
 
-        .conv-menu-container:hover .conv-menu-btn {
-          background: #f0f0f0;
-          color: #ed0000;
-        }
-
-        .conv-menu-btn:active {
-          background: #e0e0e0;
-        }
-
-        .conv-menu-container {
-          position: relative;
-          display: flex;
-          align-items: center;
-        }
-
-        .context-menu-dropdown {
+        .conv-dropdown {
           position: absolute;
-          right: 0;
-          top: 100%;
-          margin-top: 4px;
+          right: 8px;
+          top: 36px;
           background: white;
-          border: 1px solid #e0e0e0;
-          border-radius: 6px;
-          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-          min-width: 140px;
-          z-index: 1000;
-          animation: slideDown 0.15s ease-out;
-        }
-
-        @keyframes slideDown {
-          from {
-            opacity: 0;
-            transform: translateY(-4px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-
-        .context-menu-item {
+          border: 1px solid #e5e7eb;
+          border-radius: 8px;
+          box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+          z-index: 100;
           display: flex;
-          align-items: center;
-          gap: 8px;
-          width: 100%;
-          padding: 10px 12px;
+          flex-direction: column;
+          min-width: 120px;
+          overflow: hidden;
+        }
+
+        .conv-dropdown button {
+          padding: 10px 14px;
+          text-align: left;
           border: none;
           background: transparent;
-          text-align: left;
+          font-size: 13px;
+          color: #374151;
           cursor: pointer;
+          transition: all 0.2s;
+        }
+
+        .conv-dropdown button:hover {
+          background: #f3f4f6;
+          color: var(--brand-color, #ed0000);
+        }
+
+        .conv-icon {
+          flex-shrink: 0;
+          color: #9ca3af;
+        }
+
+        .conv-title-v2 {
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        .show-more-btn {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 8px 12px;
+          color: #6b7280;
           font-size: 13px;
-          color: #333;
-          transition: background 0.15s;
-          font-family: Georgia, serif;
+          cursor: pointer;
         }
 
-        .context-menu-item:first-child {
-          border-radius: 6px 6px 0 0;
+        .sidebar-footer-v2 {
+          display: flex;
+          flex-direction: column;
+          gap: 16px;
         }
 
-        .context-menu-item:last-child {
-          border-radius: 0 0 6px 6px;
-        }
-
-        .context-menu-item:hover {
-          background: #f5f5f5;
-        }
-
-        .context-menu-item.delete {
-          color: #d32f2f;
-        }
-
-        .context-menu-item.delete:hover {
-          background: #ffebee;
-        }
-
-        .rename-input {
-          width: 100%;
-          padding: 6px 8px;
-          border: 2px solid #ed0000;
-          border-radius: 4px;
-          font-size: 13px;
-          font-family: Georgia, serif;
-          outline: none;
+        .upgrade-card {
           background: white;
+          border-radius: 12px;
+          padding: 16px;
+          border: 1px solid #e5e7eb;
+          box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
         }
 
-
-        .user-info {
-          margin-bottom: 12px;
-          padding: 0 0 12px 0;
-          border-bottom: 1px solid #e0e0e0;
-        }
-
-        .user-name {
-          font-weight: 600;
-          color: #333;
+        .upgrade-content h3 {
           font-size: 14px;
-          font-family: Georgia, serif;
+          font-weight: 600;
+          margin: 0 0 4px;
         }
 
-        .user-email {
+        .upgrade-content p {
           font-size: 12px;
-          color: #999;
-          font-family: Georgia, serif;
-          margin-top: 2px;
+          color: #6b7280;
+          margin: 0 0 12px;
         }
 
-        .logout-btn {
+        .upgrade-btn {
           width: 100%;
-          padding: 12px 16px;
-          background: linear-gradient(135deg, #d92322 0%, #b81a19 100%);
+          padding: 8px;
+          background: #111827;
+          color: white;
           border: none;
           border-radius: 8px;
+          font-size: 13px;
+          font-weight: 500;
           cursor: pointer;
-          font-size: 14px;
-          font-weight: 600;
-          color: #ffffff;
-          margin-bottom: 12px;
-          transition: all 0.3s ease;
+          transition: background 0.2s;
+        }
+
+        .upgrade-btn:hover {
+          background: #1f2937;
+        }
+
+        .user-profile-v2 {
           display: flex;
           align-items: center;
-          justify-content: center;
-          gap: 8px;
-          box-shadow: 0 2px 4px rgba(217, 35, 34, 0.2);
-        }
-
-        .logout-btn-icon {
-          font-size: 16px;
-          display: flex;
-          align-items: center;
-        }
-
-        .logout-btn:hover {
-          background: linear-gradient(135deg, #a91a19 0%, #8f1615 100%);
-          box-shadow: 0 4px 8px rgba(217, 35, 34, 0.3);
-          transform: translateY(-2px);
-        }
-
-        .logout-btn:active {
-          transform: translateY(0);
-          box-shadow: 0 2px 4px rgba(217, 35, 34, 0.2);
-        }
-
-        .chat-header {
-          padding: 16px;
-          display: flex;
-          align-items: center;
-          border-bottom: 1px solid #e0e0e0;
+          gap: 10px;
+          padding: 8px;
           background: white;
+          border-radius: 10px;
+          border: 1px solid #e5e7eb;
+          cursor: pointer;
         }
 
-        .chat-title {
-          font-size: 18px;
-          font-weight: 600;
-          color: #333;
-          font-family: Georgia, serif;
-        }
-
-        .chat-subtitle {
+        .user-avatar-v2 {
+          width: 28px;
+          height: 28px;
+          background: #111827;
+          color: white;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
           font-size: 12px;
-          color: #999;
-          font-family: Georgia, serif;
+          font-weight: 600;
         }
 
-        .header-user-info {
+        .user-info-v2 {
+          flex: 1;
+          overflow: hidden;
+        }
+
+        .user-email-v2 {
+          font-size: 12px;
+          color: #111827;
+          font-weight: 500;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        /* Main Chat Area */
+        .chat-layout {
+          flex: 1;
           display: flex;
           flex-direction: column;
-          align-items: flex-end;
-          gap: 2px;
+          background: #ffffff;
+          overflow: hidden;
+          position: relative;
         }
 
-        .header-user-name {
-          font-size: 14px;
-          font-weight: 600;
-          color: #333;
-          font-family: Georgia, serif;
+        .chat-header-v2 {
+          height: 64px;
+          padding: 0 24px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          border-bottom: 1px solid #f3f4f6;
+          background: #ffffff;
         }
 
-        .header-user-email {
-          font-size: 12px;
-          color: #999;
-          font-family: Georgia, serif;
+        .header-brand-v2 {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          color: var(--brand-color, #ed0000);
+          cursor: pointer;
         }
 
-        .chat-empty-state {
+        .brand-name-v2 {
+          font-weight: 700;
+          font-size: 18px;
+          letter-spacing: -0.02em;
+        }
+
+        .plan-badge {
+          font-size: 11px;
+          color: #6b7280;
+          margin-left: 4px;
+        }
+
+        .header-actions-v2 {
+          display: flex;
+          gap: 12px;
+        }
+
+        .header-action-btn-v2 {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 8px 14px;
+          border-radius: 8px;
+          border: 1px solid #e5e7eb;
+          background: white;
+          font-size: 13px;
+          font-weight: 500;
+          color: #4b5563;
+          cursor: pointer;
+        }
+
+        .header-action-btn-v2:hover {
+          background: #f9fafb;
+        }
+
+        /* Chat content */
+        .chat-content-v2 {
+          flex: 1;
+          overflow-y: auto;
+          display: flex;
+          flex-direction: column;
+          padding: 24px;
+        }
+
+        .chat-home-v2 {
+          max-width: 800px;
+          margin: 0 auto;
+          width: 100%;
           display: flex;
           flex-direction: column;
           align-items: center;
-          justify-content: center;
-          height: 100%;
+          padding-top: 60px;
           text-align: center;
         }
 
-        .empty-title {
-          font-size: 24px;
+        .home-badge-v2 {
+          background: #f3f4f6;
+          padding: 6px 16px;
+          border-radius: 20px;
+          font-size: 12px;
+          color: #6b7280;
+          margin-bottom: 24px;
+        }
+
+        .home-badge-v2 a {
+          color: #111827;
           font-weight: 600;
-          color: #333;
-          margin: 0 0 12px 0;
-          font-family: Georgia, serif;
+          text-decoration: underline;
         }
 
-        .empty-subtitle {
-          font-size: 14px;
-          color: #999;
+        .home-greeting-wrapper-v2 {
+          text-align: center;
+          margin-bottom: 32px;
+          animation: fadeInDown 0.8s ease-out;
+        }
+
+        .welcome-name-v2 {
+          font-size: 18px;
+          color: #6b7280;
+          font-weight: 500;
+          margin-bottom: 4px;
+        }
+
+        .home-greeting-v2 {
+          font-size: 38px;
+          font-weight: 700;
           margin: 0;
-          max-width: 400px;
-          font-family: Georgia, serif;
+          color: #111827;
+          background: linear-gradient(135deg, #111827 0%, var(--brand-color, #ed0000) 100%);
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
         }
 
-        /* Mobile Responsive Styles */
-        @media (max-width: 768px) {
-          .ufl-root {
-            width: 100%;
-            height: 100dvh;
-            position: relative;
-            overflow: hidden;
-          }
-
-          .hamburger-btn {
-            display: flex;
-          }
-
-          .sidebar {
-            position: fixed;
-            left: 0;
-            top: 0;
-            width: 260px;
-            height: 100dvh;
-            transform: translateX(-100%);
-            transition: transform 0.3s ease;
-            z-index: 1001;
-          }
-
-          .sidebar.sidebar-open {
-            transform: translateX(0);
-          }
-
-          .chat-layout {
-            flex: 1;
-            width: 100%;
-          }
-
-          .chat-header {
-            padding: 12px 16px;
-            display: flex;
-            align-items: center;
-          }
-
-          .chat-title {
-            font-size: 18px;
-            font-family: Georgia, serif;
-          }
-
-          .chat-subtitle {
-            font-size: 12px;
-            font-family: Georgia, serif;
-          }
-
-          .message-row {
-            padding: 10px 16px;
-          }
-
-          .avatar {
-            min-width: 32px;
-          }
-
-          .bubble {
-            max-width: 85%;
-            font-size: 14px;
-          }
-
-          .chat-textarea {
-            min-height: 40px;
-            font-size: 16px;
-          }
+        @keyframes fadeInDown {
+          from { opacity: 0; transform: translateY(-20px); }
+          to { opacity: 1; transform: translateY(0); }
         }
 
-        @media (max-width: 480px) {
-          .chat-header {
-            padding: 10px 12px;
-          }
-
-          .chat-title {
-            font-size: 16px;
-            font-family: Georgia, serif;
-          }
-
-          .chat-subtitle {
-            font-size: 11px;
-            font-family: Georgia, serif;
-          }
-
-          .chat-messages {
-            padding: 8px 0;
-          }
-
-          .message-row {
-            padding: 8px 12px;
-            gap: 8px;
-          }
-
-          .avatar {
-            min-width: 28px;
-            width: 28px;
-            height: 28px;
-          }
-
-          .bubble {
-            max-width: 90%;
-            font-size: 13px;
-            padding: 8px 10px;
-          }
-
-          .chat-input-wrapper {
-            padding: 10px 10px 12px;
-          }
-
-          .chat-textarea {
-            min-height: 36px;
-            font-size: 15px;
-            padding: 8px;
-          }
-
-          .send-btn {
-            padding: 8px 12px;
-            font-size: 12px;
-          }
-
-          .chat-actions-bar {
-            display: flex;
-            gap: 1rem;
-            padding: 1rem;
-            background: linear-gradient(135deg, rgba(237, 0, 0, 0.08) 0%, rgba(237, 0, 0, 0.04) 100%);
-            border-bottom: 1px solid rgba(237, 0, 0, 0.15);
-            flex-wrap: wrap;
-            align-items: center;
-            backdrop-filter: blur(10px);
-          }
-
-          .export-btn {
-            display: flex;
-            align-items: center;
-            gap: 0.6rem;
-            padding: 0.7rem 1.2rem;
-            background: linear-gradient(135deg, #ED0000 0%, #c70000 100%);
-            border: none;
-            color: white;
-            border-radius: 8px;
-            font-size: 0.95rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s cubic-bezier(0.23, 1, 0.320, 1);
-            box-shadow: 0 2px 8px rgba(237, 0, 0, 0.2), 0 1px 3px rgba(0, 0, 0, 0.1);
-            position: relative;
-            overflow: hidden;
-            white-space: nowrap;
-          }
-
-          .export-btn::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: -100%;
-            width: 100%;
-            height: 100%;
-            background: rgba(255, 255, 255, 0.2);
-            transition: left 0.3s ease;
-            z-index: 0;
-          }
-
-          .export-btn:hover::before {
-            left: 100%;
-          }
-
-          .export-btn:hover {
-            background: linear-gradient(135deg, #ff1a1a 0%, #ed0000 100%);
-            transform: translateY(-2px);
-            box-shadow: 0 6px 16px rgba(237, 0, 0, 0.35), 0 2px 6px rgba(0, 0, 0, 0.15);
-          }
-
-          .export-btn:active {
-            transform: translateY(0);
-            box-shadow: 0 1px 4px rgba(237, 0, 0, 0.25), 0 1px 2px rgba(0, 0, 0, 0.1);
-          }
-
-          .export-btn svg {
-            flex-shrink: 0;
-            position: relative;
-            z-index: 1;
-            transition: transform 0.3s ease;
-          }
-
-          .export-btn:hover svg {
-            transform: scale(1.1) rotate(5deg);
-          }
-
-          .export-btn span {
-            position: relative;
-            z-index: 1;
-          }
+        .red-accent {
+          color: var(--brand-color, #ed0000);
         }
-      `}</style>
 
-      {/* Delete Confirmation Modal */}
-      {deleteConfirmOpen && (
-        <div className="delete-modal-backdrop">
-          <div className="delete-modal-card">
-            <h3>Delete Conversation?</h3>
-            <p>Are you sure you want to delete this conversation? This action cannot be undone.</p>
-            <div className="delete-modal-actions">
-              <button
-                className="delete-modal-cancel"
-                onClick={() => {
-                  setDeleteConfirmOpen(false);
-                  setConversationToDelete(null);
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                className="delete-modal-confirm"
-                onClick={confirmDeleteConversation}
-              >
-                Delete
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Logout Confirmation Modal */}
-      {logoutConfirmOpen && (
-        <div className="delete-modal-backdrop">
-          <div className="delete-modal-card">
-            <h3>Confirm Logout</h3>
-            <p>Are you sure you want to logout? You will need to login again to access this application.</p>
-            <div className="delete-modal-actions">
-              <button
-                className="delete-modal-cancel"
-                onClick={() => setLogoutConfirmOpen(false)}
-              >
-                Cancel
-              </button>
-              <button
-                className="delete-modal-confirm"
-                onClick={confirmLogout}
-              >
-                Logout
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Edit Message Modal */}
-      {editModalOpen && (
-        <div className="edit-modal-backdrop">
-          <div className="edit-modal-card">
-            <h3>Edit Message</h3>
-            <textarea
-              className="edit-message-textarea"
-              value={editingContent}
-              onChange={(e) => setEditingContent(e.target.value)}
-              placeholder="Enter your message..."
-            />
-            <div className="edit-modal-actions">
-              <button
-                className="edit-modal-cancel"
-                onClick={() => {
-                  setEditModalOpen(false);
-                  setEditingMessageIndex(null);
-                  setEditingContent("");
-                }}
-                disabled={loading}
-              >
-                Cancel
-              </button>
-              <button
-                className="edit-modal-save"
-                onClick={handleSaveEdit}
-                disabled={loading}
-              >
-                {loading ? "Loading response" : "Save"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-
-      <style>{`
-        .delete-modal-backdrop {
-          position: fixed;
-          top: 0;
-          left: 0;
+        .suggestion-cards-top {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 16px;
           width: 100%;
-          height: 100%;
-          background: rgba(0, 0, 0, 0.5);
+          margin-bottom: 32px;
+        }
+
+        .suggestion-card-v2 {
+          background: #ffffff;
+          border: 1px solid #e5e7eb;
+          border-radius: 16px;
+          padding: 24px;
+          text-align: left;
+          cursor: pointer;
+          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+          box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+          display: flex;
+          align-items: flex-start;
+          gap: 16px;
+        }
+
+        .suggestion-icon-wrapper {
+          background: #fff5f5;
+          width: 44px;
+          height: 44px;
+          border-radius: 12px;
           display: flex;
           align-items: center;
           justify-content: center;
-          z-index: 2000;
+          flex-shrink: 0;
         }
 
-        .delete-modal-card {
-          background: white;
-          border-radius: 12px;
-          padding: 24px;
-          max-width: 400px;
-          width: 90%;
-          box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-          font-family: Georgia, "Times New Roman", serif;
+        .suggestion-card-v2:hover {
+          transform: translateY(-4px);
+          border-color: var(--brand-color, #ed0000);
+          box-shadow: 0 10px 15px -3px rgba(237, 0, 0, 0.1);
+          background: #fffafa;
         }
 
-        .delete-modal-card h3 {
-          margin: 0 0 12px 0;
-          font-size: 18px;
-          color: #333;
+        .suggestion-category {
+          font-size: 11px;
+          font-weight: 700;
+          color: var(--brand-color, #ed0000);
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+          margin-bottom: 8px;
         }
 
-        .delete-modal-card p {
-          margin: 0 0 20px 0;
+        .suggestion-title {
           font-size: 14px;
-          color: #666;
-          line-height: 1.5;
+          font-weight: 600;
+          color: #111827;
+          line-height: 1.4;
         }
 
-        .delete-modal-actions {
+        .main-input-container-v2 {
+          width: 100%;
+          background: #ffffff;
+          border-radius: 20px;
+          padding: 16px;
+          box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+          margin-bottom: 16px;
+          position: relative;
+          z-index: 1;
+        }
+
+        .border-beam-svg {
+          position: absolute;
+          inset: -1px;
+          width: calc(100% + 2px);
+          height: calc(100% + 2px);
+          pointer-events: none;
+          z-index: 0;
+          overflow: visible;
+        }
+
+        .border-beam-rect {
+          fill: none;
+          stroke-width: 2.5;
+          stroke-dasharray: 300 2000;
+          stroke-dashoffset: 0;
+          animation: drawBeam 12s linear infinite;
+          stroke-linecap: round;
+        }
+
+        @keyframes drawBeam {
+          to {
+            stroke-dashoffset: -2300;
+          }
+        }
+
+        .conv-icon-container {
+          position: relative;
+          display: flex;
+          align-items: center;
+          margin-right: 12px;
+          flex-shrink: 0;
+        }
+
+        .pin-indicator-icon-absolute {
+          position: absolute;
+          left: -14px;
+          top: 0;
+          color: var(--brand-color, #ed0000);
+          animation: bounceIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        @keyframes bounceIn {
+          from { opacity: 0; transform: scale(0.3) rotate(-45deg); }
+          to { opacity: 1; transform: scale(1) rotate(0deg); }
+        }
+
+        .pin-active-icon {
+          color: var(--brand-color, #ed0000);
+          margin-left: 8px;
+          flex-shrink: 0;
+        }
+
+        .sidebar-footer-actions {
+          margin-top: auto;
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+          padding-top: 16px;
+          border-top: 1px solid #e5e7eb;
+        }
+
+        .dark-theme .sidebar-footer-actions {
+          border-top-color: #333;
+        }
+
+        .theme-toggle-btn {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          padding: 10px 12px;
+          background: transparent;
+          border: none;
+          color: #4b5563;
+          font-size: 14px;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.2s;
+        }
+
+        .theme-toggle-btn:hover {
+          background: #f3f4f6;
+          border-radius: 10px;
+        }
+
+        /* DARK THEME (Grey/Dark Grey) */
+        .dark-theme.ufl-root {
+          background: #1a1a1a;
+        }
+
+        .dark-theme .sidebar {
+          background: #1a1a1a;
+          border-right-color: #333;
+        }
+
+        .dark-theme .chat-area-v2 {
+          background: #242424;
+        }
+
+        .dark-theme .home-greeting-v2 {
+          color: #f9fafb;
+          background: none;
+          -webkit-text-fill-color: initial;
+        }
+
+        .dark-theme .welcome-name-v2 {
+          color: #9ca3af;
+        }
+
+        .dark-theme .suggestion-card-v2 {
+          background: #2a2a2a;
+          border-color: #3f3f3f;
+        }
+
+        .dark-theme .suggestion-title {
+          color: #e5e7eb;
+        }
+
+        .dark-theme .main-input-container-v2 {
+          background: #2a2a2a;
+          border-color: #3f3f3f;
+          box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+        }
+
+        .dark-theme .main-textarea-v2 {
+          color: #f9fafb;
+        }
+
+        .dark-theme .sidebar-conversation-v2 {
+          color: #9ca3af;
+        }
+
+        .dark-theme .sidebar-conversation-v2:hover {
+          background: #333;
+        }
+
+        .dark-theme .sidebar-conversation-v2.active {
+          background: #333;
+          color: #f9fafb;
+        }
+
+        .dark-theme .logo-text {
+          color: #f9fafb;
+        }
+
+        .dark-theme .new-chat-btn-v2 {
+          background: #333;
+          color: #f9fafb;
+          border-color: #444;
+        }
+
+        .dark-theme .theme-toggle-btn {
+          color: #9ca3af;
+        }
+
+        .dark-theme .sidebar-logout-btn {
+          color: var(--brand-color, #ed0000);
+        }
+
+        .dark-theme .theme-toggle-btn:hover,
+        .dark-theme .sidebar-logout-btn:hover {
+          background: #333;
+        }
+
+        .dark-theme .modal-card-v2 {
+          background: #242424;
+          color: #f9fafb;
+        }
+
+        .dark-theme .modal-header-v2 h3 {
+          color: #ffffff;
+        }
+
+        .dark-theme .modal-header-v2 p {
+          color: #9ca3af;
+        }
+        
+        .dark-theme .chat-header-v2 {
+          background: #1a1a1a;
+          border-bottom-color: #333;
+        }
+
+        .dark-theme .chat-layout {
+          background: #1a1a1a;
+        }
+
+        .dark-theme .home-view-v2 {
+          background: #1a1a1a;
+          color: #f9fafb;
+        }
+
+        .dark-theme .recent-chats-section-v2 {
+          border-top-color: #333;
+        }
+
+        .dark-theme .section-header-v2 {
+          color: #9ca3af;
+        }
+
+        .dark-theme .recent-card-v2 {
+          background: #2a2a2a;
+          border-color: #3f3f3f;
+        }
+
+        .dark-theme .recent-card-title-v2 {
+          color: #e5e7eb;
+        }
+
+        .dark-theme .collaborate-text-v2 {
+          color: #9ca3af;
+        }
+
+        .dark-theme .user-profile-v2 {
+          background: #2a2a2a;
+          border-color: #3f3f3f;
+          color: #f9fafb;
+        }
+
+        .dark-theme .user-email-v2 {
+          color: #9ca3af;
+        }
+
+        .dark-theme .upgrade-card {
+          background: #2a2a2a;
+          border-color: #3f3f3f;
+        }
+
+        .dark-theme .upgrade-content h3 {
+          color: #f9fafb;
+        }
+
+        .dark-theme .upgrade-content p {
+          color: #9ca3af;
+        }
+
+        .dark-theme .upgrade-btn {
+          background: #333;
+          color: #f9fafb;
+        }
+
+        .dark-theme .footer-input-v2 {
+          background: linear-gradient(180deg, transparent 0%, #1a1a1a 40%);
+        }
+
+        .dark-theme .footer-input-container-v2 {
+          background: #2a2a2a;
+          border-color: #3f3f3f;
+        }
+
+        .dark-theme .footer-textarea-v2 {
+          background: transparent;
+          color: #f9fafb;
+        }
+
+        .attached-files-preview {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          margin-bottom: 12px;
+          padding: 8px;
+          border-bottom: 1px solid #f3f4f6;
+        }
+
+        .attached-file-chip {
+          background: #f3f4f6;
+          padding: 4px 10px;
+          border-radius: 8px;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 12px;
+          color: #4b5563;
+        }
+
+        .remove-file-btn {
+          background: transparent;
+          border: none;
+          color: #9ca3af;
+          cursor: pointer;
+          font-size: 14px;
+          line-height: 1;
+          padding: 0;
+        }
+
+        .remove-file-btn:hover {
+          color: var(--brand-color, #ed0000);
+        }
+
+        .input-tool-btn.recording {
+          background: #fee2e2;
+          border-radius: 50%;
+          animation: pulseRecording 1.5s infinite;
+        }
+
+        @keyframes pulseRecording {
+          0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(237, 0, 0, 0.4); }
+          70% { transform: scale(1.05); box-shadow: 0 0 0 10px rgba(237, 0, 0, 0); }
+          100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(237, 0, 0, 0); }
+        }
+
+        .input-toolbar-v2 {
+          display: flex;
+          margin-bottom: 12px;
+        }
+
+        .tool-icons-v2 {
           display: flex;
           gap: 12px;
-          justify-content: flex-end;
+          color: #9ca3af;
         }
 
-        .delete-modal-cancel {
-          padding: 10px 20px;
-          border: 1px solid #d0d0d0;
-          background: white;
-          color: #333;
-          border-radius: 6px;
-          cursor: pointer;
-          font-size: 14px;
-          transition: background 0.2s;
-        }
-
-        .delete-modal-cancel:hover {
-          background: #f5f5f5;
-        }
-
-        .delete-modal-confirm {
-          padding: 10px 20px;
-          border: none;
-          background: #d32f2f;
-          color: white;
-          border-radius: 6px;
-          cursor: pointer;
-          font-size: 14px;
-          transition: background 0.2s;
-        }
-
-        .delete-modal-confirm:hover {
-          background: #b71c1c;
-        }
-
-        .edit-modal-backdrop {
-          position: fixed;
-          top: 0;
-          left: 0;
+        .main-textarea-v2 {
           width: 100%;
-          height: 100%;
-          background: rgba(0, 0, 0, 0.5);
+          border: none;
+          resize: none;
+          outline: none;
+          font-size: 16px;
+          color: #111827;
+          background: transparent;
+          min-height: 80px;
+        }
+
+        .input-footer-v2 {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          margin-top: 12px;
+        }
+
+        .sidebar-logout-btn {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          padding: 10px 12px;
+          background: transparent;
+          border: none;
+          color: var(--brand-color, #ed0000);
+          font-size: 14px;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.2s;
+          margin-bottom: 8px;
+        }
+
+        .sidebar-logout-btn:hover {
+          background: rgba(237, 0, 0, 0.05);
+          border-radius: 10px;
+        }
+
+        .send-btn-v2 {
+          background: #f3f4f6;
+          color: #9ca3af;
+          border: none;
+          width: 36px;
+          height: 36px;
+          border-radius: 50%;
           display: flex;
           align-items: center;
           justify-content: center;
-          z-index: 2000;
+          cursor: pointer;
+          transition: all 0.2s;
         }
 
-        .edit-modal-card {
-          background: white;
-          border-radius: 12px;
-          padding: 24px;
-          max-width: 500px;
-          width: 90%;
-          box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-          font-family: Georgia, "Times New Roman", serif;
+        .send-btn-v2:not(:disabled) {
+          background: var(--brand-color, #ed0000);
+          color: white;
         }
 
-        .edit-modal-card h3 {
-          margin: 0 0 12px 0;
+        .input-tool-btn, .footer-tool-btn {
+          background: transparent;
+          border: none;
+          color: #6b7280;
           font-size: 18px;
-          color: #333;
+          padding: 8px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          border-radius: 8px;
+          transition: all 0.2s;
         }
 
-        .edit-message-textarea {
+        .input-tool-btn:hover, .footer-tool-btn:hover {
+          background: #f3f4f6;
+          color: var(--brand-color, #ed0000);
+        }
+
+        .input-toolbar-icons {
+          display: flex;
+          gap: 4px;
+        }
+
+        .collaborate-text-v2 {
+          font-size: 13px;
+          color: #9ca3af;
+          margin-bottom: 40px;
+        }
+
+        .quick-actions-v2 {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 10px;
+          justify-content: center;
+          margin-bottom: 60px;
+        }
+
+        .quick-action-btn-v2 {
+          padding: 8px 16px;
+          border-radius: 20px;
+          border: 1.5px dashed #e5e7eb;
+          background: white;
+          color: #4b5563;
+          font-size: 13px;
+          font-weight: 500;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          cursor: pointer;
+          transition: all 0.2s;
+        }
+
+        .quick-action-btn-v2:hover {
+          border-color: #d1d5db;
+          background: #f9fafb;
+        }
+
+        .recent-chats-section-v2 {
           width: 100%;
+        }
+
+        .section-header-v2 {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 14px;
+          font-weight: 600;
+          color: #111827;
+          margin-bottom: 20px;
+          cursor: pointer;
+        }
+
+        .recent-cards-v2 {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+          gap: 16px;
+          width: 100%;
+        }
+
+        .recent-card-v2 {
+          background: white;
+          border: 1px solid #e5e7eb;
+          border-radius: 12px;
+          padding: 16px;
+          text-align: left;
+          cursor: pointer;
+          transition: all 0.2s;
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+        }
+
+        .recent-card-v2:hover {
+          border-color: #d1d5db;
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+        }
+
+        .recent-card-title-v2 {
+          font-size: 14px;
+          font-weight: 500;
+          color: #111827;
+          height: 40px;
+          overflow: hidden;
+          display: -webkit-box;
+          -webkit-line-clamp: 2;
+          -webkit-box-orient: vertical;
+        }
+
+        .recent-card-time-v2 {
+          font-size: 12px;
+          color: #9ca3af;
+        }
+
+        /* Message view */
+        .messages-container-v2 {
+          flex: 1;
+          overflow-y: auto;
+          width: 100%;
+          display: flex;
+          flex-direction: column;
+          gap: 24px;
+          padding: 24px;
+          padding-bottom: 220px;
+          scroll-behavior: smooth;
+        }
+
+        .message-row-v2 {
+          display: flex;
+          gap: 12px;
+          max-width: min(75%, 850px);
+          animation: messageIn 0.3s ease-out forwards;
+        }
+
+        .message-row-v2.user {
+          align-self: flex-end;
+          flex-direction: row-reverse;
+        }
+
+        .message-row-v2.assistant {
+          align-self: flex-start;
+        }
+
+        .message-avatar-v2 {
+          width: 32px;
+          height: 32px;
+          border-radius: 8px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 12px;
+          font-weight: 600;
+          flex-shrink: 0;
+          overflow: hidden;
+        }
+        
+        .bot-avatar-img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+        }
+
+        .message-row-v2.user .message-avatar-v2 {
+          background: #111827;
+          color: white;
+        }
+
+        .message-row-v2.assistant .message-avatar-v2 {
+          background: #f3f4f6;
+        }
+
+        .message-bubble-v2 {
+          padding: 12px 16px;
+          border-radius: 12px;
+          font-size: 15px;
+          line-height: 1.5;
+          position: relative;
+          box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+        }
+
+        .message-row-v2.user .message-bubble-v2 {
+          background: var(--brand-color, #ed0000);
+          color: white;
+          border-bottom-right-radius: 2px;
+        }
+
+        .message-row-v2.assistant .message-bubble-v2 {
+          background: #ffffff;
+          border: 1px solid #e5e7eb;
+          color: #111827;
+          border-bottom-left-radius: 2px;
+        }
+
+        .message-bubble-v2 p {
+          margin: 0 0 8px;
+        }
+
+        .message-bubble-v2 p:last-child {
+          margin-bottom: 0;
+        }
+
+        /* Dark Mode */
+        .dark-theme .message-row-v2.assistant .message-bubble-v2 {
+          background: #2a2a2a;
+          border-color: #3f3f3f;
+          color: #e5e7eb;
+        }
+
+        .dark-theme .message-row-v2.assistant .message-avatar-v2 {
+          background: #333;
+        }
+
+        .typing-v2 {
+          display: flex;
+          gap: 4px;
+          padding: 8px 0;
+        }
+
+        .dot-v2 {
+          width: 6px;
+          height: 6px;
+          background: #9ca3af;
+          border-radius: 50%;
+          animation: dot-loading 1.4s infinite;
+        }
+
+        @keyframes dot-loading {
+          0%, 100% { transform: scale(1); opacity: 0.3; }
+          50% { transform: scale(1.2); opacity: 1; }
+        }
+
+        .footer-input-v2 {
+          position: absolute;
+          bottom: 0;
+          left: 0;
+          right: 0;
+          padding: 24px;
+          background: linear-gradient(180deg, transparent 0%, white 40%);
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          z-index: 10;
+        }
+
+        .footer-input-container-v2 {
+          width: 100%;
+          max-width: 800px;
+          background: white;
+          border: 2px solid #e5e7eb;
+          border-radius: 24px;
+          padding: 8px 16px;
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
+          transition: all 0.2s;
+        }
+
+        .footer-input-container-v2:focus-within {
+          border-color: var(--brand-color, #ed0000);
+          box-shadow: 0 0 0 4px rgba(237, 0, 0, 0.05);
+        }
+
+        .footer-textarea-v2 {
+          flex: 1;
+          border: none;
+          resize: none;
+          outline: none;
+          padding: 8px 0;
+          font-size: 15px;
+          max-height: 200px;
+        }
+
+        .footer-send-btn-v2 {
+          background: var(--brand-color, #ed0000);
+          color: white;
+          border: none;
+          width: 32px;
+          height: 32px;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+        }
+
+        .footer-disclaimer-v2 {
+          font-size: 11px;
+          color: #9ca3af;
+          margin-top: 12px;
+        }
+
+        /* Sidebar toggle from header */
+        .sidebar-toggle-btn-header {
+          background: transparent;
+          border: none;
+          color: #6b7280;
+          cursor: pointer;
+          margin-right: 12px;
+        }
+
+        /* Modal V2 */
+        .modal-overlay-v2 {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: rgba(0, 0, 0, 0.4);
+          backdrop-filter: blur(4px);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 1000;
+          padding: 20px;
+          animation: modalFadeIn 0.2s ease-out;
+        }
+
+        .modal-card-v2 {
+          background: white;
+          border-radius: 20px;
+          padding: 32px;
+          width: 100%;
+          max-width: 440px;
+          box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.15);
+          animation: modalSlideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .modal-card-v2 h3 {
+          font-size: 20px;
+          font-weight: 700;
+          margin: 0 0 12px;
+          color: #111827;
+        }
+
+        .modal-card-v2 p {
+          font-size: 15px;
+          color: #6b7280;
+          line-height: 1.5;
+          margin-bottom: 24px;
+        }
+
+        .modal-footer-v2 {
+          display: flex;
+          justify-content: flex-end;
+          gap: 12px;
+        }
+
+        .modal-btn-v2 {
+          padding: 10px 20px;
+          border-radius: 10px;
+          font-size: 14px;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.2s;
+          border: none;
+        }
+
+        .modal-btn-v2.primary {
+          background: #111827;
+          color: white;
+        }
+
+        .modal-btn-v2.primary.danger {
+          background: var(--brand-color, #ed0000);
+        }
+
+        .modal-btn-v2.secondary {
+          background: #f3f4f6;
+          color: #4b5563;
+        }
+
+        .modal-btn-v2:hover {
+          opacity: 0.9;
+          transform: translateY(-1px);
+        }
+
+        .modal-textarea-v2 {
+          width: 100%;
+          min-height: 120px;
+          border: 1px solid #e5e7eb;
+          border-radius: 12px;
           padding: 12px;
-          border: 1px solid #d0d0d0;
-          border-radius: 6px;
-          font-family: Georgia, "Times New Roman", serif;
+          margin-bottom: 20px;
+          font-family: inherit;
           font-size: 14px;
           resize: vertical;
-          min-height: 120px;
-          max-height: 300px;
-          margin-bottom: 16px;
-          color: #333;
-          line-height: 1.5;
-        }
-
-        .edit-message-textarea:focus {
           outline: none;
-          border-color: #22c55e;
-          box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.1);
         }
 
-        .edit-modal-actions {
-          display: flex;
-          gap: 12px;
-          justify-content: flex-end;
+        .modal-textarea-v2:focus {
+          border-color: var(--brand-color, #ed0000);
+          box-shadow: 0 0 0 2px rgba(237, 0, 0, 0.1);
         }
 
-        .edit-modal-cancel {
-          padding: 10px 20px;
-          border: 1px solid #d0d0d0;
-          background: white;
-          color: #333;
-          border-radius: 6px;
-          cursor: pointer;
-          font-size: 14px;
-          transition: background 0.2s;
+        @keyframes modalFadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
         }
 
-        .edit-modal-cancel:hover {
-          background: #f5f5f5;
+        @keyframes modalSlideUp {
+          from { transform: translateY(20px); opacity: 0; }
+          to { transform: translateY(0); opacity: 1; }
         }
 
-        .edit-modal-save {
-          padding: 10px 20px;
-          border: none;
-          background: #22c55e;
-          color: white;
-          border-radius: 6px;
-          cursor: pointer;
-          font-size: 14px;
-          transition: background 0.2s;
-        }
-
-        .edit-modal-save:hover {
-          background: #16a34a;
+        @media (max-width: 768px) {
+          .sidebar-toggle-btn-header {
+            display: flex;
+          }
+          .header-actions-v2 {
+            display: none;
+          }
+          .home-greeting-v2 {
+            font-size: 24px;
+          }
+          .recent-cards-v2 {
+            grid-template-columns: 1fr;
+          }
         }
       `}</style>
       </div>

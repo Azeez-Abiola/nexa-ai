@@ -4,7 +4,7 @@ import { BsInfoCircle } from "react-icons/bs";
 import axios from "axios";
 
 import classes from "./chatbot.module.css";
-import logo from "/logo.png";
+import logo from "/1879-22.png";
 import Conditional from "../components/Conditional";
 import ChatBotInput from "./ChatBotInput";
 import { UacnMessage, UserMessage } from "./ChatMessage";

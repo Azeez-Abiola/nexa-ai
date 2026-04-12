@@ -75,7 +75,7 @@ export const AcceptInvite: React.FC = () => {
     <div style={styles.page}>
       <div style={styles.card}>
         <div style={styles.header}>
-          <img src="/logo.png" alt="Nexa AI" style={styles.logo} />
+          <img src="/1879-22.png" alt="Nexa AI" style={styles.logo} />
           <h1 style={styles.title}>Nexa AI Admin Setup</h1>
         </div>
 

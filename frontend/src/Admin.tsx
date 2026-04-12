@@ -461,7 +461,7 @@ export const Admin: React.FC = () => {
       <header className={styles.dashboardHeader}>
         <div className={styles.headerLeft}>
           <img
-            src="/logo.png"
+            src="/1879-22.png"
             alt="Nexa AI Logo"
             className={styles.headerLogo}
           />

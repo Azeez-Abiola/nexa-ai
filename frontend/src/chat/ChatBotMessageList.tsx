@@ -31,7 +31,10 @@ export const ChatBotMessageList: React.FC<ChatBotMessageListProps> = ({
   if (messages.length === 0) {
     return (
       <div className={styles.emptyState}>
-        <h2>Welcome to Nexa AI</h2>
+        <div className="flex items-center justify-center gap-3 mb-4">
+          <img src="/1879-22.png" alt="1879 Logo" className="w-10 h-10 object-contain" />
+          <h2 className="m-0">Welcome to Nexa AI</h2>
+        </div>
         <p>Ask me about company documents, policies, procedures, and guidelines.</p>
         <div className={styles.suggestedQuestions}>
           <p className={styles.suggestedLabel}>Try asking about:</p>

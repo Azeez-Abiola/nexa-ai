@@ -29,11 +29,19 @@ export async function sendVerificationEmail(
   email: string,
   otp: string,
   fullName: string,
-  businessUnit: string
+  businessUnit: string,
+  brandColor?: string
 ): Promise<void> {
+  const color = brandColor || '#ed0000';
   try {
-    const html = await renderTemplate("verification", { fullName, otp, businessUnit });
-    await sendEmail(email, `Your [${businessUnit}] GPT Email Verification Code`, html);
+    const html = await renderTemplate("verification", {
+      fullName,
+      otp,
+      businessUnit,
+      brandColor: color,
+      year: new Date().getFullYear()
+    });
+    await sendEmail(email, `${businessUnit} — Verify Your Nexa AI Account`, html);
     console.log(`Verification OTP sent to ${email}`);
   } catch (error) {
     console.error("Error sending verification email:", error);
@@ -113,14 +121,60 @@ export async function sendDocumentAddedNotification(
 /**
  * Send welcome email after successful email verification
  */
-export async function sendWelcomeEmail(email: string, fullName: string): Promise<void> {
-  const dashboardUrl = `${FRONTEND_URL}/dashboard`;
+export async function sendWelcomeEmail(
+  email: string,
+  fullName: string,
+  businessUnit: string,
+  tenantInfo?: { label?: string; logo?: string; colorCode?: string; slug?: string }
+): Promise<void> {
+  const chatUrl = `${FRONTEND_URL}/user-chat`;
+  const brandColor = tenantInfo?.colorCode || '#ed0000';
+  const buLabel = tenantInfo?.label || businessUnit;
+  const logoUrl = tenantInfo?.logo
+    ? (tenantInfo.logo.startsWith('http') ? tenantInfo.logo : `${FRONTEND_URL}/logos/${tenantInfo.logo.replace(/^\/logos\//, '')}`)
+    : undefined;
   try {
-    const html = await renderTemplate("welcome", { fullName, dashboardUrl });
-    await sendEmail(email, "Welcome to Nexa AI - Your Account is Active!", html);
+    const html = await renderTemplate("welcome", {
+      fullName,
+      chatUrl,
+      businessUnit,
+      buLabel,
+      brandColor,
+      logoUrl,
+      year: new Date().getFullYear()
+    });
+    await sendEmail(email, `Welcome to ${buLabel} on Nexa AI — Your Account is Active!`, html);
     console.log(`Welcome email sent to ${email}`);
   } catch (error) {
     console.error("Error sending welcome email:", error);
+    throw error;
+  }
+}
+/**
+ * Send welcome email with auto-generated credentials to new BU admin
+ */
+export async function sendTenantCredentialsEmail(
+  email: string,
+  fullName: string,
+  businessUnit: string,
+  slug: string,
+  password: string
+): Promise<void> {
+  const loginUrl = `${FRONTEND_URL}/login`;
+  const subdomain = `${slug}.nexa.ai`;
+  try {
+    const html = await renderTemplate("tenant-credentials", { 
+      fullName, 
+      businessUnit, 
+      subdomain, 
+      loginUrl, 
+      email, 
+      password 
+    });
+    await sendEmail(email, `Welcome to Nexa AI - Your ${businessUnit} Admin Account`, html);
+    console.log(`Tenant credentials email sent to ${email}`);
+  } catch (error) {
+    console.error("Error sending tenant credentials email:", error);
     throw error;
   }
 }

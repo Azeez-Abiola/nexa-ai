@@ -3,58 +3,188 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Welcome to Nexa AI</title>
+  <title>Welcome to <%= buLabel %> on Nexa AI</title>
 </head>
-<body style="margin:0;padding:0;background:#f0f0f0;font-family:Arial,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f0f0;padding:32px 0;">
+<body style="margin:0;padding:0;background:#f4f4f5;font-family:'Helvetica Neue',Arial,sans-serif;-webkit-font-smoothing:antialiased;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;padding:40px 16px;">
     <tr>
       <td align="center">
-        <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;border-radius:8px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.08);">
+        <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.06);">
 
-          <!-- Header -->
+          <!-- Header with brand color -->
           <tr>
-            <td style="background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);padding:40px 20px;text-align:center;">
-              <h1 style="color:#ffffff;margin:0;font-size:26px;font-weight:700;">Welcome to Nexa AI!</h1>
+            <td style="background:<%= brandColor %>;padding:48px 40px 40px;text-align:center;">
+              <% if (logoUrl) { %>
+                <img src="<%= logoUrl %>" alt="<%= buLabel %>" width="64" height="64" style="display:block;margin:0 auto 20px;border-radius:14px;background:#ffffff;padding:8px;object-fit:contain;" />
+              <% } else { %>
+                <div style="width:64px;height:64px;margin:0 auto 20px;border-radius:14px;background:rgba(255,255,255,0.2);display:flex;align-items:center;justify-content:center;">
+                  <img src="http://localhost:4000/1879-22.png" alt="Nexa" width="40" style="display:block;filter:brightness(0) invert(1);" />
+                </div>
+              <% } %>
+              <h1 style="color:#ffffff;margin:0 0 8px;font-size:28px;font-weight:800;letter-spacing:-0.5px;">Welcome to Nexa AI</h1>
+              <p style="color:rgba(255,255,255,0.85);margin:0;font-size:15px;font-weight:500;">Your <strong><%= buLabel %></strong> account is ready</p>
             </td>
           </tr>
 
-          <!-- Body -->
+          <!-- Main body -->
           <tr>
-            <td style="background:#f9f9f9;padding:40px 32px;">
-              <p style="color:#333;font-size:16px;margin:0 0 12px;">Hi <%= fullName %>,</p>
-              <p style="color:#555;font-size:15px;line-height:1.6;margin:0 0 20px;">
-                Your email has been verified successfully! Your account is now active and ready to use.
+            <td style="background:#ffffff;padding:44px 40px 36px;">
+              <p style="color:#18181b;font-size:18px;font-weight:700;margin:0 0 8px;">Hi <%= fullName %>,</p>
+              <p style="color:#52525b;font-size:15px;line-height:1.7;margin:0 0 28px;">
+                Your email has been verified and your account is now fully active. Welcome aboard! As a member of <strong style="color:#18181b;"><%= buLabel %></strong>, you now have access to an AI-powered assistant that's been trained specifically on your organization's knowledge base.
               </p>
 
-              <p style="color:#555;font-size:15px;margin:0 0 10px;">You can now:</p>
-              <ul style="color:#555;font-size:15px;line-height:1.9;margin:0 0 28px;padding-left:20px;">
-                <li>Chat with the AI assistant</li>
-                <li>Access company policies and knowledge base</li>
-                <li>Get instant answers to your questions</li>
-              </ul>
+              <!-- Feature cards -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 32px;">
+                <!-- Feature 1 -->
+                <tr>
+                  <td style="padding:0 0 12px;">
+                    <table width="100%" cellpadding="0" cellspacing="0" style="background:#fafafa;border-radius:12px;border:1px solid #f0f0f0;">
+                      <tr>
+                        <td width="56" style="padding:16px 0 16px 16px;vertical-align:top;">
+                          <div style="width:40px;height:40px;border-radius:10px;background:<%= brandColor %>15;text-align:center;line-height:40px;font-size:18px;">💬</div>
+                        </td>
+                        <td style="padding:16px 16px 16px 12px;">
+                          <p style="color:#18181b;font-size:14px;font-weight:700;margin:0 0 4px;">AI-Powered Chat</p>
+                          <p style="color:#71717a;font-size:13px;line-height:1.5;margin:0;">Ask questions about company policies, procedures, and documents — get instant, accurate answers tailored to <%= buLabel %>.</p>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+                <!-- Feature 2 -->
+                <tr>
+                  <td style="padding:0 0 12px;">
+                    <table width="100%" cellpadding="0" cellspacing="0" style="background:#fafafa;border-radius:12px;border:1px solid #f0f0f0;">
+                      <tr>
+                        <td width="56" style="padding:16px 0 16px 16px;vertical-align:top;">
+                          <div style="width:40px;height:40px;border-radius:10px;background:<%= brandColor %>15;text-align:center;line-height:40px;font-size:18px;">📚</div>
+                        </td>
+                        <td style="padding:16px 16px 16px 12px;">
+                          <p style="color:#18181b;font-size:14px;font-weight:700;margin:0 0 4px;">Knowledge Base Access</p>
+                          <p style="color:#71717a;font-size:13px;line-height:1.5;margin:0;">Browse your organization's uploaded documents, SOPs, and training materials directly through the chat interface.</p>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+                <!-- Feature 3 -->
+                <tr>
+                  <td style="padding:0;">
+                    <table width="100%" cellpadding="0" cellspacing="0" style="background:#fafafa;border-radius:12px;border:1px solid #f0f0f0;">
+                      <tr>
+                        <td width="56" style="padding:16px 0 16px 16px;vertical-align:top;">
+                          <div style="width:40px;height:40px;border-radius:10px;background:<%= brandColor %>15;text-align:center;line-height:40px;font-size:18px;">🔒</div>
+                        </td>
+                        <td style="padding:16px 16px 16px 12px;">
+                          <p style="color:#18181b;font-size:14px;font-weight:700;margin:0 0 4px;">Private & Secure</p>
+                          <p style="color:#71717a;font-size:13px;line-height:1.5;margin:0;">Your conversations are private and secured. Data is scoped to your business unit so you only access what you're authorized to see.</p>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
 
-              <!-- CTA -->
+              <!-- Getting started section -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="background:#18181b;border-radius:14px;margin:0 0 32px;">
+                <tr>
+                  <td style="padding:28px 28px 12px;">
+                    <p style="color:#ffffff;font-size:15px;font-weight:700;margin:0 0 16px;">Quick Start Guide</p>
+                    <table width="100%" cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td style="padding:0 0 14px;">
+                          <table cellpadding="0" cellspacing="0">
+                            <tr>
+                              <td width="28" style="vertical-align:top;">
+                                <div style="width:22px;height:22px;border-radius:50%;background:<%= brandColor %>;color:#fff;text-align:center;line-height:22px;font-size:11px;font-weight:700;">1</div>
+                              </td>
+                              <td style="padding-left:10px;">
+                                <p style="color:#e4e4e7;font-size:13px;margin:0;line-height:1.5;">Sign in at <a href="<%= chatUrl %>" style="color:<%= brandColor %>;text-decoration:none;font-weight:600;">nexa.ai</a> with your verified email</p>
+                              </td>
+                            </tr>
+                          </table>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding:0 0 14px;">
+                          <table cellpadding="0" cellspacing="0">
+                            <tr>
+                              <td width="28" style="vertical-align:top;">
+                                <div style="width:22px;height:22px;border-radius:50%;background:<%= brandColor %>;color:#fff;text-align:center;line-height:22px;font-size:11px;font-weight:700;">2</div>
+                              </td>
+                              <td style="padding-left:10px;">
+                                <p style="color:#e4e4e7;font-size:13px;margin:0;line-height:1.5;">Start a new conversation and ask anything about your role or company</p>
+                              </td>
+                            </tr>
+                          </table>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding:0 0 8px;">
+                          <table cellpadding="0" cellspacing="0">
+                            <tr>
+                              <td width="28" style="vertical-align:top;">
+                                <div style="width:22px;height:22px;border-radius:50%;background:<%= brandColor %>;color:#fff;text-align:center;line-height:22px;font-size:11px;font-weight:700;">3</div>
+                              </td>
+                              <td style="padding-left:10px;">
+                                <p style="color:#e4e4e7;font-size:13px;margin:0;line-height:1.5;">Get instant AI-generated answers sourced from your organization's documents</p>
+                              </td>
+                            </tr>
+                          </table>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- CTA Button -->
               <table width="100%" cellpadding="0" cellspacing="0">
                 <tr>
-                  <td align="center" style="padding:8px 0 24px;">
-                    <a href="<%= dashboardUrl %>"
-                       style="display:inline-block;background:#667eea;color:#ffffff;padding:14px 36px;text-decoration:none;border-radius:6px;font-size:15px;font-weight:700;">
-                      Go to Dashboard
+                  <td align="center" style="padding:0 0 32px;">
+                    <a href="<%= chatUrl %>"
+                       style="display:inline-block;background:<%= brandColor %>;color:#ffffff;padding:16px 48px;text-decoration:none;border-radius:12px;font-size:15px;font-weight:700;letter-spacing:-0.2px;box-shadow:0 4px 14px rgba(0,0,0,0.12);">
+                      Start Chatting with Nexa
                     </a>
                   </td>
                 </tr>
               </table>
 
-              <p style="color:#999;font-size:12px;margin:0;">
-                If you have any questions, please reach out to your administrator.
-              </p>
+              <!-- Help line -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #f0f0f0;padding-top:20px;">
+                <tr>
+                  <td style="padding-top:20px;">
+                    <p style="color:#a1a1aa;font-size:13px;line-height:1.6;margin:0;text-align:center;">
+                      Need help? Reach out to your <strong><%= buLabel %></strong> administrator or reply to this email.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Business unit strip -->
+          <tr>
+            <td style="background:<%= brandColor %>;padding:14px 40px;">
+              <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td>
+                    <p style="color:rgba(255,255,255,0.9);font-size:11px;font-weight:700;margin:0;text-transform:uppercase;letter-spacing:0.08em;"><%= buLabel %> — POWERED BY NEXA AI</p>
+                  </td>
+                  <td align="right">
+                    <p style="color:rgba(255,255,255,0.6);font-size:11px;font-weight:600;margin:0;">BUSINESS UNIT</p>
+                  </td>
+                </tr>
+              </table>
             </td>
           </tr>
 
           <!-- Footer -->
           <tr>
-            <td style="background:#f0f0f0;padding:20px;text-align:center;">
-              <p style="color:#aaa;font-size:12px;margin:0;">&copy; <%= new Date().getFullYear() %> Nexa AI. All rights reserved.</p>
+            <td style="background:#fafafa;padding:28px 40px;text-align:center;border-top:1px solid #f0f0f0;">
+              <p style="color:#a1a1aa;font-size:11px;margin:0 0 8px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;">&copy; <%= year %> Nexa AI. All rights reserved.</p>
+              <p style="color:#d4d4d8;font-size:10px;margin:0;font-weight:700;">POWERED BY 1879 TECHHUB</p>
             </td>
           </tr>
 

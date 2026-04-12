@@ -5,7 +5,10 @@ import logger from "../utils/logger";
 export interface AuditPayload {
   userId?: string;
   adminId?: string;
+  adminEmail?: string;
   businessUnit: string;
+  action: string;
+  details: string;
   documentId?: string;
   metadata?: Record<string, any>;
 }
@@ -25,7 +28,10 @@ export function logEvent(eventType: AuditEventType, payload: AuditPayload): void
       eventType,
       userId: payload.userId || null,
       adminId: payload.adminId || null,
+      adminEmail: payload.adminEmail || null,
       businessUnit: payload.businessUnit,
+      action: payload.action,
+      details: payload.details,
       documentId: payload.documentId || null,
       metadata: payload.metadata || {}
     });
@@ -41,6 +47,8 @@ export function logRAGQuery(
   logEvent("rag_query", {
     userId,
     businessUnit,
+    action: "Knowledge Query",
+    details: `User queried: "${query.substring(0, 50)}..."`,
     metadata: {
       query: query.substring(0, 200),
       chunksRetrieved: result.chunks.length,
@@ -52,7 +60,13 @@ export function logRAGQuery(
   });
 
   if (result.chunks.length === 0) {
-    logEvent("rag_retrieval_empty", { userId, businessUnit, metadata: { query: query.substring(0, 200) } });
+    logEvent("rag_retrieval_empty", { 
+      userId, 
+      businessUnit, 
+      action: "Empty Retrieval",
+      details: `No relevant chunks found for query: "${query.substring(0, 50)}..."`,
+      metadata: { query: query.substring(0, 200) } 
+    });
   }
 }
 
@@ -60,24 +74,46 @@ export function logDocumentUpload(
   adminId: string,
   businessUnit: string,
   documentId: string,
-  meta: { filename: string; fileSize: number; mimeType: string; cloudinaryPublicId: string }
+  meta: { filename: string; fileSize: number; mimeType: string; cloudinaryPublicId: string },
+  adminEmail?: string
 ): void {
   logEvent("document_upload_completed", {
     adminId,
+    adminEmail,
     businessUnit,
     documentId,
+    action: "Document Uploaded",
+    details: `Uploaded file: ${meta.filename} (${(meta.fileSize / 1024).toFixed(1)} KB)`,
     metadata: meta
   });
 }
 
 export function logProcessingStarted(documentId: string, businessUnit: string, jobId: string): void {
-  logEvent("document_processing_started", { businessUnit, documentId, metadata: { jobId } });
+  logEvent("document_processing_started", { 
+    businessUnit, 
+    documentId, 
+    action: "Processing Started",
+    details: `Background processing job ${jobId} initialized`,
+    metadata: { jobId } 
+  });
 }
 
 export function logProcessingCompleted(documentId: string, businessUnit: string, totalChunks: number): void {
-  logEvent("document_processing_completed", { businessUnit, documentId, metadata: { totalChunks } });
+  logEvent("document_processing_completed", { 
+    businessUnit, 
+    documentId, 
+    action: "Processing Success",
+    details: `Document segmented into ${totalChunks} neural chunks`,
+    metadata: { totalChunks } 
+  });
 }
 
 export function logProcessingFailed(documentId: string, businessUnit: string, error: string, jobId?: string): void {
-  logEvent("document_processing_failed", { businessUnit, documentId, metadata: { error, jobId } });
+  logEvent("document_processing_failed", { 
+    businessUnit, 
+    documentId, 
+    action: "Processing Failed",
+    details: `Error during embedding: ${error}`,
+    metadata: { error, jobId } 
+  });
 }

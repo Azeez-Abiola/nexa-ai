@@ -13,7 +13,49 @@ import {
 import { streamAIResponse } from "../services/openaiService";
 import { buildContextForQuery } from "../utils/contextBuilder";
 
+import { Policy } from "../models/Policy";
+import logger from "../utils/logger";
+
 export const chatRouter = express.Router();
+
+chatRouter.get("/suggestions", async (req, res) => {
+  try {
+    const { businessUnit } = req.query;
+    if (!businessUnit) {
+      return res.status(400).json({ error: "businessUnit is required" });
+    }
+
+    // Fetch up to 4 policies for the business unit
+    const policies = await Policy.find({ businessUnit: businessUnit as string })
+      .sort({ createdAt: -1 })
+      .limit(4)
+      .select("title category")
+      .lean();
+
+    const suggestions = policies.map(p => ({
+      title: p.title,
+      category: p.category,
+      prompt: `Tell me about ${p.title}`
+    }));
+
+    // If no policies found, return some defaults
+    if (suggestions.length === 0) {
+      const defaults = [
+        { title: "Work Hours", category: "Policy", prompt: "What are the standard work hours?" },
+        { title: "Leave Policy", category: "HR", prompt: "How do I apply for leave?" },
+        { title: "Code of Conduct", category: "Compliance", prompt: "What is the company code of conduct?" },
+        { title: "Benefits", category: "HR", prompt: "What are my employee benefits?" }
+      ];
+      return res.json({ suggestions: defaults });
+    }
+
+    res.json({ suggestions });
+  } catch (error) {
+    console.error("Get suggestions error stack:", error);
+    logger.error("Get suggestions error", { error });
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
 
 interface ChatMessage {
   role: "user" | "assistant" | "system";

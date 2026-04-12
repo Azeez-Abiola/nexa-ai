@@ -1,6 +1,6 @@
 import mongoose, { Schema, Document } from "mongoose";
 
-export type BusinessUnit = "GCL" | "LSF" | "CAP" | "UFL" | "CHI" | "UAC-Restaurants" | "UPDC" | "UACN" | "SUPERADMIN";
+export type BusinessUnit = string;
 
 export interface AdminUserDocument extends Document {
   email: string;
@@ -12,6 +12,7 @@ export interface AdminUserDocument extends Document {
   emailVerificationOTPExpiry?: Date;
   resetToken?: string;
   resetTokenExpiry?: Date;
+  isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -22,11 +23,12 @@ const AdminUserSchema = new Schema<AdminUserDocument>(
     fullName: { type: String, required: true },
     businessUnit: { 
       type: String, 
-      enum: ["GCL", "LSF", "CAP", "UFL", "CHI", "UAC-Restaurants", "UPDC", "UACN", "SUPERADMIN"],
-      required: true 
+      required: true,
+      index: true
     },
     password: { type: String, required: true },
     emailVerified: { type: Boolean, default: false },
+    isActive: { type: Boolean, default: true },
     emailVerificationOTP: { type: String, default: null },
     emailVerificationOTPExpiry: { type: Date, default: null },
     resetToken: { type: String, default: null },
