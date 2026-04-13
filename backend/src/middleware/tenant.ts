@@ -33,8 +33,11 @@ export const tenantMiddleware = async (
 
     const slug = parts[0].toLowerCase();
 
-    // Skip non-tenant subdomains
+    // Skip non-tenant subdomains and hosting platform domains
     if (["www", "api", "mail", "super-admin"].includes(slug)) {
+      return next();
+    }
+    if (host.endsWith(".railway.app") || host.endsWith(".vercel.app") || host.endsWith(".up.railway.app")) {
       return next();
     }
 
