@@ -148,7 +148,7 @@ const SuperAdminMain: React.FC<SuperAdminMainProps> = ({ theme, toggleTheme }) =
           )}>
             {user?.tenantLogo ? (
               <img
-                src={user.tenantLogo.startsWith('http') ? user.tenantLogo : `/logos/${user.tenantLogo.replace(/^\/logos\//, '')}`}
+                src={user.tenantLogo.startsWith('http') ? user.tenantLogo : `${import.meta.env.VITE_API_URL || ''}/logos/${user.tenantLogo.replace(/^\/logos\//, '')}`}
                 alt="Tenant Logo"
                 className="w-full h-full object-contain"
                 onError={(e) => {

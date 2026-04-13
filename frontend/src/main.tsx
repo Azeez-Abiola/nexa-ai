@@ -1,8 +1,11 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
+import axios from "axios";
 import { App } from "./App";
 import "./styles.css";
+
+axios.defaults.baseURL = import.meta.env.VITE_API_URL || "";
 
 // Prevent all drag and pan interactions
 document.addEventListener("dragstart", (e) => e.preventDefault(), false);
