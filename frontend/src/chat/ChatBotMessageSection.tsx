@@ -100,11 +100,7 @@ const ChatBotMessageSection = () => {
         // Save last chat message for home screen
         localStorage.setItem("ufl_last_chat_message", message);
 
-        // Determine the backend URL dynamically
-        const getBackendUrl = () => {
-          const isDev = typeof window !== 'undefined' && window.location.hostname === '0.0.0.0';
-          return isDev ? '' : '/nexa-ai';
-        };
+        const getBackendUrl = () => import.meta.env.VITE_API_URL || '';
 
         // Create assistant message placeholder for streaming
         const assistantMessageId = crypto.randomUUID?.() ?? String(Date.now());

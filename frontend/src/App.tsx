@@ -543,8 +543,9 @@ export const App: React.FC = () => {
 
   // Helper function to stream AI response
   const streamResponse = async (conversationId: string, userContent: string): Promise<Conversation | null> => {
+    const apiBase = import.meta.env.VITE_API_URL || '';
     const response = await fetch(
-      `/api/v1/conversations/${conversationId}/message-stream`,
+      `${apiBase}/api/v1/conversations/${conversationId}/message-stream`,
       {
         method: "POST",
         headers: {
@@ -1143,11 +1144,11 @@ export const App: React.FC = () => {
               <div className="messages-container-v2" ref={messagesContainerRef}>
                 {currentConversation?.messages.map((m, idx) => (
                   <div key={idx} className={`message-row-v2 ${m.role}`}>
-                    <div className="message-avatar-v2">
-                      {m.role === 'assistant' ? (
+                    {m.role === 'assistant' && (
+                      <div className="message-avatar-v2">
                         <img src="/avatar-1.png" alt="Nexa" className="bot-avatar-img" />
-                      ) : null}
-                    </div>
+                      </div>
+                    )}
                     <div className="message-bubble-v2">
                       {m.content.split("\n").map((line, lIdx) => (
                         <p key={lIdx}>{parseMarkdown(line)}</p>
