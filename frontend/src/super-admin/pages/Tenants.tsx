@@ -12,7 +12,8 @@ import {
   Loader2,
   UploadCloud,
   Globe,
-  Download
+  Download,
+  Pencil
 } from 'lucide-react';
 import { useToast } from "@/lib/use-toast";
 import {
@@ -53,6 +54,7 @@ const Tenants: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [editingTenant, setEditingTenant] = useState<any | null>(null);
   const [confirmModal, setConfirmModal] = useState<{ open: boolean; tenant: any | null }>({ open: false, tenant: null });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -137,7 +139,7 @@ const Tenants: React.FC = () => {
             Export CSV
           </button>
           <Button
-            onClick={() => setIsDrawerOpen(true)}
+            onClick={() => { setEditingTenant(null); setIsDrawerOpen(true); }}
             className="bg-[#ed0000] hover:bg-[#c40000] text-white rounded-[1.25rem] h-11 px-6 shadow-2xl shadow-red-500/30 flex items-center gap-3 group font-bold transition-all hover:-translate-y-1"
           >
             <PlusCircle size={20} className="group-hover:rotate-90 transition-transform duration-300" />
@@ -241,16 +243,26 @@ const Tenants: React.FC = () => {
                     </Badge>
                   </TableCell>
                   <TableCell className="text-right px-10">
-                    <Button
-                      variant="outline"
-                      className={cn(
-                        "rounded-xl h-10 px-6 font-bold text-[10px] uppercase tracking-widest transition-all",
-                        t.isActive ? "border-slate-200 text-slate-400 hover:text-[var(--brand-color)] hover:bg-[var(--brand-color)]/5 hover:border-[var(--brand-color)]/10" : "bg-[var(--brand-color)] border-[var(--brand-color)] text-white hover:opacity-90"
-                      )}
-                      onClick={() => setConfirmModal({ open: true, tenant: t })}
-                    >
-                      {t.isActive ? "Deactivate" : "Activate"}
-                    </Button>
+                    <div className="flex items-center justify-end gap-2">
+                      <Button
+                        variant="outline"
+                        className="rounded-xl h-10 px-4 font-bold text-[10px] uppercase tracking-widest transition-all border-slate-200 text-slate-400 hover:text-slate-600 hover:bg-slate-50 hover:border-slate-300"
+                        onClick={() => { setEditingTenant(t); setIsDrawerOpen(true); }}
+                      >
+                        <Pencil size={14} className="mr-1.5" />
+                        Edit
+                      </Button>
+                      <Button
+                        variant="outline"
+                        className={cn(
+                          "rounded-xl h-10 px-6 font-bold text-[10px] uppercase tracking-widest transition-all",
+                          t.isActive ? "border-slate-200 text-slate-400 hover:text-[var(--brand-color)] hover:bg-[var(--brand-color)]/5 hover:border-[var(--brand-color)]/10" : "bg-[var(--brand-color)] border-[var(--brand-color)] text-white hover:opacity-90"
+                        )}
+                        onClick={() => setConfirmModal({ open: true, tenant: t })}
+                      >
+                        {t.isActive ? "Deactivate" : "Activate"}
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
@@ -259,11 +271,12 @@ const Tenants: React.FC = () => {
         </Card>
       </div>
 
-      {/* Add Tenant Drawer */}
+      {/* Add / Edit Tenant Drawer */}
       <CreateTenantDrawer
         isOpen={isDrawerOpen}
-        onClose={() => setIsDrawerOpen(false)}
+        onClose={() => { setIsDrawerOpen(false); setEditingTenant(null); }}
         onSuccess={fetchTenants}
+        tenant={editingTenant}
       />
 
       {/* Status Confirmation Modal */}
@@ -329,12 +342,31 @@ const MiniStatCard = ({ label, value, icon, trend }: any) => {
   );
 };
 
-const CreateTenantDrawer = ({ isOpen, onClose, onSuccess }: any) => {
-  const [formData, setFormData] = useState({ name: '', label: '', slug: '', contactEmail: '', colorCode: '#ed0000' });
+const CreateTenantDrawer = ({ isOpen, onClose, onSuccess, tenant }: any) => {
+  const isEditing = !!tenant;
+  const emptyForm = { name: '', label: '', slug: '', contactEmail: '', colorCode: '#ed0000' };
+  const [formData, setFormData] = useState(emptyForm);
   const [logo, setLogo] = useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
   const { toast } = useToast();
+
+  useEffect(() => {
+    if (tenant) {
+      setFormData({
+        name: tenant.name || '',
+        label: tenant.label || '',
+        slug: tenant.slug || '',
+        contactEmail: tenant.contactEmail || '',
+        colorCode: tenant.colorCode || '#ed0000'
+      });
+      setLogo(null);
+    } else {
+      setFormData(emptyForm);
+      setLogo(null);
+    }
+    setError("");
+  }, [tenant, isOpen]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -351,19 +383,27 @@ const CreateTenantDrawer = ({ isOpen, onClose, onSuccess }: any) => {
       data.append('colorCode', formData.colorCode);
       if (logo) data.append('logo', logo);
 
-      const response = await axios.post('/api/v1/provisioning/tenants', data, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      if (isEditing) {
+        await axios.put(`/api/v1/provisioning/tenants/${tenant._id}`, data, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        toast({
+          title: "Tenant Updated",
+          description: `Successfully updated ${formData.name}.`,
+        });
+      } else {
+        const response = await axios.post('/api/v1/provisioning/tenants', data, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        toast({
+          title: "Tenant Provisioned",
+          description: `Successfully added ${response.data.tenant.name} to the registry.`,
+        });
+      }
       onSuccess();
       onClose();
-      setFormData({ name: '', label: '', slug: '', contactEmail: '', colorCode: '#ed0000' });
-      setLogo(null);
-      toast({
-        title: "Tenant Provisioned",
-        description: `Successfully added ${response.data.tenant.name} to the registry.`,
-      });
     } catch (err: any) {
-      setError(err.response?.data?.error || "Provisioning failed. Please try again.");
+      setError(err.response?.data?.error || (isEditing ? "Update failed. Please try again." : "Provisioning failed. Please try again."));
     } finally {
       setIsSubmitting(false);
     }
@@ -373,12 +413,14 @@ const CreateTenantDrawer = ({ isOpen, onClose, onSuccess }: any) => {
     <Sheet open={isOpen} onOpenChange={(o) => !o && onClose()}>
       <SheetContent side="right" className="sm:max-w-xl bg-white p-0 flex flex-col border-none shadow-2xl animate-in slide-in-from-right duration-500">
         <SheetHeader className="p-12 pb-0">
-          <div className="w-16 h-16 bg-red-50 rounded-3xl flex items-center justify-center text-[#ed0000] mb-6">
-            <Building2 size={32} />
+          <div className={cn("w-16 h-16 rounded-3xl flex items-center justify-center mb-6", isEditing ? "bg-blue-50 text-blue-600" : "bg-red-50 text-[#ed0000]")}>
+            {isEditing ? <Pencil size={32} /> : <Building2 size={32} />}
           </div>
-          <SheetTitle className="text-3xl font-bold font-['Sen'] text-slate-900 tracking-tight">Add new tenant</SheetTitle>
+          <SheetTitle className="text-3xl font-bold font-['Sen'] text-slate-900 tracking-tight">
+            {isEditing ? 'Update tenant info' : 'Add new tenant'}
+          </SheetTitle>
           <SheetDescription className="text-slate-400 text-sm font-medium mt-2 leading-relaxed">
-            Create a new business unit and configure its infrastructure.
+            {isEditing ? `Editing ${tenant.name}. Update the fields below and save.` : 'Create a new business unit and configure its infrastructure.'}
           </SheetDescription>
         </SheetHeader>
 
@@ -468,20 +510,40 @@ const CreateTenantDrawer = ({ isOpen, onClose, onSuccess }: any) => {
                 accept="image/*"
                 onChange={e => setLogo(e.target.files ? e.target.files[0] : null)}
               />
-              <div className="w-16 h-16 rounded-[1.5rem] bg-white shadow-xl flex items-center justify-center mb-5 group-hover:scale-110 transition-transform duration-500">
-                <UploadCloud size={28} className="text-[#ed0000]" />
-              </div>
-              <p className="text-slate-900 text-sm font-medium tracking-tight">{logo ? logo.name : "Add Asset"}</p>
-              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-[0.2em] mt-3">High-resolution PNG / JPG preferred</p>
+              {isEditing && tenant.logo && !logo ? (
+                <>
+                  <img src={tenant.logo} alt="Current logo" className="w-16 h-16 rounded-[1.5rem] object-contain mb-5 border border-slate-100 bg-white p-2" />
+                  <p className="text-slate-900 text-sm font-medium tracking-tight">Current logo</p>
+                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-[0.2em] mt-3">Click to replace</p>
+                </>
+              ) : (
+                <>
+                  <div className="w-16 h-16 rounded-[1.5rem] bg-white shadow-xl flex items-center justify-center mb-5 group-hover:scale-110 transition-transform duration-500">
+                    <UploadCloud size={28} className="text-[#ed0000]" />
+                  </div>
+                  <p className="text-slate-900 text-sm font-medium tracking-tight">{logo ? logo.name : "Add Asset"}</p>
+                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-[0.2em] mt-3">High-resolution PNG / JPG preferred</p>
+                </>
+              )}
             </div>
           </div>
         </form>
 
         <SheetFooter className="p-12 pt-8 bg-slate-50/50 space-x-6 border-t border-slate-100">
           <Button variant="ghost" className="rounded-2xl font-bold text-xs flex-1 h-11" onClick={onClose}>Cancel</Button>
-          <Button className="bg-[#ed0000] hover:bg-[#c40000] text-white rounded-2xl font-bold text-xs flex-[2] h-11 shadow-2xl shadow-red-500/40 disabled:opacity-60" disabled={isSubmitting} onClick={handleSubmit}>
+          <Button
+            className={cn(
+              "text-white rounded-2xl font-bold text-xs flex-[2] h-11 shadow-2xl disabled:opacity-60",
+              isEditing ? "bg-blue-600 hover:bg-blue-700 shadow-blue-500/40" : "bg-[#ed0000] hover:bg-[#c40000] shadow-red-500/40"
+            )}
+            disabled={isSubmitting}
+            onClick={handleSubmit}
+          >
             {isSubmitting ? <Loader2 className="animate-spin mr-3" size={18} /> : null}
-            {isSubmitting ? 'Adding tenant...' : 'Add tenant'}
+            {isEditing
+              ? (isSubmitting ? 'Updating tenant...' : 'Update tenant info')
+              : (isSubmitting ? 'Adding tenant...' : 'Add tenant')
+            }
           </Button>
         </SheetFooter>
       </SheetContent>

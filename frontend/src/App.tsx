@@ -542,18 +542,28 @@ export const App: React.FC = () => {
   };
 
   // Helper function to stream AI response
-  const streamResponse = async (conversationId: string, userContent: string): Promise<Conversation | null> => {
+  const streamResponse = async (conversationId: string, userContent: string, files?: File[]): Promise<Conversation | null> => {
     const apiBase = import.meta.env.VITE_API_URL || '';
+    const hasFiles = files && files.length > 0;
+
+    let body: FormData | string;
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${token}`,
+    };
+
+    if (hasFiles) {
+      const formData = new FormData();
+      formData.append("message", userContent);
+      files.forEach((f) => formData.append("files", f));
+      body = formData;
+    } else {
+      headers["Content-Type"] = "application/json";
+      body = JSON.stringify({ content: userContent });
+    }
+
     const response = await fetch(
       `${apiBase}/api/v1/conversations/${conversationId}/message-stream`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ content: userContent }),
-      }
+      { method: "POST", headers, body }
     );
 
     if (!response.ok) {
@@ -648,8 +658,9 @@ export const App: React.FC = () => {
   };
 
   const startVoiceRecording = () => {
-    if (!('webkitSpeechRecognition' in window)) {
-      alert("Speech recognition is not supported in this browser.");
+    const SpeechRecognitionAPI = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognitionAPI) {
+      alert("Speech recognition is not supported in this browser. Please use Chrome or Edge.");
       return;
     }
 
@@ -659,8 +670,7 @@ export const App: React.FC = () => {
       return;
     }
 
-    const SpeechRecognition = (window as any).webkitSpeechRecognition;
-    const recognition = new SpeechRecognition();
+    const recognition = new SpeechRecognitionAPI();
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = 'en-US';
@@ -673,12 +683,9 @@ export const App: React.FC = () => {
     };
 
     recognition.onresult = (event: any) => {
-      let interimTranscript = '';
       for (let i = event.resultIndex; i < event.results.length; ++i) {
         if (event.results[i].isFinal) {
           setInput(prev => prev + (prev ? ' ' : '') + event.results[i][0].transcript);
-        } else {
-          interimTranscript += event.results[i][0].transcript;
         }
       }
     };
@@ -701,9 +708,10 @@ export const App: React.FC = () => {
 
   const handleSend = async () => {
     const trimmed = input.trim();
-    if (!trimmed || loading || !token) return;
+    if (!trimmed && attachedFiles.length === 0) return;
+    if (loading || !token) return;
 
-    // Clear input and attachments immediately
+    const filesToSend = [...attachedFiles];
     setInput("");
     setAttachedFiles([]);
 
@@ -717,15 +725,15 @@ export const App: React.FC = () => {
       setCurrentConversation(createData.data.conversation);
       setConversations([createData.data.conversation, ...conversations]);
 
-      // Add user message to local state immediately
-      const userMsg: Message = { role: "user", content: trimmed, timestamp: new Date() };
+      const fileLabel = filesToSend.length > 0 ? `\n📎 ${filesToSend.map(f => f.name).join(', ')}` : '';
+      const userMsg: Message = { role: "user", content: (trimmed || '') + fileLabel, timestamp: new Date() };
       const updatedConv = { ...createData.data.conversation, messages: [userMsg] };
       setCurrentConversation(updatedConv);
       setLoading(true);
 
       // Stream AI response
       try {
-        const finalConversation = await streamResponse(createData.data.conversation._id, trimmed);
+        const finalConversation = await streamResponse(createData.data.conversation._id, trimmed, filesToSend);
 
         // Use the final conversation data from the stream response
         if (finalConversation) {
@@ -743,15 +751,15 @@ export const App: React.FC = () => {
       return;
     }
 
-    // Add user message to local state immediately
-    const userMsg: Message = { role: "user", content: trimmed, timestamp: new Date() };
+    const fileLabel = filesToSend.length > 0 ? `\n📎 ${filesToSend.map(f => f.name).join(', ')}` : '';
+    const userMsg: Message = { role: "user", content: (trimmed || '') + fileLabel, timestamp: new Date() };
     const updatedConv = { ...currentConversation, messages: [...currentConversation.messages, userMsg] };
     setCurrentConversation(updatedConv);
     setLoading(true);
 
     // Stream AI response
     try {
-      const finalConversation = await streamResponse(currentConversation._id, trimmed);
+      const finalConversation = await streamResponse(currentConversation._id, trimmed, filesToSend);
 
       // Use the final conversation data from the stream response
       if (finalConversation) {
@@ -1043,6 +1051,9 @@ export const App: React.FC = () => {
                     <div className="attached-files-preview">
                       {attachedFiles.map((file, i) => (
                         <div key={i} className="attached-file-chip">
+                          {file.type.startsWith('image/') ? (
+                            <img src={URL.createObjectURL(file)} alt="" className="attach-thumb" />
+                          ) : null}
                           <span className="file-name">{file.name}</span>
                           <button className="remove-file-btn" onClick={() => removeAttachedFile(i)}>✕</button>
                         </div>
@@ -1109,7 +1120,7 @@ export const App: React.FC = () => {
                     <button
                       className="send-btn-v2"
                       onClick={handleSend}
-                      disabled={!input.trim() || loading}
+                      disabled={(!input.trim() && attachedFiles.length === 0) || loading}
                     >
                       <BiUpArrowAlt size={24} />
                     </button>
@@ -1175,12 +1186,29 @@ export const App: React.FC = () => {
             )}
           </section>
 
-          {(currentConversation?.messages.length > 0 || loading) && (
+          {((currentConversation?.messages?.length ?? 0) > 0 || loading) && (
             <footer className="footer-input-v2">
+              {attachedFiles.length > 0 && (
+                <div className="footer-attached-preview">
+                  {attachedFiles.map((file, i) => (
+                    <div key={i} className="attached-file-chip">
+                      {file.type.startsWith('image/') ? (
+                        <img src={URL.createObjectURL(file)} alt="" className="attach-thumb" />
+                      ) : null}
+                      <span className="file-name">{file.name}</span>
+                      <button className="remove-file-btn" onClick={() => removeAttachedFile(i)}>✕</button>
+                    </div>
+                  ))}
+                </div>
+              )}
               <div className="footer-input-container-v2">
-                <button className="footer-tool-btn"><BiPlus /></button>
-                <button className="footer-tool-btn"><BiPaperclip /></button>
-                <button className="footer-tool-btn"><BiMicrophone /></button>
+                <input type="file" ref={imageInputRef} style={{ display: 'none' }} accept="image/*" multiple onChange={handleFileAttach} />
+                <input type="file" ref={fileInputRef} style={{ display: 'none' }} accept="*" multiple onChange={handleFileAttach} />
+                <button className="footer-tool-btn" onClick={() => imageInputRef.current?.click()} title="Add image"><BiPlus /></button>
+                <button className="footer-tool-btn" onClick={() => fileInputRef.current?.click()} title="Attach file"><BiPaperclip /></button>
+                <button className={`footer-tool-btn ${isRecording ? 'recording' : ''}`} onClick={startVoiceRecording} title={isRecording ? "Stop recording" : "Voice record"}>
+                  <BiMicrophone style={{ color: isRecording ? 'var(--brand-color, #ed0000)' : 'inherit' }} />
+                </button>
                 <textarea
                   className="footer-textarea-v2"
                   placeholder="Send a message..."
@@ -1192,7 +1220,7 @@ export const App: React.FC = () => {
                 <button
                   className="footer-send-btn-v2"
                   onClick={handleSend}
-                  disabled={!input.trim() || loading}
+                  disabled={(!input.trim() && attachedFiles.length === 0) || loading}
                 >
                   <BiUpArrowAlt size={20} />
                 </button>
@@ -2063,6 +2091,21 @@ export const App: React.FC = () => {
 
         .remove-file-btn:hover {
           color: var(--brand-color, #ed0000);
+        }
+
+        .attach-thumb {
+          width: 28px;
+          height: 28px;
+          border-radius: 4px;
+          object-fit: cover;
+          flex-shrink: 0;
+        }
+
+        .footer-attached-preview {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          padding: 8px 12px 0;
         }
 
         .input-tool-btn.recording {

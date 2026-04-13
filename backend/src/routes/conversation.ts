@@ -6,7 +6,8 @@ import { authMiddleware, AuthenticatedRequest } from "../middleware/auth";
 import {
   generateAIResponse,
   generateConversationTitle,
-  streamAIResponse
+  streamAIResponse,
+  ImageAttachment
 } from "../services/openaiService";
 import { buildContextForQuery } from "../utils/contextBuilder";
 import { uploadDocument } from "../services/cloudinaryService";
@@ -18,6 +19,10 @@ import {
   getSessionDocumentStatus
 } from "../services/sessionRagService";
 import logger from "../utils/logger";
+import { extractTextFromPdf } from "../utils/pdfParser";
+import { extractTextFromDocx } from "../utils/docxParser";
+import { extractTextFromXlsx } from "../utils/xlsxParser";
+import { extractTextFromPptx } from "../utils/pptxParser";
 
 export const conversationRouter = express.Router();
 
@@ -28,8 +33,14 @@ const ALLOWED_MIME_TYPES = [
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   "text/plain",
-  "text/csv"
+  "text/csv",
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp"
 ];
+
+const IMAGE_MIME_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"];
 
 const MAX_FILE_SIZE_BYTES = parseInt(process.env.USER_UPLOAD_MAX_FILE_SIZE_MB || "10") * 1024 * 1024;
 const MAX_FILES_PER_REQUEST = parseInt(process.env.USER_UPLOAD_MAX_FILES_PER_REQUEST || "5");
@@ -42,7 +53,7 @@ const upload = multer({
     if (ALLOWED_MIME_TYPES.includes(file.mimetype)) {
       cb(null, true);
     } else {
-      cb(new Error("Only PDF, DOCX, XLSX, PPTX, TXT, and CSV files are allowed"));
+      cb(new Error("Only PDF, DOCX, XLSX, PPTX, TXT, CSV, and image (JPG, PNG, GIF, WebP) files are allowed"));
     }
   }
 });
@@ -127,6 +138,31 @@ async function handleFileUploads(
   }
 
   return results;
+}
+
+const MAX_INLINE_TEXT_CHARS = 15000;
+
+async function extractTextFromFile(file: Express.Multer.File): Promise<string> {
+  try {
+    switch (file.mimetype) {
+      case "application/pdf":
+        return await extractTextFromPdf(file.buffer);
+      case "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        return await extractTextFromDocx(file.buffer);
+      case "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+        return extractTextFromXlsx(file.buffer);
+      case "application/vnd.openxmlformats-officedocument.presentationml.presentation":
+        return await extractTextFromPptx(file.buffer);
+      case "text/plain":
+      case "text/csv":
+        return file.buffer.toString("utf-8");
+      default:
+        return "";
+    }
+  } catch (err: any) {
+    logger.warn("[Conversation] Inline text extraction failed", { fileName: file.originalname, error: err.message });
+    return "";
+  }
 }
 
 /**
@@ -741,15 +777,25 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
       return res.status(400).json({ error: "Message content or file is required" });
     }
 
-    // ── Session file-count guard ──────────────────────────────────────────────
-    if (uploadedFiles.length > 0) {
+    // ── Separate images from documents ─────────────────────────────────────────
+    const imageFiles = uploadedFiles.filter(f => IMAGE_MIME_TYPES.includes(f.mimetype));
+    const documentFiles = uploadedFiles.filter(f => !IMAGE_MIME_TYPES.includes(f.mimetype));
+
+    // Session file-count guard (documents only, images are processed inline)
+    if (documentFiles.length > 0) {
       const existingCount = await UserDocument.countDocuments({ userId, chatSessionId });
-      if (existingCount + uploadedFiles.length > MAX_FILES_PER_SESSION) {
+      if (existingCount + documentFiles.length > MAX_FILES_PER_SESSION) {
         return res.status(400).json({
           error: `Session document limit reached (max ${MAX_FILES_PER_SESSION} files per session)`
         });
       }
     }
+
+    // Convert images to base64 for OpenAI vision
+    const imageAttachments: ImageAttachment[] = imageFiles.map(f => ({
+      base64: f.buffer.toString("base64"),
+      mimeType: f.mimetype
+    }));
 
     // ── Load conversation ─────────────────────────────────────────────────────
     const userConversations = await Conversation.findOne({ userId });
@@ -764,10 +810,22 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
       return res.status(404).json({ error: "Conversation not found" });
     }
 
-    // ── Upload files ──────────────────────────────────────────────────────────
+    // Upload document files (non-images) for RAG processing
     let uploadedDocs: { fileName: string; status: string; documentId: string }[] = [];
-    if (uploadedFiles.length > 0) {
-      uploadedDocs = await handleFileUploads(uploadedFiles, userId, chatSessionId, businessUnit);
+    if (documentFiles.length > 0) {
+      uploadedDocs = await handleFileUploads(documentFiles, userId, chatSessionId, businessUnit);
+    }
+
+    // ── Extract text from documents inline for immediate AI access ───────────
+    let inlineDocumentText = "";
+    if (documentFiles.length > 0) {
+      const extractions = await Promise.all(
+        documentFiles.map(async (f) => {
+          const text = await extractTextFromFile(f);
+          return text ? `--- Document: ${f.originalname} ---\n${text.slice(0, MAX_INLINE_TEXT_CHARS)}` : "";
+        })
+      );
+      inlineDocumentText = extractions.filter(Boolean).join("\n\n");
     }
 
     // ── Set up SSE headers early ──────────────────────────────────────────────
@@ -776,8 +834,8 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
     res.setHeader("Connection", "keep-alive");
     res.setHeader("Access-Control-Allow-Origin", "*");
 
-    // File-only upload: send acknowledgement as SSE
-    if (!content && uploadedFiles.length > 0) {
+    // File-only upload with no text: auto-summarize the document
+    if (!content && uploadedFiles.length > 0 && !inlineDocumentText && imageAttachments.length === 0) {
       const successUploads = uploadedDocs.filter((d) => d.status === "pending");
       const failedUploads = uploadedDocs.filter((d) => d.status === "failed");
 
@@ -872,14 +930,19 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
     }));
 
     // ── Stream response ───────────────────────────────────────────────────────
+    const aiUserMessage = inlineDocumentText
+      ? `${content || "Please analyze and summarize the following document(s)."}\n\n${inlineDocumentText}`
+      : content;
+
     let fullResponse = "";
     try {
       const generator = streamAIResponse(
-        content,
+        aiUserMessage,
         policyContext,
         group.messages.slice(0, -1).map((m) => ({ role: m.role, content: m.content })),
         businessUnit,
-        systemPrompt
+        systemPrompt,
+        imageAttachments.length > 0 ? imageAttachments : undefined
       );
 
       for await (const chunk of generator) {

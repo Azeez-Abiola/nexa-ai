@@ -175,12 +175,18 @@ export async function generateAIResponse(
  * Stream AI response using OpenAI streaming API
  * Yields chunks of text as they are generated
  */
+export interface ImageAttachment {
+  base64: string;
+  mimeType: string;
+}
+
 export async function* streamAIResponse(
   userMessage: string,
   policies: PolicyContext[],
   conversationHistory: Message[],
   businessUnit: string = "UFL",
-  customSystemPrompt?: string
+  customSystemPrompt?: string,
+  imageAttachments?: ImageAttachment[]
 ): AsyncGenerator<string, void, unknown> {
   try {
     // Get correct business unit name from config
@@ -210,7 +216,23 @@ export async function* streamAIResponse(
     // Use custom system prompt if provided
     const systemPrompt = customSystemPrompt || buildSystemPrompt(correctBUName, policyContext, hasPolicies);
 
-    // Prepare messages for OpenAI
+    // Build the user message content (text-only or multimodal with images)
+    let userContent: OpenAI.Chat.ChatCompletionContentPart[] | string;
+    if (imageAttachments && imageAttachments.length > 0) {
+      userContent = [
+        { type: "text" as const, text: userMessage || "What is in this image?" },
+        ...imageAttachments.map((img) => ({
+          type: "image_url" as const,
+          image_url: {
+            url: `data:${img.mimeType};base64,${img.base64}`,
+            detail: "auto" as const
+          }
+        }))
+      ];
+    } else {
+      userContent = userMessage;
+    }
+
     const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
       {
         role: "system",
@@ -222,16 +244,15 @@ export async function* streamAIResponse(
       })),
       {
         role: "user",
-        content: userMessage,
+        content: userContent,
       },
     ];
 
-    // Create streaming request
     const stream = (await (openai.chat.completions.create as any)({
       model: "gpt-4o-mini",
       messages,
       temperature: 0.7,
-      max_tokens: 800,
+      max_tokens: 1500,
       stream: true,
     })) as AsyncIterable<any>;
 
