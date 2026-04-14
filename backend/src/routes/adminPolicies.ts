@@ -1,11 +1,37 @@
 import express from "express";
 import multer from "multer";
 import { Policy } from "../models/Policy";
+import { EMPLOYEE_GRADES } from "../models/User";
 import { adminAuthMiddleware, AuthenticatedRequest } from "../middleware/auth";
 import { extractTextFromDocx } from "../utils/docxParser";
 import { extractTextFromPdf } from "../utils/pdfParser";
+import { KNOWLEDGE_BASE_CATEGORIES } from "../constants/knowledgeBaseForm";
 
 export const adminPoliciesRouter = express.Router();
+
+const GRADE_SET = new Set<string>(EMPLOYEE_GRADES);
+
+function parseAllowedGrades(raw: unknown): string[] {
+  const list = Array.isArray(raw)
+    ? raw
+    : typeof raw === "string"
+      ? raw.split(",").map((g: string) => g.trim()).filter(Boolean)
+      : [];
+  const normalized = list.map((g) => g.trim()).filter(Boolean);
+  if (normalized.some((g) => g.toUpperCase() === "ALL")) {
+    return ["ALL"];
+  }
+  return [...new Set(normalized.filter((g) => GRADE_SET.has(g)))];
+}
+
+function normalizeCategory(category: string): string | null {
+  const trimmed = (category || "").trim();
+  if (!trimmed) return null;
+  const exact = KNOWLEDGE_BASE_CATEGORIES.find((c) => c === trimmed);
+  if (exact) return exact;
+  const ci = KNOWLEDGE_BASE_CATEGORIES.find((c) => c.toLowerCase() === trimmed.toLowerCase());
+  return ci ?? null;
+}
 
 // Configure multer for file uploads (in-memory storage)
 const upload = multer({
@@ -27,6 +53,14 @@ const upload = multer({
 
 // Protect all admin policy routes: require authenticated admin
 adminPoliciesRouter.use(adminAuthMiddleware);
+
+/** Categories and employee grades for knowledge-base forms (fetched by admin UI). */
+adminPoliciesRouter.get("/meta/form-options", (_req: AuthenticatedRequest, res) => {
+  res.json({
+    categories: [...KNOWLEDGE_BASE_CATEGORIES],
+    grades: [...EMPLOYEE_GRADES]
+  });
+});
 
 // List policies: SUPERADMIN sees all, BU admin sees only their BU
 adminPoliciesRouter.get("/", async (req: AuthenticatedRequest, res) => {
@@ -114,15 +148,19 @@ adminPoliciesRouter.post("/", upload.single("file"), async (req: AuthenticatedRe
         .json({ error: "title, category and content (or file) are required" });
     }
 
-    const parsedAllowedGrades = Array.isArray(allowedGrades)
-      ? allowedGrades
-      : typeof allowedGrades === "string"
-      ? allowedGrades.split(",").map((g: string) => g.trim()).filter(Boolean)
-      : [];
+    const normalizedCategory = normalizeCategory(category);
+    if (!normalizedCategory) {
+      return res.status(400).json({
+        error: "Invalid category",
+        allowedCategories: KNOWLEDGE_BASE_CATEGORIES
+      });
+    }
+
+    const parsedAllowedGrades = parseAllowedGrades(allowedGrades);
 
     const policy = await Policy.create({
       title,
-      category,
+      category: normalizedCategory,
       content: policyContent,
       businessUnit: targetBU,
       allowedGrades: parsedAllowedGrades,
@@ -151,10 +189,11 @@ adminPoliciesRouter.post("/", upload.single("file"), async (req: AuthenticatedRe
 
 // Update an existing policy
 // BU admins can only update their own BU's policies; SUPERADMIN can update any
-adminPoliciesRouter.put("/:id", async (req: AuthenticatedRequest, res) => {
+adminPoliciesRouter.put("/:id", upload.single("file"), async (req: AuthenticatedRequest, res) => {
   try {
     const { id } = req.params;
     const { title, category, content, tags, allowedGrades } = req.body;
+    const file = req.file;
     const { businessUnit, isSuperAdmin } = req;
 
     if (!businessUnit) {
@@ -170,27 +209,75 @@ adminPoliciesRouter.put("/:id", async (req: AuthenticatedRequest, res) => {
       return res.status(403).json({ error: "Unauthorized: Cannot modify policy from another business unit" });
     }
 
-    const updatedAllowedGrades = allowedGrades !== undefined
-      ? (Array.isArray(allowedGrades)
-          ? allowedGrades
-          : typeof allowedGrades === "string"
-          ? allowedGrades.split(",").map((g: string) => g.trim()).filter(Boolean)
-          : [])
-      : undefined;
+    const updatedAllowedGrades =
+      allowedGrades !== undefined ? parseAllowedGrades(allowedGrades) : undefined;
 
-    const updateData: any = {
+    let policyContent: string | undefined = content;
+    let sourceFile: typeof existingPolicy.sourceFile | undefined;
+
+    if (file) {
+      if (file.mimetype === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
+        try {
+          policyContent = await extractTextFromDocx(file.buffer);
+        } catch (err) {
+          console.error("Error extracting text from DOCX:", err);
+          return res.status(400).json({ error: "Failed to parse Word document. Make sure it's a valid .docx file." });
+        }
+        sourceFile = {
+          filename: file.originalname,
+          fileType: "docx" as const,
+          uploadedAt: new Date()
+        };
+      } else if (file.mimetype === "text/plain") {
+        policyContent = file.buffer.toString("utf-8");
+        sourceFile = {
+          filename: file.originalname,
+          fileType: "text" as const,
+          uploadedAt: new Date()
+        };
+      } else if (file.mimetype === "application/pdf") {
+        try {
+          policyContent = await extractTextFromPdf(file.buffer);
+        } catch (err) {
+          console.error("Error extracting text from PDF:", err);
+          return res.status(400).json({ error: "Failed to parse PDF document. Make sure it's a valid PDF file." });
+        }
+        sourceFile = {
+          filename: file.originalname,
+          fileType: "pdf" as const,
+          uploadedAt: new Date()
+        };
+      }
+    }
+
+    if (policyContent === undefined || policyContent === "") {
+      return res.status(400).json({ error: "content (or a replace file) is required" });
+    }
+
+    const normalizedCategory = normalizeCategory(category);
+    if (!normalizedCategory) {
+      return res.status(400).json({
+        error: "Invalid category",
+        allowedCategories: KNOWLEDGE_BASE_CATEGORIES
+      });
+    }
+
+    const updateData: Record<string, unknown> = {
       title,
-      category,
-      content,
+      category: normalizedCategory,
+      content: policyContent,
       tags: Array.isArray(tags)
         ? tags
         : typeof tags === "string"
-        ? tags.split(",").map((t: string) => t.trim()).filter(Boolean)
-        : []
+          ? tags.split(",").map((t: string) => t.trim()).filter(Boolean)
+          : []
     };
 
     if (updatedAllowedGrades !== undefined) {
       updateData.allowedGrades = updatedAllowedGrades;
+    }
+    if (sourceFile) {
+      updateData.sourceFile = sourceFile;
     }
 
     const updated = await Policy.findByIdAndUpdate(id, updateData, { new: true });

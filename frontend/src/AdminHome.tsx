@@ -72,7 +72,7 @@ export const AdminHome: React.FC<AdminHomeProps> = ({ onEnter, admin }) => {
         {/* Avatar Section */}
         <div className={styles.avatarSection}>
           <img 
-            src="/avatar-1.png" 
+            src={localStorage.getItem("nexa-avatar") || "/avatar-1.png"} 
             alt="Avatar" 
             className={styles.centralAvatarImage}
           />

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { ArrowRight, Play, Sparkles, Send } from "lucide-react";
+import { ArrowRight, Play, Sparkles, Send, Brain, Shield, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 const HeroSection = () => {
@@ -51,6 +51,16 @@ const HeroSection = () => {
 
       <div className="container relative z-10 mx-auto px-6">
         <div className="max-w-5xl mx-auto text-center">
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, delay: 0.05 }}
+            className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-white/80 px-4 py-2 text-xs font-semibold text-muted-foreground shadow-sm mb-8"
+          >
+            <span className="h-1.5 w-1.5 rounded-full bg-primary" aria-hidden />
+            Enterprise AI Assistant
+          </motion.div>
+
           {/* Main Headline */}
           <motion.h1
             initial={{ opacity: 0, y: 20 }}
@@ -58,9 +68,7 @@ const HeroSection = () => {
             transition={{ duration: 0.8, delay: 0.1 }}
             className="text-4xl md:text-6xl lg:text-7xl font-extrabold tracking-tight leading-[1.1] mb-8 text-[#1A1A1A] font-sans"
           >
-            The Personal AI for
-            <br />
-            Next Gen <span className="gradient-text italic">Success</span>
+            The Intelligent <span className="gradient-text">Brain of Your</span> Organization
           </motion.h1>
 
           {/* Subheadline */}
@@ -70,8 +78,7 @@ const HeroSection = () => {
             transition={{ duration: 0.8, delay: 0.2 }}
             className="text-lg md:text-xl text-muted-foreground max-w-2xl mx-auto mb-12 leading-relaxed"
           >
-            Meet the AI chatbot that understands, learns, and delivers your personal
-            assistant for everything from customer support to creative ideas.
+            Nexa connects your people to your knowledge. Ask questions, get instant answers from approved internal documents — securely, intelligently, instantly.
           </motion.p>
 
           {/* CTA Buttons */}
@@ -79,18 +86,41 @@ const HeroSection = () => {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.8, delay: 0.3 }}
-            className="flex flex-col sm:flex-row gap-5 justify-center items-center mb-20"
+            className="flex flex-col sm:flex-row gap-5 justify-center items-center mb-14"
           >
             <Button size="lg" className="h-14 px-10 text-base font-bold rounded-full shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/30 transition-all group bg-primary">
-              Try It Free
+              Request Demo
               <ArrowRight className="ml-2 w-5 h-5 group-hover:translate-x-1 transition-transform" />
             </Button>
           <Button size="lg" variant="outline" className="h-14 px-10 text-base font-bold rounded-full border-2 bg-white/50 backdrop-blur-sm group hover:bg-white hover:border-primary/30 hover:shadow-xl hover:shadow-primary/5 transition-all duration-300">
             <div className="mr-3 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center group-hover:bg-primary group-hover:scale-110 transition-all duration-300">
               <Play className="w-3.5 h-3.5 fill-primary text-primary group-hover:fill-white group-hover:text-white ml-0.5 transition-colors" />
             </div>
-            <span className="group-hover:text-primary transition-colors">Watch Demo</span>
+            <span className="group-hover:text-primary transition-colors">See How It Works</span>
           </Button>
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8, delay: 0.35 }}
+            className="grid md:grid-cols-3 gap-4 md:gap-6 mb-20 text-left max-w-4xl mx-auto"
+          >
+            {[
+              { icon: Brain, text: "AI-powered answers from your internal knowledge base" },
+              { icon: Shield, text: "Enterprise-grade security with role-based access" },
+              { icon: Zap, text: "Instant insights from policies, reports & documents" },
+            ].map(({ icon: Icon, text }) => (
+              <div
+                key={text}
+                className="flex gap-4 rounded-2xl border border-border/40 bg-white/70 p-5 shadow-sm backdrop-blur-sm"
+              >
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                  <Icon className="h-5 w-5" strokeWidth={2} />
+                </div>
+                <p className="text-sm font-semibold leading-snug text-[#1A1A1A]">{text}</p>
+              </div>
+            ))}
           </motion.div>
 
           {/* Floating Chat UI Concept */}

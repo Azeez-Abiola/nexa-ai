@@ -54,7 +54,30 @@ import {
 import { useToast } from "@/lib/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "@/components/ui/select";
 import { cn } from '@/lib/utils';
+
+const ALL_GRADES_TOKEN = "ALL";
+
+const EMPLOYEE_GRADE_KEYS = new Set([
+  "Executive",
+  "Senior VP",
+  "VP",
+  "Associate",
+  "Senior Analyst",
+  "Analyst"
+]);
+
+function docUsesSpecificGrades(allowed?: string[]): boolean {
+  return (allowed ?? []).some((g) => EMPLOYEE_GRADE_KEYS.has(g));
+}
 
 interface Document {
   _id: string;
@@ -62,6 +85,7 @@ interface Document {
   category: string;
   content: string;
   tags: string[];
+  allowedGrades?: string[];
   uploadedBy?: {
     adminId: string;
     adminEmail: string;
@@ -73,52 +97,6 @@ interface Document {
     uploadedAt: string;
   };
 }
-
-// Intelligent content analysis logic ported from legacy Admin.tsx
-const intelligentContentAnalysis = (content: string, hasDefault: boolean = true): { category: string; tags: string[] } => {
-  if (!content.trim()) return { category: "", tags: [] };
-  const lowerContent = content.toLowerCase();
-
-  const categoryMap: Record<string, string[]> = {
-    "Time Off & Leave": ["leave", "vacation", "holiday", "time off", "pto"],
-    "Compensation & Salary": ["salary", "pay", "wage", "compensation", "bonus", "payroll"],
-    "Benefits": ["benefit", "health", "insurance", "medical", "dental", "pension"],
-    "Work Schedule & Hours": ["work hours", "working hours", "schedule", "shift", "overtime"],
-    "Attendance": ["attendance", "present", "check in", "lateness", "absence"],
-    "Remote Work": ["remote", "work from home", "wfh", "hybrid", "telecommute"],
-    "Code of Conduct": ["conduct", "behavior", "dress code", "ethics", "professionalism"],
-    "Training & Development": ["training", "development", "course", "certification", "learning"],
-    "Harassment & Safety": ["harassment", "discrimination", "safety", "respect"],
-    "Performance": ["performance", "review", "evaluation", "appraisal", "rating"]
-  };
-
-  let matchedCategory = hasDefault ? "General Document" : "";
-  let maxMatches = 0;
-
-  for (const [category, keywords] of Object.entries(categoryMap)) {
-    const matches = keywords.filter((kw) => lowerContent.includes(kw)).length;
-    if (matches > maxMatches) {
-      maxMatches = matches;
-      matchedCategory = category;
-    }
-  }
-
-  const stopWords = new Set(["the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of"]);
-  const words = content.toLowerCase().match(/\b[a-z]+(?:'[a-z]+)?\b/g) || [];
-  const wordFreq: Record<string, number> = {};
-  words.forEach((word) => {
-    if (!stopWords.has(word) && word.length > 2) {
-      wordFreq[word] = (wordFreq[word] || 0) + 1;
-    }
-  });
-
-  const topTerms = Object.entries(wordFreq)
-    .sort((a, b) => b[1] - a[1])
-    .map(([word]) => word)
-    .slice(0, 8);
-
-  return { category: matchedCategory, tags: topTerms };
-};
 
 const KnowledgeBase: React.FC = () => {
   const [documents, setDocuments] = useState<Document[]>([]);
@@ -136,6 +114,15 @@ const KnowledgeBase: React.FC = () => {
   const [content, setContent] = useState("");
   const [tags, setTags] = useState<string[]>([]);
   const [file, setFile] = useState<File | null>(null);
+  /** When true, material is visible to every grade (sent as ALL). */
+  const [allUsers, setAllUsers] = useState(true);
+  /** Used only when `allUsers` is false — one or more employee grades. */
+  const [selectedGrades, setSelectedGrades] = useState<string[]>([]);
+  const [formOptions, setFormOptions] = useState<{ categories: string[]; grades: string[] }>({
+    categories: [],
+    grades: []
+  });
+  const [formOptionsLoading, setFormOptionsLoading] = useState(true);
 
   const isSuper = window.location.pathname.startsWith('/super-admin');
   const token = isSuper
@@ -165,13 +152,33 @@ const KnowledgeBase: React.FC = () => {
     fetchDocuments();
   }, [fetchDocuments]);
 
-  const handleTitleChange = (val: string) => {
-    setTitle(val);
-    if (!editingDoc) {
-      const { category: autoCat } = intelligentContentAnalysis(val, false);
-      if (autoCat) setCategory(autoCat);
+  const fetchFormOptions = useCallback(async () => {
+    try {
+      setFormOptionsLoading(true);
+      const { data } = await axios.get<{ categories: string[]; grades: string[] }>(
+        "/api/v1/admin/policies/meta/form-options",
+        { headers }
+      );
+      setFormOptions({
+        categories: data.categories ?? [],
+        grades: data.grades ?? []
+      });
+    } catch (e) {
+      console.error("Failed to load form options", e);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Could not load categories and grades. Refresh the page to try again."
+      });
+    } finally {
+      setFormOptionsLoading(false);
     }
-  };
+  }, [headers, toast]);
+
+  useEffect(() => {
+    fetchFormOptions();
+  }, [fetchFormOptions]);
+
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const uploadedFile = e.target.files?.[0];
@@ -183,14 +190,33 @@ const KnowledgeBase: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title || (!file && !content)) return;
+    if (!title || (!file && !content) || !category) {
+      toast({
+        variant: "destructive",
+        title: "Missing fields",
+        description: "Title, category, and either a file or pasted text are required."
+      });
+      return;
+    }
 
     try {
       setIsSaving(true);
       const formData = new FormData();
       formData.append("title", title);
-      formData.append("category", category || "General");
+      formData.append("category", category);
       if (tags.length > 0) formData.append("tags", tags.join(","));
+      if (allUsers) {
+        formData.append("allowedGrades", ALL_GRADES_TOKEN);
+      } else if (selectedGrades.length === 0) {
+        toast({
+          variant: "destructive",
+          title: "Select grades",
+          description: "Choose at least one employee grade, or turn on “All users”."
+        });
+        return;
+      } else {
+        formData.append("allowedGrades", selectedGrades.join(","));
+      }
 
       if (file) {
         formData.append("file", file);
@@ -243,6 +269,8 @@ const KnowledgeBase: React.FC = () => {
     setContent("");
     setTags([]);
     setFile(null);
+    setAllUsers(true);
+    setSelectedGrades([]);
     setEditingDoc(null);
   };
 
@@ -252,8 +280,24 @@ const KnowledgeBase: React.FC = () => {
     setCategory(doc.category);
     setContent(doc.content);
     setTags(doc.tags);
+    const raw = Array.isArray(doc.allowedGrades) ? doc.allowedGrades : [];
+    if (docUsesSpecificGrades(raw)) {
+      setAllUsers(false);
+      setSelectedGrades(raw.filter((g) => EMPLOYEE_GRADE_KEYS.has(g)));
+    } else {
+      setAllUsers(true);
+      setSelectedGrades([]);
+    }
     setIsDrawerOpen(true);
   };
+
+  const selectCategories = React.useMemo(() => {
+    const base = formOptions.categories;
+    if (category && !base.includes(category)) {
+      return [category, ...base];
+    }
+    return base;
+  }, [formOptions.categories, category]);
 
   const filteredDocs = documents.filter(d =>
     d.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -305,19 +349,114 @@ const KnowledgeBase: React.FC = () => {
                     <Input
                       placeholder="e.g. Employee Travel Policy"
                       value={title}
-                      onChange={(e) => handleTitleChange(e.target.value)}
+                      onChange={(e) => setTitle(e.target.value)}
                       className="h-12 rounded-xl border-slate-200 focus-visible:ring-0 focus-visible:ring-offset-0 focus:border-[var(--brand-color)]"
                     />
                   </div>
 
                   <div className="space-y-2">
-                    <Label className="text-sm font-bold text-slate-700">Classification</Label>
-                    <Input
-                      placeholder="Category"
-                      value={category}
-                      onChange={(e) => setCategory(e.target.value)}
-                      className="h-12 rounded-xl border-slate-200 placeholder:text-slate-300 focus-visible:ring-0 focus-visible:ring-offset-0 focus:border-[var(--brand-color)]"
-                    />
+                    <Label className="text-sm font-bold text-slate-700">Category</Label>
+                    {formOptionsLoading ? (
+                      <Skeleton className="h-12 w-full rounded-xl" />
+                    ) : (
+                      <Select
+                        value={category || undefined}
+                        onValueChange={setCategory}
+                        disabled={selectCategories.length === 0}
+                      >
+                        <SelectTrigger
+                          className={cn(
+                            "h-12 rounded-xl border-2 shadow-sm transition-colors",
+                            "border-[var(--brand-color)]/35 bg-white",
+                            "focus-visible:ring-2 focus-visible:ring-[var(--brand-color)]/30 focus-visible:ring-offset-0",
+                            "data-[state=open]:border-[var(--brand-color)]"
+                          )}
+                        >
+                          <SelectValue placeholder="Select a category" />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-[min(320px,60vh)] border-[var(--brand-color)]/20">
+                          {selectCategories.map((c) => (
+                            <SelectItem
+                              key={c}
+                              value={c}
+                              className="text-left cursor-pointer focus:bg-[var(--brand-color)]/10 focus:text-[var(--brand-color)] data-[highlighted]:bg-[var(--brand-color)]/10 data-[highlighted]:text-[var(--brand-color)]"
+                            >
+                              {c}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                    <p className="text-xs text-slate-400 font-medium">
+                      Categories are defined by your organization and loaded from the server.
+                    </p>
+                  </div>
+
+                  <div className="space-y-3">
+                    <Label className="text-sm font-bold text-slate-700">Visible to grades</Label>
+                    <p className="text-xs text-slate-400 font-medium -mt-1">
+                      Choose <span className="font-bold text-[var(--brand-color)]">All users</span> so every employee grade can use this material in chat, or turn it off and pick specific grades.
+                    </p>
+                    <div
+                      className={cn(
+                        "rounded-2xl border-2 p-4 space-y-3 max-h-56 overflow-y-auto transition-colors",
+                        "border-[var(--brand-color)]/30 bg-[var(--brand-color)]/[0.06]"
+                      )}
+                    >
+                      {formOptionsLoading ? (
+                        <Skeleton className="h-20 w-full rounded-xl" />
+                      ) : (
+                        <>
+                          <label className="flex items-center gap-3 cursor-pointer select-none text-sm font-bold text-slate-800 pb-2 border-b border-[var(--brand-color)]/15">
+                            <Checkbox
+                              checked={allUsers}
+                              onCheckedChange={(checked) => {
+                                const on = checked === true;
+                                setAllUsers(on);
+                                if (on) setSelectedGrades([]);
+                              }}
+                              className={cn(
+                                "border-2 border-[var(--brand-color)]/50 data-[state=checked]:bg-[var(--brand-color)] data-[state=checked]:border-[var(--brand-color)]",
+                                "focus-visible:ring-2 focus-visible:ring-[var(--brand-color)]/35"
+                              )}
+                            />
+                            <span>All users</span>
+                            <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--brand-color)] ml-auto">
+                              Every grade
+                            </span>
+                          </label>
+                          {formOptions.grades.map((grade) => (
+                            <label
+                              key={grade}
+                              className={cn(
+                                "flex items-center gap-3 select-none text-sm font-medium text-slate-700",
+                                allUsers ? "opacity-45 cursor-not-allowed" : "cursor-pointer"
+                              )}
+                            >
+                              <Checkbox
+                                disabled={allUsers}
+                                checked={selectedGrades.includes(grade)}
+                                onCheckedChange={(checked) => {
+                                  if (allUsers) return;
+                                  if (checked === true) {
+                                    setSelectedGrades((prev) =>
+                                      prev.includes(grade) ? prev : [...prev, grade]
+                                    );
+                                  } else {
+                                    setSelectedGrades((prev) => prev.filter((g) => g !== grade));
+                                  }
+                                }}
+                                className={cn(
+                                  "border-2 border-[var(--brand-color)]/50 data-[state=checked]:bg-[var(--brand-color)] data-[state=checked]:border-[var(--brand-color)]",
+                                  "focus-visible:ring-2 focus-visible:ring-[var(--brand-color)]/35"
+                                )}
+                              />
+                              <span>{grade}</span>
+                            </label>
+                          ))}
+                        </>
+                      )}
+                    </div>
                   </div>
 
                   <div className="space-y-2">
@@ -468,7 +607,8 @@ const KnowledgeBase: React.FC = () => {
             <TableHeader className="bg-slate-50/50">
               <TableRow className="hover:bg-transparent border-slate-50">
                 <TableHead className="font-bold text-slate-400 uppercase text-[10px] tracking-widest pl-8 w-[40%]">Document Title</TableHead>
-                <TableHead className="font-bold text-slate-400 uppercase text-[10px] tracking-widest">Classification</TableHead>
+                <TableHead className="font-bold text-slate-400 uppercase text-[10px] tracking-widest">Category</TableHead>
+                <TableHead className="font-bold text-slate-400 uppercase text-[10px] tracking-widest">Grades</TableHead>
                 <TableHead className="font-bold text-slate-400 uppercase text-[10px] tracking-widest">Source</TableHead>
                 <TableHead className="font-bold text-slate-400 uppercase text-[10px] tracking-widest">Last Synced</TableHead>
                 <TableHead className="w-[100px]"></TableHead>
@@ -493,9 +633,31 @@ const KnowledgeBase: React.FC = () => {
                     </div>
                   </TableCell>
                   <TableCell>
-                    <Badge variant="outline" className="bg-white font-bold text-xs ring-1 ring-slate-100 rounded-lg py-1 px-3">
+                    <Badge
+                      variant="outline"
+                      className="bg-[var(--brand-color)]/[0.06] font-bold text-xs rounded-lg py-1 px-3 max-w-[200px] whitespace-normal text-left border-[var(--brand-color)]/25 text-[var(--brand-color)] ring-1 ring-[var(--brand-color)]/15"
+                    >
                       {doc.category}
                     </Badge>
+                  </TableCell>
+                  <TableCell>
+                    {!docUsesSpecificGrades(doc.allowedGrades) ? (
+                      <span className="text-xs font-bold text-[var(--brand-color)]">All users</span>
+                    ) : (
+                      <div className="flex flex-wrap gap-1 max-w-[220px]">
+                        {(doc.allowedGrades ?? [])
+                          .filter((g) => EMPLOYEE_GRADE_KEYS.has(g))
+                          .map((g) => (
+                            <Badge
+                              key={g}
+                              variant="secondary"
+                              className="text-[10px] font-bold rounded-md px-2 py-0.5 bg-[var(--brand-color)]/10 text-[var(--brand-color)] ring-1 ring-[var(--brand-color)]/20 border-0"
+                            >
+                              {g}
+                            </Badge>
+                          ))}
+                      </div>
+                    )}
                   </TableCell>
                   <TableCell>
                     {doc.sourceFile ? (

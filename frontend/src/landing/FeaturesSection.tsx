@@ -1,13 +1,37 @@
 import { motion } from "framer-motion";
-import { Search, TrendingUp, ShieldCheck, ClipboardCheck, BookOpen, MessageSquare, Zap, Lock, ArrowRight } from "lucide-react";
+import { Search, TrendingUp, ShieldCheck, ClipboardCheck, BookOpen, ArrowRight } from "lucide-react";
 
 const features = [
-  { icon: MessageSquare, title: "Contextual Understanding", desc: "Nexa remembers the flow of your conversation to provide relevant and meaningful replies." },
-  { icon: Zap, title: "Instant Responses", desc: "Get fast, accurate answers without waiting — perfect for quick info and brainstorming." },
-  { icon: Lock, title: "Privacy & Security", desc: "Your conversations are private and protected with top-level security measures." },
-  { icon: BookOpen, title: "Continuous Learning", desc: "As new documents are approved, Nexa learns and evolves — always current, always accurate." },
-  { icon: ShieldCheck, title: "Role-Based Access", desc: "Granular permissions ensure every user only sees what they're authorized to access." },
-  { icon: TrendingUp, title: "AI-Powered Analysis", desc: "Analyze financial reports, spot trends, compare data across periods — all through natural conversation." },
+  {
+    icon: Search,
+    title: "Smart Document Search & Retrieval",
+    desc: "Find exactly what you need across thousands of documents. Nexa understands meaning, not just keywords.",
+    highlight: false,
+  },
+  {
+    icon: TrendingUp,
+    title: "AI-Powered Analysis",
+    desc: "Analyze financial reports, spot trends, compare data across periods — all through natural conversation.",
+    highlight: false,
+  },
+  {
+    icon: ShieldCheck,
+    title: "Role-Based Access & Security",
+    desc: "Granular permissions ensure every user only sees what they're authorized to access.",
+    highlight: true,
+  },
+  {
+    icon: ClipboardCheck,
+    title: "Compliance & Audit Readiness",
+    desc: "Instant access to policies and procedures. Full audit trails of every query and response.",
+    highlight: false,
+  },
+  {
+    icon: BookOpen,
+    title: "Continuous Learning Knowledge Base",
+    desc: "As new documents are approved, Nexa learns and evolves — always current, always accurate.",
+    highlight: false,
+  },
 ];
 
 const FeaturesSection = () => (
@@ -20,11 +44,8 @@ const FeaturesSection = () => (
         className="text-center mb-20"
       >
         <h2 className="text-3xl md:text-5xl font-extrabold tracking-tight text-[#1A1A1A] mb-6 font-sans">
-          Everything Your Organization <span className="gradient-text italic">Needs to Know</span>
+          Everything Your Organization <span className="gradient-text">Needs to Know</span>
         </h2>
-        <p className="text-muted-foreground max-w-2xl mx-auto text-lg leading-relaxed">
-          Nexa provides the tools to transform your static documents into an active, intelligent knowledge base.
-        </p>
       </motion.div>
 
       <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-10">
@@ -35,7 +56,11 @@ const FeaturesSection = () => (
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
             transition={{ delay: i * 0.1 }}
-            className="group relative p-10 rounded-[3rem] bg-white border border-border/40 hover:border-primary/30 shadow-[0_10px_40px_rgba(0,0,0,0.03)] hover:shadow-[0_30px_70px_rgba(0,0,0,0.12)] transition-all duration-700"
+            className={`group relative p-10 rounded-[3rem] bg-white border shadow-[0_10px_40px_rgba(0,0,0,0.03)] hover:shadow-[0_30px_70px_rgba(0,0,0,0.12)] transition-all duration-700 hover:border-primary/30 ${
+              f.highlight
+                ? "border-primary/40 ring-2 ring-primary/20"
+                : "border-border/40"
+            }`}
           >
             {/* Background Glow on Hover */}
             <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-accent/5 opacity-0 group-hover:opacity-100 transition-opacity duration-700 rounded-[3rem]" />

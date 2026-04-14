@@ -30,7 +30,7 @@ const PolicySchema = new Schema<PolicyDocument>(
     businessUnit: { type: String, required: true, index: true },
     allowedGrades: {
       type: [String],
-      enum: ["Executive", "Senior VP", "VP", "Associate", "Senior Analyst", "Analyst"],
+      enum: ["Executive", "Senior VP", "VP", "Associate", "Senior Analyst", "Analyst", "ALL"],
       default: []
     },
     uploadedBy: {

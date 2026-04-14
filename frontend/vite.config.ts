@@ -19,10 +19,6 @@ export default defineConfig({
       "/logos": {
         target: backendUrl,
         changeOrigin: true,
-      },
-      "/1879-22.png": {
-        target: backendUrl,
-        changeOrigin: true,
       }
     },
     middlewareMode: false

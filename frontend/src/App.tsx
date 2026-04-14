@@ -118,6 +118,8 @@ export const App: React.FC = () => {
   const [isHomeRecentCollapsed, setIsHomeRecentCollapsed] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const [isRecording, setIsRecording] = useState(false);
+  const [selectedAvatar, setSelectedAvatar] = useState<string>(() => localStorage.getItem("nexa-avatar") || "");
+  const [showAvatarPicker, setShowAvatarPicker] = useState(false);
   const recognitionRef = useRef<any>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -206,11 +208,13 @@ export const App: React.FC = () => {
           })();
           if (!isAdmin) {
             loadingStartTimeRef.current = Date.now();
-            // Redirect authenticated users to /user-chat if they're on / or /login
             if (window.location.pathname === "/" || window.location.pathname === "/login") {
               window.history.replaceState(null, "", "/user-chat");
             }
             loadConversations(savedToken);
+            if (!localStorage.getItem("nexa-avatar")) {
+              setShowAvatarPicker(true);
+            }
           } else {
             // If admin, we don't force redirect on load anymore
             // The navbar will provide access to the control panel
@@ -345,6 +349,9 @@ export const App: React.FC = () => {
       setIsConversationsLoading(true);
       axios.defaults.headers.common["Authorization"] = `Bearer ${authToken}`;
       await loadConversations(authToken);
+      if (!localStorage.getItem("nexa-avatar")) {
+        setShowAvatarPicker(true);
+      }
     }
   };
 
@@ -980,6 +987,10 @@ export const App: React.FC = () => {
               {theme === 'light' ? <BiMoon size={18} /> : <BiSun size={18} />}
               <span>{theme === 'light' ? 'Dark Mode' : 'Light Mode'}</span>
             </button>
+            <button className="theme-toggle-btn" onClick={() => setShowAvatarPicker(true)}>
+              <img src={selectedAvatar || "/avatar-1.png"} alt="" style={{ width: 18, height: 18, borderRadius: 4, objectFit: 'cover' }} />
+              <span>Change AI Assistant</span>
+            </button>
             <button className="sidebar-logout-btn" onClick={() => setLogoutConfirmOpen(true)}>
               <FiLogOut size={18} />
               <span>Logout</span>
@@ -1157,7 +1168,7 @@ export const App: React.FC = () => {
                   <div key={idx} className={`message-row-v2 ${m.role}`}>
                     {m.role === 'assistant' && (
                       <div className="message-avatar-v2">
-                        <img src="/avatar-1.png" alt="Nexa" className="bot-avatar-img" />
+                        <img src={selectedAvatar || "/avatar-1.png"} alt="Nexa" className="bot-avatar-img" />
                       </div>
                     )}
                     <div className="message-bubble-v2">
@@ -1276,6 +1287,52 @@ export const App: React.FC = () => {
               <div className="modal-footer-v2">
                 <button className="modal-btn-v2 secondary" onClick={() => setEditModalOpen(false)}>Cancel</button>
                 <button className="modal-btn-v2 primary" onClick={handleSaveEdit}>Save Changes</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showAvatarPicker && (
+          <div className="modal-overlay-v2" style={{ zIndex: 9999 }}>
+            <div className="avatar-picker-modal">
+              <div className="avatar-picker-header">
+                <div className="avatar-picker-icon">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                </div>
+                <h3>Choose Your AI Assistant</h3>
+                <p>Select the avatar you'd like as your Nexa AI assistant</p>
+              </div>
+              <div className="avatar-picker-grid">
+                {["/avatar-1.png", "/avatar-2.png"].map((avatar) => (
+                  <button
+                    key={avatar}
+                    className={`avatar-picker-option ${selectedAvatar === avatar ? "selected" : ""}`}
+                    onClick={() => setSelectedAvatar(avatar)}
+                  >
+                    <img src={avatar} alt="AI Assistant" />
+                    <span className="avatar-picker-label">{avatar === "/avatar-1.png" ? "Nexa" : "Nex"}</span>
+                    {selectedAvatar === avatar && (
+                      <div className="avatar-picker-check">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                      </div>
+                    )}
+                  </button>
+                ))}
+              </div>
+              <div className="avatar-picker-footer">
+                <button
+                  className="avatar-picker-confirm"
+                  disabled={!selectedAvatar}
+                  onClick={() => {
+                    if (selectedAvatar) {
+                      localStorage.setItem("nexa-avatar", selectedAvatar);
+                      setShowAvatarPicker(false);
+                    }
+                  }}
+                  style={{ background: `var(--brand-color, #ed0000)` }}
+                >
+                  Continue
+                </button>
               </div>
             </div>
           </div>
@@ -2593,6 +2650,176 @@ export const App: React.FC = () => {
           to { transform: translateY(0); opacity: 1; }
         }
 
+        .avatar-picker-modal {
+          background: white;
+          border-radius: 24px;
+          padding: 40px 36px 32px;
+          width: 100%;
+          max-width: 480px;
+          box-shadow: 0 25px 60px -12px rgba(0, 0, 0, 0.2);
+          animation: modalSlideUp 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+          text-align: center;
+        }
+
+        .avatar-picker-header {
+          margin-bottom: 32px;
+        }
+
+        .avatar-picker-icon {
+          width: 48px;
+          height: 48px;
+          border-radius: 14px;
+          background: linear-gradient(135deg, var(--brand-color, #ed0000), #ff4444);
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          margin-bottom: 16px;
+          color: white;
+        }
+
+        .avatar-picker-header h3 {
+          font-size: 22px;
+          font-weight: 700;
+          color: #111827;
+          margin: 0 0 8px;
+        }
+
+        .avatar-picker-header p {
+          font-size: 14px;
+          color: #6b7280;
+          margin: 0;
+        }
+
+        .avatar-picker-grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 16px;
+          margin-bottom: 28px;
+        }
+
+        .avatar-picker-option {
+          position: relative;
+          border: 2px solid #e5e7eb;
+          border-radius: 20px;
+          padding: 24px 16px 16px;
+          cursor: pointer;
+          background: #fafafa;
+          transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 12px;
+        }
+
+        .avatar-picker-option:hover {
+          border-color: #d1d5db;
+          background: #f5f5f5;
+          transform: translateY(-2px);
+          box-shadow: 0 8px 25px -5px rgba(0, 0, 0, 0.08);
+        }
+
+        .avatar-picker-option.selected {
+          border-color: var(--brand-color, #ed0000);
+          background: white;
+          box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand-color, #ed0000) 15%, transparent), 0 8px 25px -5px rgba(0, 0, 0, 0.08);
+          transform: translateY(-2px);
+        }
+
+        .avatar-picker-option img {
+          width: 120px;
+          height: 120px;
+          object-fit: contain;
+          border-radius: 16px;
+        }
+
+        .avatar-picker-label {
+          font-size: 15px;
+          font-weight: 600;
+          color: #374151;
+        }
+
+        .avatar-picker-option.selected .avatar-picker-label {
+          color: var(--brand-color, #ed0000);
+        }
+
+        .avatar-picker-check {
+          position: absolute;
+          top: 10px;
+          right: 10px;
+          width: 26px;
+          height: 26px;
+          border-radius: 50%;
+          background: var(--brand-color, #ed0000);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          animation: checkPop 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        @keyframes checkPop {
+          from { transform: scale(0); }
+          to { transform: scale(1); }
+        }
+
+        .avatar-picker-footer {
+          display: flex;
+          justify-content: center;
+        }
+
+        .avatar-picker-confirm {
+          width: 100%;
+          padding: 14px 32px;
+          border-radius: 14px;
+          font-size: 15px;
+          font-weight: 600;
+          color: white;
+          border: none;
+          cursor: pointer;
+          transition: all 0.2s ease;
+          letter-spacing: 0.3px;
+        }
+
+        .avatar-picker-confirm:hover:not(:disabled) {
+          opacity: 0.9;
+          transform: translateY(-1px);
+          box-shadow: 0 6px 20px -4px rgba(0, 0, 0, 0.2);
+        }
+
+        .avatar-picker-confirm:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+
+        .dark .avatar-picker-modal {
+          background: #1e1e1e;
+        }
+
+        .dark .avatar-picker-header h3 {
+          color: #f3f4f6;
+        }
+
+        .dark .avatar-picker-header p {
+          color: #9ca3af;
+        }
+
+        .dark .avatar-picker-option {
+          border-color: #374151;
+          background: #262626;
+        }
+
+        .dark .avatar-picker-option:hover {
+          border-color: #4b5563;
+          background: #2a2a2a;
+        }
+
+        .dark .avatar-picker-option.selected {
+          background: #1e1e1e;
+        }
+
+        .dark .avatar-picker-label {
+          color: #d1d5db;
+        }
+
         @media (max-width: 768px) {
           .sidebar-toggle-btn-header {
             display: flex;
@@ -2605,6 +2832,14 @@ export const App: React.FC = () => {
           }
           .recent-cards-v2 {
             grid-template-columns: 1fr;
+          }
+          .avatar-picker-modal {
+            padding: 28px 20px 24px;
+            max-width: 360px;
+          }
+          .avatar-picker-option img {
+            width: 90px;
+            height: 90px;
           }
         }
       `}</style>
