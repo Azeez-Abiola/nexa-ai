@@ -3,6 +3,8 @@ import mongoose, { Schema, Document } from "mongoose";
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
+  /** Cloudinary URLs for images attached to this message — preserved so follow-up turns can reference them. */
+  imageUrls?: string[];
   timestamp: Date;
 }
 
@@ -26,6 +28,7 @@ const MessageSchema = new Schema<ChatMessage>(
   {
     role: { type: String, enum: ["user", "assistant"], required: true },
     content: { type: String, required: true },
+    imageUrls: { type: [String], default: undefined },
     timestamp: { type: Date, default: Date.now }
   },
   { _id: false }

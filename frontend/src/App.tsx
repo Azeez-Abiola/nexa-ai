@@ -12,6 +12,7 @@ import { MdPushPin, MdAutoAwesome } from "react-icons/md";
 import { FiLogOut, FiDownload, FiTrash2, FiExternalLink } from "react-icons/fi";
 import { useLocation, useNavigate } from "react-router-dom";
 import { ChatGptStyleMenuIcon } from "./components/ChatGptStyleMenuIcon";
+import { WebcamCaptureModal } from "./components/WebcamCaptureModal";
 import { UserChatProfile } from "./UserChatProfile";
 import { Admin } from "./Admin";
 import { Login } from "./Login";
@@ -40,6 +41,7 @@ import {
 interface Message {
   role: "user" | "assistant";
   content: string;
+  imageUrls?: string[];
   timestamp: Date;
 }
 
@@ -191,6 +193,7 @@ export const App: React.FC = () => {
   const [isHomeRecentCollapsed, setIsHomeRecentCollapsed] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
+  const [webcamOpen, setWebcamOpen] = useState(false);
   const [copiedMessageIndex, setCopiedMessageIndex] = useState<number | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [selectedAvatar, setSelectedAvatar] = useState<string>(() => localStorage.getItem("nexa-avatar") || "");
@@ -1088,7 +1091,19 @@ export const App: React.FC = () => {
               role="menuitem"
               className="attach-picker-item"
               onClick={() => {
-                cameraInputRef.current?.click();
+                // Desktop: open an in-browser webcam modal so "Camera" actually opens the camera
+                // instead of falling back to the OS file picker (the `capture=` attribute is ignored
+                // on laptops). Mobile keeps the native capture flow which launches the device camera.
+                const isDesktop =
+                  typeof window !== "undefined" &&
+                  window.matchMedia("(pointer: fine) and (hover: hover)").matches &&
+                  !!navigator.mediaDevices?.getUserMedia;
+                if (isDesktop) {
+                  setAttachMenuOpen(false);
+                  setWebcamOpen(true);
+                } else {
+                  cameraInputRef.current?.click();
+                }
               }}
             >
               <span className="attach-picker-icon-circle">
@@ -1609,9 +1624,20 @@ export const App: React.FC = () => {
                       )}
                       <div className="message-bubble-wrap-v2">
                         <div className="message-bubble-v2">
-                          {m.content.split("\n").map((line, lIdx) => (
-                            <p key={lIdx}>{parseMarkdown(line)}</p>
-                          ))}
+                          {m.imageUrls && m.imageUrls.length > 0 ? (
+                            <div className="message-image-grid-v2">
+                              {m.imageUrls.map((url, iIdx) => (
+                                <a key={iIdx} href={url} target="_blank" rel="noreferrer">
+                                  <img src={url} alt="Attached" className="message-image-v2" />
+                                </a>
+                              ))}
+                            </div>
+                          ) : null}
+                          {m.content
+                            ? m.content.split("\n").map((line, lIdx) => (
+                                <p key={lIdx}>{parseMarkdown(line)}</p>
+                              ))
+                            : null}
                         </div>
                         <div className="message-copy-stack-v2">
                           <button
@@ -1703,6 +1729,12 @@ export const App: React.FC = () => {
           </>
           )}
         </main>
+
+        <WebcamCaptureModal
+          open={webcamOpen}
+          onClose={() => setWebcamOpen(false)}
+          onCapture={(file) => setAttachedFiles((prev) => [...prev, file])}
+        />
 
         {/* Modals */}
         {logoutConfirmOpen && (
@@ -3291,6 +3323,20 @@ export const App: React.FC = () => {
           border-bottom-left-radius: 2px;
         }
 
+        .message-image-grid-v2 {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+          gap: 6px;
+          margin-bottom: 8px;
+        }
+        .message-image-v2 {
+          width: 100%;
+          max-height: 260px;
+          object-fit: cover;
+          border-radius: 12px;
+          display: block;
+          cursor: zoom-in;
+        }
         .message-bubble-v2 p {
           margin: 0 0 8px;
         }

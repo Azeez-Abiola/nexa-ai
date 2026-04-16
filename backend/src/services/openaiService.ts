@@ -65,6 +65,9 @@ Rules: Only provide ${correctBUName} information. Ignore other BUs. When unsure,
 interface Message {
   role: "user" | "assistant" | "system";
   content: string;
+  /** Public image URLs (e.g. Cloudinary) attached to this historical message — expanded into
+   * multimodal content when sent to the model so past images stay visible in follow-up turns. */
+  imageUrls?: string[];
 }
 
 export interface PolicyContext {
@@ -233,19 +236,28 @@ export async function* streamAIResponse(
       userContent = userMessage;
     }
 
-    const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-      {
-        role: "system",
-        content: systemPrompt,
-      },
-      ...trimmedHistory.map((msg: Message) => ({
+    const historyMessages: OpenAI.Chat.ChatCompletionMessageParam[] = trimmedHistory.map((msg) => {
+      // Rehydrate images from prior user turns so follow-up questions about an earlier photo still work.
+      if (msg.role === "user" && msg.imageUrls && msg.imageUrls.length > 0) {
+        const parts: OpenAI.Chat.ChatCompletionContentPart[] = [
+          { type: "text" as const, text: msg.content || "" },
+          ...msg.imageUrls.map((url) => ({
+            type: "image_url" as const,
+            image_url: { url, detail: "auto" as const }
+          }))
+        ];
+        return { role: "user" as const, content: parts };
+      }
+      return {
         role: msg.role as "user" | "assistant" | "system",
-        content: msg.content,
-      })),
-      {
-        role: "user",
-        content: userContent,
-      },
+        content: msg.content
+      };
+    });
+
+    const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+      { role: "system", content: systemPrompt },
+      ...historyMessages,
+      { role: "user", content: userContent }
     ];
 
     const stream = (await (openai.chat.completions.create as any)({

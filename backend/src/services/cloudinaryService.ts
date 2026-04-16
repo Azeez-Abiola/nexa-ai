@@ -70,3 +70,44 @@ export async function deleteDocument(publicId: string): Promise<void> {
   await cloudinary.uploader.destroy(publicId, { resource_type: "raw" });
   logger.info("[Cloudinary] Deleted document", { publicId });
 }
+
+/**
+ * Upload a chat image (buffer) to Cloudinary under a per-user folder. Unlike uploadDocument which
+ * stores as "raw" for documents, images use the default image resource type so Cloudinary can
+ * serve optimized variants and return a URL that GPT-4o-mini can fetch via image_url.
+ */
+export async function uploadChatImage(
+  buffer: Buffer,
+  filename: string,
+  userId: string,
+  mimeType: string
+): Promise<{ publicId: string; secureUrl: string }> {
+  const sanitized = path
+    .basename(filename, path.extname(filename))
+    .replace(/[^a-zA-Z0-9_-]/g, "_")
+    .substring(0, 40);
+  const publicId = `${BASE_FOLDER}/chat-images/${userId}/${randomUUID()}-${sanitized}`;
+
+  return new Promise((resolve, reject) => {
+    const uploadStream = cloudinary.uploader.upload_stream(
+      {
+        public_id: publicId,
+        resource_type: "image",
+        overwrite: false
+      },
+      (error, result) => {
+        if (error || !result) {
+          logger.error("[Cloudinary] Chat image upload failed", { error, filename, userId });
+          return reject(error || new Error("Upload returned no result"));
+        }
+        logger.info("[Cloudinary] Chat image uploaded", { publicId: result.public_id, mimeType });
+        resolve({ publicId: result.public_id, secureUrl: result.secure_url });
+      }
+    );
+
+    const readable = new Readable();
+    readable.push(buffer);
+    readable.push(null);
+    readable.pipe(uploadStream);
+  });
+}

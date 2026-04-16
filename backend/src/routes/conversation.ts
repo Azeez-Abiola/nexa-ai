@@ -11,7 +11,7 @@ import {
 } from "../services/openaiService";
 import { buildContextForQuery } from "../utils/contextBuilder";
 import { KNOWLEDGE_BASE_VERSIONING_RULES } from "../prompts/knowledgeBaseBehavior";
-import { uploadDocument } from "../services/cloudinaryService";
+import { uploadDocument, uploadChatImage } from "../services/cloudinaryService";
 import { userDocumentQueue } from "../queue/userDocumentQueue";
 import {
   hasReadySessionChunks,
@@ -794,11 +794,33 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
       }
     }
 
-    // Convert images to base64 for OpenAI vision
+    // Convert images to base64 for the current turn (fastest path — no round trip to Cloudinary
+     // before the model sees them). We separately upload to Cloudinary to get persistent URLs that
+     // get stored on the message, so follow-up turns about the same image still work.
     const imageAttachments: ImageAttachment[] = imageFiles.map(f => ({
       base64: f.buffer.toString("base64"),
       mimeType: f.mimetype
     }));
+
+    // Upload images to Cloudinary in parallel; capture URLs for persistence. Failures are tolerated —
+    // the current turn still works via base64, we just lose cross-turn memory for that one image.
+    let persistedImageUrls: string[] = [];
+    if (imageFiles.length > 0) {
+      const uploads = await Promise.allSettled(
+        imageFiles.map((f) => uploadChatImage(f.buffer, f.originalname || "image", userId, f.mimetype))
+      );
+      persistedImageUrls = uploads
+        .map((u) => (u.status === "fulfilled" ? u.value.secureUrl : null))
+        .filter((u): u is string => !!u);
+      const failedCount = uploads.length - persistedImageUrls.length;
+      if (failedCount > 0) {
+        logger.warn("[Conversation/Stream] Some chat image uploads failed", {
+          userId,
+          total: uploads.length,
+          failed: failedCount
+        });
+      }
+    }
 
     // ── Load conversation ─────────────────────────────────────────────────────
     const userConversations = await Conversation.findOne({ userId });
@@ -872,7 +894,12 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
     }
 
     // ── Push user message ─────────────────────────────────────────────────────
-    const userMessage = { role: "user" as const, content, timestamp: new Date() };
+    const userMessage = {
+      role: "user" as const,
+      content,
+      timestamp: new Date(),
+      ...(persistedImageUrls.length > 0 ? { imageUrls: persistedImageUrls } : {})
+    };
     group.messages.push(userMessage);
 
     // ── Build context ─────────────────────────────────────────────────────────
@@ -942,7 +969,11 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
       const generator = streamAIResponse(
         aiUserMessage,
         policyContext,
-        group.messages.slice(0, -1).map((m) => ({ role: m.role, content: m.content })),
+        group.messages.slice(0, -1).map((m) => ({
+          role: m.role,
+          content: m.content,
+          ...(m.imageUrls && m.imageUrls.length > 0 ? { imageUrls: m.imageUrls } : {})
+        })),
         businessUnit,
         systemPrompt,
         imageAttachments.length > 0 ? imageAttachments : undefined

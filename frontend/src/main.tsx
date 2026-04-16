@@ -11,16 +11,22 @@ axios.defaults.baseURL = import.meta.env.VITE_API_URL || "";
 document.addEventListener("dragstart", (e) => e.preventDefault(), false);
 document.addEventListener("dragover", (e) => e.preventDefault(), false);
 document.addEventListener("drop", (e) => e.preventDefault(), false);
+// Block touch-pan only inside the fixed-layout chat shell, where the outer container is meant
+// to stay pinned. Everywhere else (landing, marketing pages, admin dashboards, auth screens)
+// must scroll normally — this used to be an allow-list and silently broke every new surface.
 document.addEventListener("touchmove", (e) => {
-  // Allow free scrolling in chat messages and sidebar
-  if (
-    e.target.closest(".chat-messages") ||
-    e.target.closest(".sidebar-conversations") ||
-    e.target.closest(".user-chat-profile-page")
-  ) {
-    return;
+  const target = e.target as Element | null;
+  if (!target || !target.closest) return;
+  const insideChatShell = target.closest(".ufl-root");
+  const insideScrollRegion =
+    target.closest(".chat-messages") ||
+    target.closest(".sidebar-conversations") ||
+    target.closest(".user-chat-profile-page") ||
+    target.closest(".messages-container-v2") ||
+    target.closest("[data-allow-scroll]");
+  if (insideChatShell && !insideScrollRegion) {
+    e.preventDefault();
   }
-  e.preventDefault();
 }, { passive: false });
 document.addEventListener("wheel", (e) => {
   if (e.ctrlKey) e.preventDefault();
