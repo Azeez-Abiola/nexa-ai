@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { cn } from '@/lib/utils';
-import { Routes, Route, useNavigate, Navigate, useLocation } from 'react-router-dom';
+import { Routes, Route, useNavigate, Navigate, useLocation } from "react-router-dom";
 import {
   Building2,
   Users,
@@ -9,19 +9,18 @@ import {
   LayoutDashboard,
   LogOut,
   UserCircle,
-  FolderOpen,
-  Menu,
   ChevronRight,
-  AlertCircle,
-  Loader2,
-  X,
-  Mail,
-  Building,
-  CheckCircle2,
-  BookOpen
+  BookOpen,
+  Network,
+  BarChart3,
+  HelpCircle,
+  Shield,
+  Settings,
+  Moon,
+  Sun
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Toaster } from "@/components/ui/toaster";
 import {
   AlertDialog,
@@ -38,12 +37,14 @@ import Tenants from './pages/Tenants';
 import KnowledgeBase from './pages/KnowledgeBase';
 import Administration from './pages/Administration';
 import EmailDomains from './pages/EmailDomains';
-import Directory from './pages/Directory';
 import AuditLogs from './pages/AuditLogs';
 import HelpSupport from './pages/HelpSupport';
 import UsersManagement from './pages/UsersManagement';
 import BusinessProfile from './pages/BusinessProfile';
-import { HelpCircle, Shield, Sun, Moon, Settings } from 'lucide-react';
+import AdminUserGroupsPage from './pages/AdminUserGroupsPage';
+import Analytics from './pages/Analytics';
+import { hexToHslSpace, DEFAULT_RING_HSL } from '@/lib/brandCss';
+import { ChatGptStyleMenuIcon } from '@/components/ChatGptStyleMenuIcon';
 
 interface SuperAdminMainProps {
   theme?: 'light' | 'dark';
@@ -52,9 +53,14 @@ interface SuperAdminMainProps {
 
 const SuperAdminMain: React.FC<SuperAdminMainProps> = ({ theme, toggleTheme }) => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
   const [user, setUser] = useState<any>(null);
+
+  useEffect(() => {
+    setMobileNavOpen(false);
+  }, [location.pathname]);
 
   useEffect(() => {
     const isSuper = location.pathname.startsWith('/super-admin');
@@ -71,11 +77,21 @@ const SuperAdminMain: React.FC<SuperAdminMainProps> = ({ theme, toggleTheme }) =
         try {
           const userData = JSON.parse(userStr);
           setUser(userData);
-          // Set dynamic brand color from tenant data
-          if (userData.tenantColor) {
-            document.documentElement.style.setProperty('--brand-color', userData.tenantColor);
+          const brandHex = userData.tenantColor || '#ed0000';
+          document.documentElement.style.setProperty('--brand-color', brandHex);
+          if (isSuper) {
+            document.documentElement.style.setProperty('--ring', DEFAULT_RING_HSL);
+            document.documentElement.style.setProperty('--sidebar-ring', DEFAULT_RING_HSL);
+            document.documentElement.style.setProperty('--primary', DEFAULT_RING_HSL);
+            document.documentElement.style.setProperty('--accent', '0 85% 38%');
+            document.documentElement.style.setProperty('--accent-foreground', '0 0% 100%');
           } else {
-            document.documentElement.style.setProperty('--brand-color', '#ed0000');
+            const ring = hexToHslSpace(brandHex);
+            document.documentElement.style.setProperty('--ring', ring);
+            document.documentElement.style.setProperty('--sidebar-ring', ring);
+            document.documentElement.style.setProperty('--primary', ring);
+            document.documentElement.style.setProperty('--accent', ring);
+            document.documentElement.style.setProperty('--accent-foreground', '0 0% 100%');
           }
         } catch (err) {
           console.error("Invalid session data:", err);
@@ -114,23 +130,31 @@ const SuperAdminMain: React.FC<SuperAdminMainProps> = ({ theme, toggleTheme }) =
   const menuItems = isSuperAdminContext ? [
     { name: 'Dashboard', path: '/super-admin/dashboard', icon: LayoutDashboard },
     { name: 'Tenants', path: '/super-admin/tenants', icon: Building2 },
+    { name: 'Analytics', path: '/super-admin/analytics', icon: BarChart3 },
     { name: 'Administration', path: '/super-admin/management', icon: ShieldCheck },
     { name: 'Email domains', path: '/super-admin/domains', icon: Globe },
-    { name: 'Registered BU', path: '/super-admin/directory', icon: FolderOpen },
   ] : [
     { name: 'Dashboard', path: '/admin/dashboard', icon: LayoutDashboard },
     { name: 'Knowledge Base', path: '/admin/knowledge', icon: BookOpen },
     { name: 'Users', path: '/admin/users', icon: Users },
+    { name: 'User groups', path: '/admin/user-groups', icon: Network },
+    { name: 'Analytics', path: '/admin/analytics', icon: BarChart3 },
     { name: 'Audit Logs', path: '/admin/audit', icon: Shield },
     { name: 'Help & Support', path: '/admin/help', icon: HelpCircle },
     { name: 'My Profile', path: '/admin/profile', icon: Settings },
   ];
 
   const currentPath = location.pathname;
+  const pageTitle = menuItems.find(i => i.path === currentPath)?.name || (isSuperAdminContext ? 'Super Admin' : 'Dashboard');
+
+  const goNav = (path: string) => {
+    navigate(path);
+    setMobileNavOpen(false);
+  };
 
   return (
     <div className={cn(
-      "flex h-screen font-['Inter', 'Sen', sans-serif] transition-colors duration-300",
+      "flex h-[100dvh] min-h-0 w-full max-w-full overflow-x-hidden font-['Inter', 'Sen', sans-serif] transition-colors duration-300",
       theme === 'dark' ? 'admin-dark' : 'bg-white'
     )}>
       {/* Sidebar - Desktop */}
@@ -177,7 +201,7 @@ const SuperAdminMain: React.FC<SuperAdminMainProps> = ({ theme, toggleTheme }) =
           <div>
             {isSidebarOpen && <p className={cn("px-4 text-[10px] tracking-[0.05em] font-bold mb-4", theme === 'dark' ? "text-gray-600" : "text-slate-400")}>Core management</p>}
             <div className="space-y-1.5">
-              {menuItems.slice(0, isSuperAdminContext ? 3 : 2).map((item) => (
+              {menuItems.slice(0, isSuperAdminContext ? 3 : 5).map((item) => (
                 <SidebarItem
                   key={item.name}
                   item={item}
@@ -194,7 +218,7 @@ const SuperAdminMain: React.FC<SuperAdminMainProps> = ({ theme, toggleTheme }) =
           <div>
             {isSidebarOpen && <p className={cn("px-4 text-[10px] tracking-[0.05em] font-bold mb-4", theme === 'dark' ? "text-gray-600" : "text-slate-400")}>System settings</p>}
             <div className="space-y-1.5">
-              {menuItems.slice(isSuperAdminContext ? 3 : 2).map((item) => (
+              {menuItems.slice(isSuperAdminContext ? 3 : 5).map((item) => (
                 <SidebarItem
                   key={item.name}
                   item={item}
@@ -213,10 +237,29 @@ const SuperAdminMain: React.FC<SuperAdminMainProps> = ({ theme, toggleTheme }) =
           "p-6 border-t",
           theme === 'dark' ? "border-[#333] bg-[#1a1a1a]" : "border-slate-100 bg-slate-50/50"
         )}>
+          {toggleTheme ? (
+            <button
+              type="button"
+              onClick={() => toggleTheme()}
+              className={cn(
+                "mb-2 w-full flex items-center gap-3 rounded-xl px-4 py-2.5 text-sm font-medium transition-colors",
+                !isSidebarOpen && "justify-center px-2",
+                theme === 'dark'
+                  ? "text-gray-400 hover:bg-[#333] hover:text-white"
+                  : "text-slate-600 hover:bg-slate-100"
+              )}
+              aria-label={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
+            >
+              {theme === 'light' ? <Moon size={18} strokeWidth={2} /> : <Sun size={18} strokeWidth={2} />}
+              {isSidebarOpen && <span>{theme === 'light' ? 'Dark Mode' : 'Light Mode'}</span>}
+            </button>
+          ) : null}
           <button
+            type="button"
             onClick={() => setShowLogoutConfirm(true)}
             className={cn(
               "w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl hover:text-[var(--brand-color)] transition-all duration-300 group",
+              !isSidebarOpen && "justify-center px-2",
               theme === 'dark'
                 ? "text-gray-400 hover:bg-[#333] hover:shadow-none"
                 : "text-slate-500 hover:bg-white hover:shadow-sm"
@@ -227,188 +270,306 @@ const SuperAdminMain: React.FC<SuperAdminMainProps> = ({ theme, toggleTheme }) =
           </button>
         </div>
 
-        <AlertDialog open={showLogoutConfirm} onOpenChange={setShowLogoutConfirm}>
-          <AlertDialogContent className={cn(
-            "rounded-[2.5rem] border-none shadow-2xl p-0 overflow-hidden sm:max-w-md",
-            theme === 'dark' ? "bg-[#2a2a2a]" : "bg-white"
-          )}>
-            <div className="p-10 pb-2">
-              <AlertDialogHeader>
-                <AlertDialogTitle className={cn("text-2xl font-black font-['Sen']", theme === 'dark' ? "text-white" : "text-slate-900")}>End your session?</AlertDialogTitle>
-                <AlertDialogDescription className={cn("font-medium leading-relaxed", theme === 'dark' ? "text-gray-400" : "text-slate-500")}>
-                  Are you sure you want to sign out of your administrative account?
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-            </div>
-            <AlertDialogFooter className={cn("p-8 pb-10 gap-3 flex-col sm:flex-row", theme === 'dark' ? "bg-[#2a2a2a]" : "bg-white")}>
-              <AlertDialogCancel className={cn(
-                "rounded-xl h-12 font-bold border-none transition-all flex-1",
-                theme === 'dark' ? "text-gray-400 bg-[#333] hover:bg-[#3f3f3f] hover:text-white" : "text-slate-500 bg-slate-50 hover:bg-slate-100 hover:text-slate-900"
-              )}>
-                Cancel
-              </AlertDialogCancel>
-              <AlertDialogAction
-                onClick={handleLogout}
-                className={cn(
-                  "rounded-xl h-12 text-white font-bold px-8 active:scale-95 transition-all flex-1",
-                  theme === 'dark' ? "bg-white/10 hover:bg-white/20 shadow-none" : "bg-slate-900 hover:bg-slate-800 shadow-lg shadow-slate-200"
-                )}
-              >
-                Sign out
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
       </aside>
 
-      {/* Main Content */}
-      <main className="flex-1 flex flex-col overflow-hidden">
-        {/* Header */}
-        <header className={cn(
-          "h-20 backdrop-blur-md flex items-center justify-between px-10 z-20 transition-colors duration-300",
-          theme === 'dark'
-            ? "bg-[#1a1a1a]/90 border-b border-[#333]"
-            : "bg-white/80 border-b border-slate-200"
-        )}>
-          <div className="flex items-center gap-6">
-            <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setIsSidebarOpen(!isSidebarOpen)}>
-              <Menu size={20} />
-            </Button>
-            <div className="flex items-center gap-3 text-xs font-semibold">
-              <span className={theme === 'dark' ? "text-gray-500" : "text-slate-400"}>Pages</span>
-              <ChevronRight size={12} className={theme === 'dark' ? "text-gray-600" : "text-slate-300"} />
-              <span className={cn("font-bold", theme === 'dark' ? "text-white" : "text-slate-900")}>{menuItems.find(i => i.path === currentPath)?.name || (isSuperAdminContext ? 'Super Admin' : 'Dashboard')}</span>
-            </div>
-          </div>
-
-          <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-2.5">
-            <img src="/1879-22.png" alt="1879" className="w-8 h-8 object-contain" />
-            <span className={cn(
-              "text-xl font-black font-['Sen'] tracking-tight",
-              theme === 'dark' ? "text-white" : "text-slate-900"
-            )}>Nexa.Ai</span>
-          </div>
-
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2 mr-2">
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => toggleTheme?.()}
-                className={cn(
-                  "w-10 h-10 rounded-xl",
-                  theme === 'dark' ? "hover:bg-[#333] text-gray-400" : "hover:bg-slate-100 text-slate-500"
-                )}
-              >
-                {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
-              </Button>
-            </div>
-
-            <div className="text-right hidden sm:block">
-              {user?.tenantLabel && !isSuperAdminContext && (
-                <p className="text-[10px] font-black text-[var(--brand-color)] uppercase tracking-widest mb-1.5">{user.tenantLabel}</p>
+      {/* Sheet controls mobile nav; SheetContent is a sibling of main so nested page Sheets do not break the tree */}
+      <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
+      <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        {/* Header — mobile: compact title row + tappable menu; desktop: centered brand */}
+        <header
+          className={cn(
+            "relative z-[70] isolate shrink-0 border-b backdrop-blur-md transition-colors duration-300",
+            theme === 'dark' ? "border-[#333] bg-[#1a1a1a]/90" : "border-slate-200 bg-white/80"
+          )}
+        >
+          {/* Mobile */}
+          <div className="flex min-h-[3.25rem] items-center gap-2 px-2.5 py-2 md:hidden">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className={cn(
+                "relative z-[80] h-11 w-11 shrink-0 touch-manipulation rounded-xl",
+                theme === 'dark' ? "text-gray-200 hover:bg-[#333]" : "text-slate-700 hover:bg-slate-100"
               )}
-              <p className={cn("text-sm font-bold leading-none", theme === 'dark' ? "text-white" : "text-slate-900")}>{user?.fullName || user?.email}</p>
+              aria-label="Open navigation menu"
+              aria-expanded={mobileNavOpen}
+              onClick={() => setMobileNavOpen(true)}
+            >
+              <ChatGptStyleMenuIcon size={22} />
+            </Button>
+            <div className="min-w-0 flex-1 overflow-hidden pr-1">
+              <p className={cn("truncate text-[10px] font-semibold uppercase tracking-wide", theme === 'dark' ? "text-gray-500" : "text-slate-400")}>
+                Pages <span className="mx-1 opacity-50">·</span> {pageTitle}
+              </p>
+              <p className={cn("mt-0.5 truncate text-sm font-bold leading-tight", theme === 'dark' ? "text-gray-100" : "text-slate-900")}>
+                {isSuperAdminContext ? "Nexa AI" : (user?.tenantLabel || user?.businessUnit || "Admin")}
+              </p>
             </div>
-            <div className={cn(
-              "w-11 h-11 rounded-2xl flex items-center justify-center hover:text-[var(--brand-color)] hover:border-[var(--brand-color)]/20 transition-all cursor-pointer",
-              theme === 'dark'
-                ? "bg-[#333] border border-[#3f3f3f] text-gray-400"
-                : "bg-slate-50 border border-slate-200 text-slate-400"
-            )}>
-              <UserCircle size={26} strokeWidth={1.5} />
+            <div
+              className={cn(
+                "flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border transition-colors",
+                theme === 'dark'
+                  ? "border-[#3f3f3f] bg-[#333] text-gray-400"
+                  : "border-slate-200 bg-slate-50 text-slate-400"
+              )}
+              aria-hidden
+            >
+              <UserCircle size={22} strokeWidth={1.5} />
+            </div>
+          </div>
+
+          {/* Desktop */}
+          <div className="relative hidden min-h-[5rem] items-center justify-between px-6 py-3 lg:px-10 md:flex">
+            <div className="flex min-w-0 flex-1 items-center gap-6">
+              <div className="flex min-w-0 items-center gap-3 text-xs font-semibold">
+                <span className={theme === 'dark' ? "text-gray-500" : "text-slate-400"}>Pages</span>
+                <ChevronRight size={12} className={cn("shrink-0", theme === 'dark' ? "text-gray-600" : "text-slate-300")} />
+                <span className={cn("truncate font-bold", theme === 'dark' ? "text-white" : "text-slate-900")}>{pageTitle}</span>
+              </div>
+            </div>
+
+            <div className="pointer-events-none absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center gap-2.5">
+              <img src="/1879-22.png" alt="" className="h-8 w-8 object-contain" width={32} height={32} />
+              <span className={cn("whitespace-nowrap font-['Sen'] text-xl font-black tracking-tight", theme === 'dark' ? "text-white" : "text-slate-900")}>
+                Nexa.Ai
+              </span>
+            </div>
+
+            <div className="flex min-w-0 flex-1 items-center justify-end gap-4">
+              <div className="hidden text-right sm:block">
+                {user?.tenantLabel && !isSuperAdminContext && (
+                  <p className="mb-1.5 text-[10px] font-black uppercase tracking-widest text-[var(--brand-color)]">{user.tenantLabel}</p>
+                )}
+                <p className={cn("text-sm font-bold leading-none", theme === 'dark' ? "text-white" : "text-slate-900")}>{user?.fullName || user?.email}</p>
+              </div>
+              <div
+                className={cn(
+                  "flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border transition-colors",
+                  theme === 'dark'
+                    ? "border-[#3f3f3f] bg-[#333] text-gray-400"
+                    : "border-slate-200 bg-slate-50 text-slate-400"
+                )}
+                aria-hidden
+              >
+                <UserCircle size={26} strokeWidth={1.5} />
+              </div>
             </div>
           </div>
         </header>
 
-        {/* Content Area */}
-        <div className={cn(
-          "flex-1 overflow-y-auto p-10 transition-colors duration-300",
-          theme === 'dark' ? "bg-[#242424]" : "bg-slate-50/50"
-        )}>
-          <Routes>
-            {/* Business Admin Routes - Only accessible if NOT super admin */}
-            {!isSuperAdminContext ? (
-              <>
-                <Route path="/admin/dashboard" element={<Dashboard />} />
-                <Route path="/admin/knowledge" element={<KnowledgeBase />} />
-                <Route path="/admin/users" element={<UsersManagement />} />
-                <Route path="/admin/audit" element={<AuditLogs />} />
-                <Route path="/admin/help" element={<HelpSupport />} />
-                <Route path="/admin/profile" element={<BusinessProfile />} />
-                <Route path="*" element={<Navigate to="/admin/dashboard" replace />} />
-              </>
-            ) : (
-              <>
-                {/* Super Admin Routes */}
-                <Route path="/super-admin/dashboard" element={<Dashboard />} />
-                <Route path="/super-admin/tenants" element={<Tenants />} />
-                <Route path="/super-admin/management" element={<Administration />} />
-                <Route path="/super-admin/domains" element={<EmailDomains />} />
-                <Route path="/super-admin/directory" element={<Directory />} />
-                <Route path="*" element={<Navigate to="/super-admin/dashboard" replace />} />
-              </>
+        {/* Content: scrollable pages + fixed footer strip */}
+        <div className="flex flex-1 flex-col min-h-0 overflow-hidden">
+          <div
+            className={cn(
+              "flex-1 min-h-0 min-w-0 overflow-x-hidden overflow-y-auto px-4 py-6 sm:px-6 sm:py-8 md:p-10 transition-colors duration-300",
+              theme === 'dark' ? "bg-[#242424]" : "bg-slate-50/50"
             )}
-          </Routes>
+          >
+            <Routes>
+              {!isSuperAdminContext ? (
+                <>
+                  <Route path="/admin/dashboard" element={<Dashboard />} />
+                  <Route path="/admin/analytics" element={<Analytics />} />
+                  <Route path="/admin/knowledge" element={<KnowledgeBase />} />
+                  <Route path="/admin/user-groups" element={<AdminUserGroupsPage />} />
+                  <Route path="/admin/knowledge-groups" element={<Navigate to="/admin/user-groups" replace />} />
+                  <Route path="/admin/users" element={<UsersManagement />} />
+                  <Route path="/admin/audit" element={<AuditLogs />} />
+                  <Route path="/admin/help" element={<HelpSupport />} />
+                  <Route path="/admin/profile" element={<BusinessProfile />} />
+                  <Route path="*" element={<Navigate to="/admin/dashboard" replace />} />
+                </>
+              ) : (
+                <>
+                  <Route path="/super-admin/dashboard" element={<Dashboard />} />
+                  <Route path="/super-admin/analytics" element={<Analytics />} />
+                  <Route path="/super-admin/tenants" element={<Tenants />} />
+                  <Route path="/super-admin/knowledge" element={<Navigate to="/super-admin/dashboard" replace />} />
+                  <Route path="/super-admin/user-groups" element={<Navigate to="/super-admin/tenants" replace />} />
+                  <Route path="/super-admin/knowledge-groups" element={<Navigate to="/super-admin/tenants" replace />} />
+                  <Route path="/super-admin/management" element={<Administration />} />
+                  <Route path="/super-admin/domains" element={<EmailDomains />} />
+                  <Route path="/super-admin/directory" element={<Navigate to="/super-admin/tenants?tab=registered" replace />} />
+                  <Route path="*" element={<Navigate to="/super-admin/dashboard" replace />} />
+                </>
+              )}
+            </Routes>
+          </div>
+          <div
+            className={cn(
+              "shrink-0 flex flex-wrap items-center justify-center gap-2 py-4 px-6 text-[11px] font-bold border-t",
+              theme === 'dark' ? "border-[#333] bg-[#1a1a1a] text-gray-500" : "border-slate-200 bg-white text-slate-500"
+            )}
+          >
+            <img src="/1879-22.png" alt="" className="w-5 h-5 object-contain opacity-90" width={20} height={20} />
+            <span>Powered by 1879 Tech Hub</span>
+          </div>
           <Toaster />
         </div>
       </main>
+
+      <SheetContent
+            side="left"
+            className={cn(
+              "flex h-full w-[min(100%,20rem)] max-w-full flex-col gap-0 border-r p-0 sm:max-w-sm",
+              theme === 'dark' ? "border-[#333] bg-[#1a1a1a]" : "border-slate-200 bg-white"
+            )}
+          >
+            <SheetHeader className={cn("border-b p-6 text-left", theme === 'dark' ? "border-[#333]" : "border-slate-100")}>
+              <div className="flex items-center gap-3">
+                <div className={cn("flex h-12 w-12 items-center justify-center overflow-hidden rounded-2xl border p-2 shadow-sm", theme === 'dark' ? "border-[#3f3f3f] bg-[#2a2a2a]" : "border-slate-100 bg-white")}>
+                  {user?.tenantLogo ? (
+                    <img
+                      src={user.tenantLogo.startsWith('http') ? user.tenantLogo : `${import.meta.env.VITE_API_URL || ''}/logos/${user.tenantLogo.replace(/^\/logos\//, '')}`}
+                      alt=""
+                      className="h-full w-full object-contain"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).src = "/1879-22.png";
+                      }}
+                    />
+                  ) : (
+                    <img src="/1879-22.png" alt="" className="h-full w-full object-contain" />
+                  )}
+                </div>
+                <div className="min-w-0">
+                  <SheetTitle className={cn("text-left font-['Sen'] text-lg font-bold", theme === 'dark' ? "text-white" : "text-slate-900")}>
+                    {isSuperAdminContext ? 'Nexa AI' : (user?.tenantLabel || user?.businessUnit || 'Admin')}
+                  </SheetTitle>
+                  <p className={cn("text-xs font-semibold", theme === 'dark' ? "text-gray-500" : "text-slate-400")}>
+                    {isSuperAdminContext ? 'Super Admin' : 'Business admin'}
+                  </p>
+                </div>
+              </div>
+            </SheetHeader>
+            <nav className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-4">
+              {menuItems.map((item) => {
+                const active = currentPath === item.path;
+                return (
+                  <button
+                    key={item.path}
+                    type="button"
+                    onClick={() => goNav(item.path)}
+                    className={cn(
+                      "flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-bold transition-colors",
+                      active
+                        ? "bg-[color-mix(in_srgb,var(--brand-color)_14%,transparent)] text-[var(--brand-color)]"
+                        : theme === 'dark'
+                          ? "text-gray-400 hover:bg-[#333] hover:text-white"
+                          : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+                    )}
+                  >
+                    <item.icon size={20} className={cn("shrink-0", active ? "text-[var(--brand-color)]" : "")} />
+                    {item.name}
+                  </button>
+                );
+              })}
+            </nav>
+            <div className={cn("mt-auto border-t p-4", theme === 'dark' ? "border-[#333]" : "border-slate-100")}>
+              {toggleTheme ? (
+                <button
+                  type="button"
+                  onClick={() => toggleTheme()}
+                  className={cn(
+                    "mb-2 flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-bold transition-colors",
+                    theme === 'dark' ? "text-gray-400 hover:bg-[#333] hover:text-white" : "text-slate-600 hover:bg-slate-50"
+                  )}
+                  aria-label={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
+                >
+                  {theme === 'light' ? <Moon size={20} strokeWidth={2} /> : <Sun size={20} strokeWidth={2} />}
+                  {theme === 'light' ? 'Dark Mode' : 'Light Mode'}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => {
+                  setMobileNavOpen(false);
+                  setShowLogoutConfirm(true);
+                }}
+                className={cn(
+                  "flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-sm font-bold transition-colors",
+                  theme === 'dark' ? "text-gray-400 hover:bg-[#333] hover:text-white" : "text-slate-500 hover:bg-slate-50"
+                )}
+              >
+                <LogOut size={20} />
+                Sign out
+              </button>
+            </div>
+          </SheetContent>
+      </Sheet>
+
+      <AlertDialog open={showLogoutConfirm} onOpenChange={setShowLogoutConfirm}>
+        <AlertDialogContent className={cn(
+          "rounded-[2.5rem] border-none shadow-2xl p-0 overflow-hidden sm:max-w-md",
+          theme === 'dark' ? "bg-[#2a2a2a]" : "bg-white"
+        )}>
+          <div className="p-10 pb-2">
+            <AlertDialogHeader>
+              <AlertDialogTitle className={cn("text-2xl font-black font-['Sen']", theme === 'dark' ? "text-white" : "text-slate-900")}>End your session?</AlertDialogTitle>
+              <AlertDialogDescription className={cn("font-medium leading-relaxed", theme === 'dark' ? "text-gray-400" : "text-slate-500")}>
+                Are you sure you want to sign out of your administrative account?
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+          </div>
+          <AlertDialogFooter className={cn("p-8 pb-10 gap-3 flex-col sm:flex-row", theme === 'dark' ? "bg-[#2a2a2a]" : "bg-white")}>
+            <AlertDialogCancel className={cn(
+              "rounded-xl h-12 font-bold border-none transition-all flex-1",
+              theme === 'dark' ? "text-gray-400 bg-[#333] hover:bg-[#3f3f3f] hover:text-white" : "text-slate-500 bg-slate-50 hover:bg-slate-100 hover:text-slate-900"
+            )}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleLogout}
+              className={cn(
+                "rounded-xl h-12 text-white font-bold px-8 active:scale-95 transition-all flex-1",
+                theme === 'dark' ? "bg-white/10 hover:bg-white/20 shadow-none" : "bg-slate-900 hover:bg-slate-800 shadow-lg shadow-slate-200"
+              )}
+            >
+              Sign out
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
 
 const SidebarItem = ({ item, currentPath, isSidebarOpen, user, isDark, onClick }: any) => {
   const isActive = currentPath === item.path;
-  const brandColor = getComputedStyle(document.documentElement).getPropertyValue('--brand-color').trim() || '#ed0000';
-  
+
   return (
     <button
+      type="button"
       onClick={onClick}
       className={cn(
-        "w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all duration-300 group relative",
+        "w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-colors duration-200 group relative",
+        "outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0 ring-0 ring-offset-0",
         isActive
-          ? "bg-opacity-10 shadow-sm ring-1"
+          ? "text-[var(--brand-color)] bg-[color-mix(in_srgb,var(--brand-color)_12%,transparent)] font-semibold"
           : isDark
             ? "text-gray-400 hover:bg-[#333] hover:text-white"
-            : "text-slate-500 hover:bg-slate-50 hover:text-slate-900",
-        isActive && (isDark ? "ring-[#3f3f3f]" : "ring-slate-100")
+            : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
       )}
-      style={isActive ? { 
-        backgroundColor: `${brandColor}15`,
-        color: brandColor,
-      } : {}}
     >
-      <item.icon 
-        size={20} 
-        className={cn("transition-colors", isActive ? "text-current" : isDark ? "text-gray-500 group-hover:text-white" : "text-slate-400 group-hover:text-slate-900")}
-        style={isActive ? { color: brandColor } : {}}
+      <item.icon
+        size={20}
+        className={cn(
+          "transition-colors shrink-0",
+          isActive
+            ? "text-[var(--brand-color)]"
+            : isDark
+              ? "text-gray-500 group-hover:text-white"
+              : "text-slate-400 group-hover:text-slate-900"
+        )}
       />
       {isSidebarOpen && <span className="font-bold text-sm transition-colors">{item.name}</span>}
       {isActive && !isSidebarOpen && (
-        <div 
-          className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-6 rounded-l-full"
-          style={{ backgroundColor: brandColor }}
+        <div
+          className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-6 rounded-l-full bg-[var(--brand-color)]"
         />
       )}
     </button>
   );
 };
-
-const Loader2 = ({ className, size }: { className?: string, size?: number }) => (
-  <svg
-    xmlns="http://www.w3.org/2000/svg"
-    width={size || 24}
-    height={size || 24}
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className={cn("animate-spin", className)}
-  >
-    <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-  </svg>
-);
 
 export default SuperAdminMain;

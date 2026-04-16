@@ -3,7 +3,7 @@ import axios from "axios";
 import { motion, AnimatePresence } from "framer-motion";
 import { FiX, FiCheckCircle, FiEye, FiEyeOff, FiArrowRight, FiMail, FiLock, FiUser, FiBriefcase, FiChevronLeft } from "react-icons/fi";
 import { Sparkles } from "lucide-react";
-import { PrivacyPolicyFooter, PrivacyPolicy } from "./components/PrivacyPolicy";
+import { PrivacyPolicy } from "./components/PrivacyPolicy";
 import { Button } from "@/components/ui/button";
 
 interface LoginProps {
@@ -11,16 +11,6 @@ interface LoginProps {
 }
 
 type BusinessUnit = "GCL" | "LSF" | "CAP" | "UFL" | "CHI" | "UAC-Restaurants" | "UPDC" | "UACN";
-type EmployeeGrade = "Executive" | "Senior VP" | "VP" | "Associate" | "Senior Analyst" | "Analyst";
-
-const EMPLOYEE_GRADES: { label: string; value: EmployeeGrade }[] = [
-  { label: "Executive", value: "Executive" },
-  { label: "Senior VP", value: "Senior VP" },
-  { label: "VP", value: "VP" },
-  { label: "Associate", value: "Associate" },
-  { label: "Senior Analyst", value: "Senior Analyst" },
-  { label: "Analyst", value: "Analyst" },
-];
 
 const DEFAULT_BUSINESS_UNITS: { label: string; value: BusinessUnit }[] = [
   { label: "Grand Cereals Limited (GCL)", value: "GCL" },
@@ -39,9 +29,11 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
-  const [businessUnit, setBusinessUnit] = useState<BusinessUnit | "">();
-  const [grade, setGrade] = useState<EmployeeGrade | "">("");
+  const [businessUnit, setBusinessUnit] = useState<BusinessUnit | "">("");
   const [businessUnits, setBusinessUnits] = useState<{ label: string; value: BusinessUnit }[]>(DEFAULT_BUSINESS_UNITS);
+  /** BU fixed from invite link (?businessUnit= or ?bu=) — employee signup only */
+  const [buFromInvite, setBuFromInvite] = useState(false);
+  const [inviteBuInvalid, setInviteBuInvalid] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
@@ -87,6 +79,55 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
   }, []);
 
   useEffect(() => {
+    if (typeof window === "undefined" || isAdminView) return;
+    const sp = new URLSearchParams(window.location.search);
+    if (sp.get("register") === "1" || sp.get("signup") === "1") {
+      setIsLogin(false);
+    }
+    const presetEmail = sp.get("email");
+    if (presetEmail) {
+      try {
+        setEmail(decodeURIComponent(presetEmail.trim()));
+      } catch {
+        setEmail(presetEmail.trim());
+      }
+    }
+  }, [isAdminView]);
+
+  useEffect(() => {
+    if (isAdminView) return;
+    const raw =
+      typeof window !== "undefined"
+        ? new URLSearchParams(window.location.search).get("businessUnit") ||
+          new URLSearchParams(window.location.search).get("bu")
+        : null;
+    if (!raw || !raw.trim()) {
+      setBuFromInvite(false);
+      setInviteBuInvalid(false);
+      return;
+    }
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(raw.trim());
+    } catch {
+      decoded = raw.trim();
+    }
+    const match = businessUnits.find(
+      (bu) =>
+        bu.value === decoded ||
+        String(bu.value).toLowerCase() === decoded.toLowerCase()
+    );
+    if (match) {
+      setBusinessUnit(match.value);
+      setBuFromInvite(true);
+      setInviteBuInvalid(false);
+    } else {
+      setBuFromInvite(false);
+      setInviteBuInvalid(true);
+    }
+  }, [businessUnits, isAdminView]);
+
+  useEffect(() => {
     if (success) {
       const timer = setTimeout(() => {
         setSuccess(false);
@@ -95,7 +136,6 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
         setPassword("");
         setFullName("");
         setBusinessUnit("");
-        setGrade("");
       }, 3000);
       return () => clearTimeout(timer);
     }
@@ -134,7 +174,10 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
     try {
       const base = isAdminView ? "/api/v1/admin/auth" : "/api/v1/auth";
       const endpoint = `${base}/register`;
-      const payload = { email, password, fullName, businessUnit, grade };
+      const payload =
+        isAdminView
+          ? { email, password, fullName, businessUnit }
+          : { email, password, fullName, businessUnit };
       await axios.post(endpoint, payload);
       setShowConfirmation(false);
       setVerificationEmail(email);
@@ -194,7 +237,6 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
         setPassword("");
         setFullName("");
         setBusinessUnit("");
-        setGrade("");
       }, 3000);
     } catch (err: any) {
       setVerificationError(err.response?.data?.error || "Invalid or expired OTP");
@@ -321,6 +363,12 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-6">
+            {!isLogin && !isAdminView && inviteBuInvalid && (
+              <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/25 text-amber-900 text-sm font-medium">
+                This invite link includes an organization code we don&apos;t recognize. Choose your business unit below,
+                or ask your admin for an updated link.
+              </div>
+            )}
             {!isLogin && (
               <>
                 <div className="space-y-2">
@@ -337,46 +385,43 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
                     />
                   </div>
                 </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-bold text-[#1A1A1A] ml-1">Business Unit</label>
-                  <div className="relative group">
-                    <FiBriefcase className="absolute left-5 top-1/2 -translate-y-1/2 text-muted-foreground group-focus-within:text-primary transition-colors" />
-                    <select
-                      value={businessUnit || ""}
-                      onChange={(e) => setBusinessUnit(e.target.value as BusinessUnit)}
-                      required={!isLogin}
-                      className="w-full pl-14 pr-12 py-5 bg-[#F8F9FF] border border-border/60 rounded-2xl focus:outline-none focus:border-primary/40 focus:ring-4 focus:ring-primary/5 transition-all font-medium text-[#1A1A1A] appearance-none cursor-pointer"
-                    >
-                      <option value="">Select your department</option>
-                      {businessUnits.map((bu) => (
-                        <option key={bu.value} value={bu.value}>{bu.label}</option>
-                      ))}
-                    </select>
-                    <div className="absolute right-5 top-1/2 -translate-y-1/2 pointer-events-none text-muted-foreground">
-                      <FiArrowRight className="rotate-90 w-4 h-4" />
+                {!isAdminView && buFromInvite ? (
+                  <div className="space-y-2">
+                    <label className="text-sm font-bold text-[#1A1A1A] ml-1">Organization</label>
+                    <div className="relative flex items-center gap-3 pl-14 pr-5 py-5 bg-[#F8F9FF] border border-border/60 rounded-2xl font-medium text-[#1A1A1A]">
+                      <FiBriefcase className="absolute left-5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                      <span>
+                        {businessUnits.find((bu) => bu.value === businessUnit)?.label || businessUnit}
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground ml-1">
+                      Set from your invite link. Access to documents is managed by your team&apos;s groups.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <label className="text-sm font-bold text-[#1A1A1A] ml-1">Business Unit</label>
+                    <div className="relative group">
+                      <FiBriefcase className="absolute left-5 top-1/2 -translate-y-1/2 text-muted-foreground group-focus-within:text-primary transition-colors" />
+                      <select
+                        value={businessUnit || ""}
+                        onChange={(e) => setBusinessUnit(e.target.value as BusinessUnit)}
+                        required={!isLogin}
+                        className="w-full pl-14 pr-12 py-5 bg-[#F8F9FF] border border-border/60 rounded-2xl focus:outline-none focus:border-primary/40 focus:ring-4 focus:ring-primary/5 transition-all font-medium text-[#1A1A1A] appearance-none cursor-pointer"
+                      >
+                        <option value="">Select your department</option>
+                        {businessUnits.map((bu) => (
+                          <option key={bu.value} value={bu.value}>
+                            {bu.label}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="absolute right-5 top-1/2 -translate-y-1/2 pointer-events-none text-muted-foreground">
+                        <FiArrowRight className="rotate-90 w-4 h-4" />
+                      </div>
                     </div>
                   </div>
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-bold text-[#1A1A1A] ml-1">Grade / Level</label>
-                  <div className="relative group">
-                    <FiUser className="absolute left-5 top-1/2 -translate-y-1/2 text-muted-foreground group-focus-within:text-primary transition-colors" />
-                    <select
-                      value={grade}
-                      onChange={(e) => setGrade(e.target.value as EmployeeGrade)}
-                      required={!isLogin}
-                      className="w-full pl-14 pr-12 py-5 bg-[#F8F9FF] border border-border/60 rounded-2xl focus:outline-none focus:border-primary/40 focus:ring-4 focus:ring-primary/5 transition-all font-medium text-[#1A1A1A] appearance-none cursor-pointer"
-                    >
-                      <option value="">Select your grade</option>
-                      {EMPLOYEE_GRADES.map((g) => (
-                        <option key={g.value} value={g.value}>{g.label}</option>
-                      ))}
-                    </select>
-                    <div className="absolute right-5 top-1/2 -translate-y-1/2 pointer-events-none text-muted-foreground">
-                      <FiArrowRight className="rotate-90 w-4 h-4" />
-                    </div>
-                  </div>
-                </div>
+                )}
               </>
             )}
 
@@ -577,7 +622,6 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
                 {[
                   { label: "Full Name", value: fullName },
                   { label: "Business Unit", value: businessUnits.find(bu => bu.value === businessUnit)?.label || businessUnit },
-                  { label: "Grade", value: grade },
                   { label: "Email", value: email }
                 ].map((item, i) => (
                   <div key={i} className="p-4 rounded-2xl bg-[#F8F9FF] border border-border/40">
@@ -653,7 +697,7 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
       </AnimatePresence>
 
       {showPolicy && (
-        <PrivacyPolicy isOpen={showPolicy} onClose={() => setShowPolicy(false)} type="user" />
+        <PrivacyPolicy isOpen={showPolicy} onClose={() => setShowPolicy(false)} type="user" variant="light" />
       )}
     </div>
   );

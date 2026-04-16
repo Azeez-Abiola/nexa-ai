@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
+import { useNavigate } from "react-router-dom";
 import { ArrowRight, Play, Sparkles, Send, Brain, Shield, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 const HeroSection = () => {
+  const navigate = useNavigate();
   const [inputValue, setInputValue] = useState("");
   const [messages, setMessages] = useState([
     { role: "assistant", content: "How can I help you optimize your organizational knowledge today?" }
@@ -20,7 +22,7 @@ const HeroSection = () => {
   };
 
   return (
-    <section className="relative min-h-[90vh] flex items-center justify-center overflow-hidden pt-32 pb-12 bg-[#F8F9FF]">
+    <section className="relative min-h-[88vh] sm:min-h-[90vh] flex items-center justify-center overflow-hidden pt-24 pb-10 sm:pt-28 md:pt-32 sm:pb-12 bg-[#F8F9FF]">
       {/* Background Decorative Elements */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-[-10%] right-[-5%] w-[600px] h-[600px] bg-primary/5 rounded-full blur-[120px]" />
@@ -49,24 +51,14 @@ const HeroSection = () => {
         </svg>
       </div>
 
-      <div className="container relative z-10 mx-auto px-6">
+      <div className="container relative z-10 mx-auto px-4 sm:px-6">
         <div className="max-w-5xl mx-auto text-center">
-          <motion.div
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, delay: 0.05 }}
-            className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-white/80 px-4 py-2 text-xs font-semibold text-muted-foreground shadow-sm mb-8"
-          >
-            <span className="h-1.5 w-1.5 rounded-full bg-primary" aria-hidden />
-            Enterprise AI Assistant
-          </motion.div>
-
           {/* Main Headline */}
           <motion.h1
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.8, delay: 0.1 }}
-            className="text-4xl md:text-6xl lg:text-7xl font-extrabold tracking-tight leading-[1.1] mb-8 text-[#1A1A1A] font-sans"
+            className="text-[1.65rem] leading-tight sm:text-4xl md:text-6xl lg:text-7xl font-extrabold tracking-tight sm:leading-[1.1] mb-6 sm:mb-8 text-[#1A1A1A] font-sans px-1"
           >
             The Intelligent <span className="gradient-text">Brain of Your</span> Organization
           </motion.h1>
@@ -76,7 +68,7 @@ const HeroSection = () => {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.8, delay: 0.2 }}
-            className="text-lg md:text-xl text-muted-foreground max-w-2xl mx-auto mb-12 leading-relaxed"
+            className="text-base sm:text-lg md:text-xl text-muted-foreground max-w-2xl mx-auto mb-8 sm:mb-12 leading-relaxed px-1"
           >
             Nexa connects your people to your knowledge. Ask questions, get instant answers from approved internal documents — securely, intelligently, instantly.
           </motion.p>
@@ -86,13 +78,24 @@ const HeroSection = () => {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.8, delay: 0.3 }}
-            className="flex flex-col sm:flex-row gap-5 justify-center items-center mb-14"
+            className="flex flex-col sm:flex-row gap-3 sm:gap-5 justify-center items-stretch sm:items-center mb-10 sm:mb-14 w-full max-w-md sm:max-w-none mx-auto"
           >
-            <Button size="lg" className="h-14 px-10 text-base font-bold rounded-full shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/30 transition-all group bg-primary">
+            <Button
+              size="lg"
+              type="button"
+              className="inline-flex h-12 sm:h-14 px-8 sm:px-10 w-full sm:w-auto text-base font-bold rounded-full shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/30 transition-all group bg-primary items-center justify-center"
+              onClick={() => navigate("/contact?intent=demo")}
+            >
               Request Demo
               <ArrowRight className="ml-2 w-5 h-5 group-hover:translate-x-1 transition-transform" />
             </Button>
-          <Button size="lg" variant="outline" className="h-14 px-10 text-base font-bold rounded-full border-2 bg-white/50 backdrop-blur-sm group hover:bg-white hover:border-primary/30 hover:shadow-xl hover:shadow-primary/5 transition-all duration-300">
+          <Button
+            size="lg"
+            type="button"
+            variant="outline"
+            className="inline-flex h-12 sm:h-14 px-8 sm:px-10 w-full sm:w-auto text-base font-bold rounded-full border-2 bg-white/50 backdrop-blur-sm group hover:bg-white hover:border-primary/30 hover:shadow-xl hover:shadow-primary/5 transition-all duration-300 items-center justify-center"
+            onClick={() => document.getElementById("how-it-works")?.scrollIntoView({ behavior: "smooth" })}
+          >
             <div className="mr-3 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center group-hover:bg-primary group-hover:scale-110 transition-all duration-300">
               <Play className="w-3.5 h-3.5 fill-primary text-primary group-hover:fill-white group-hover:text-white ml-0.5 transition-colors" />
             </div>
@@ -104,7 +107,7 @@ const HeroSection = () => {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.8, delay: 0.35 }}
-            className="grid md:grid-cols-3 gap-4 md:gap-6 mb-20 text-left max-w-4xl mx-auto"
+            className="grid sm:grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4 md:gap-6 mb-14 sm:mb-20 text-left max-w-4xl mx-auto"
           >
             {[
               { icon: Brain, text: "AI-powered answers from your internal knowledge base" },
@@ -113,7 +116,7 @@ const HeroSection = () => {
             ].map(({ icon: Icon, text }) => (
               <div
                 key={text}
-                className="flex gap-4 rounded-2xl border border-border/40 bg-white/70 p-5 shadow-sm backdrop-blur-sm"
+                className="flex gap-3 sm:gap-4 rounded-2xl border border-border/40 bg-white/70 p-4 sm:p-5 shadow-sm backdrop-blur-sm"
               >
                 <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
                   <Icon className="h-5 w-5" strokeWidth={2} />
@@ -130,7 +133,7 @@ const HeroSection = () => {
             transition={{ duration: 1, delay: 0.5 }}
             className="relative max-w-4xl mx-auto"
           >
-            <div className="bg-white rounded-3xl shadow-[0_32px_64px_-16px_rgba(0,0,0,0.1)] border border-border/40 p-4 md:p-8 backdrop-blur-xl">
+            <div className="bg-white rounded-2xl sm:rounded-3xl shadow-[0_32px_64px_-16px_rgba(0,0,0,0.1)] border border-border/40 p-3 sm:p-4 md:p-8 backdrop-blur-xl">
               {/* Mock Chat Interface */}
               <div className="space-y-6 text-left">
                 <div className="flex items-center justify-between border-b border-border/40 pb-4 mb-6">
@@ -170,16 +173,16 @@ const HeroSection = () => {
                 <div className="mt-8 pt-6 border-t border-border/40">
                   <form 
                     onSubmit={(e) => { e.preventDefault(); handleSend(); }}
-                    className="bg-[#F8F9FF] border border-border/60 rounded-2xl p-2 flex items-center gap-4 focus-within:border-primary/40 transition-colors"
+                    className="bg-[#F8F9FF] border border-border/60 rounded-2xl p-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4 focus-within:border-primary/40 transition-colors"
                   >
                     <input
                       type="text"
                       value={inputValue}
                       onChange={(e) => setInputValue(e.target.value)}
                       placeholder="Ask a question or make a request..."
-                      className="flex-1 bg-transparent border-none outline-none px-4 text-sm text-foreground placeholder:text-muted-foreground"
+                      className="min-w-0 flex-1 bg-transparent border-none outline-none px-3 sm:px-4 py-2 text-sm text-foreground placeholder:text-muted-foreground"
                     />
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center justify-end sm:justify-start gap-2 shrink-0">
                       <button type="button" className="w-8 h-8 rounded-full border border-border/60 flex items-center justify-center text-muted-foreground hover:bg-white transition-colors">
                         <span className="text-xs font-bold">+</span>
                       </button>
@@ -205,14 +208,14 @@ const HeroSection = () => {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 1, delay: 1.2 }}
-            className="mt-24 pt-12 border-t border-border/40"
+            className="mt-16 sm:mt-24 pt-8 sm:pt-12 border-t border-border/40"
           >
             <p className="text-[13px] font-bold text-muted-foreground/60 uppercase tracking-[0.2em] mb-10">
               Connect Nexa to the apps you love
             </p>
-            <div className="flex flex-wrap justify-center items-center gap-x-12 gap-y-8 opacity-40 grayscale hover:grayscale-0 transition-all duration-500">
+            <div className="flex flex-wrap justify-center items-center gap-x-6 sm:gap-x-10 md:gap-x-12 gap-y-5 sm:gap-y-8 opacity-40 grayscale hover:grayscale-0 transition-all duration-500">
               {["Phoenix", "Foxen", "Boycott", "Arts Mafia", "Natural"].map((partner) => (
-                <span key={partner} className="text-xl md:text-2xl font-black tracking-tighter text-[#1A1A1A]">
+                <span key={partner} className="text-base sm:text-lg md:text-2xl font-black tracking-tighter text-[#1A1A1A]">
                   {partner}
                 </span>
               ))}

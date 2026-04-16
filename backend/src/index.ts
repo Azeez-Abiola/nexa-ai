@@ -18,13 +18,16 @@ import { conversationRouter } from "./routes/conversation";
 import { conversationSharingRouter } from "./routes/conversationSharing";
 import { analyticsRouter } from "./routes/analytics";
 import { provisioningRouter } from "./routes/provisioning";
+import { employeeInviteRouter } from "./routes/employeeInvite";
 import { adminDocumentsRouter } from "./routes/adminDocuments";
+import { adminKnowledgeGroupsRouter } from "./routes/adminKnowledgeGroups";
 import { adminAuditLogsRouter } from "./routes/adminAuditLogs";
 import { BusinessUnit } from "./models/BusinessUnit";
 import { EMPLOYEE_GRADES } from "./models/User";
 import { getUACNInfo, formatBusinessUnit } from "./config/businessUnits";
 import { tenantMiddleware } from "./middleware/tenant";
 import logger from "./utils/logger";
+import { sendContactFormInquiry } from "./services/emailService";
 import { startWorker } from "./queue/documentWorker";
 import { startUserDocumentWorker } from "./queue/userDocumentWorker";
 import { userDocumentsRouter } from "./routes/userDocuments";
@@ -103,9 +106,12 @@ app.use("/api/v1/conversations", userDocumentsRouter);
 app.use("/api/v1/chat", chatRouter);
 app.use("/api/v1/admin/policies", adminPoliciesRouter);
 app.use("/api/v1/admin/documents", adminDocumentsRouter);
+app.use("/api/v1/admin/user-groups", adminKnowledgeGroupsRouter);
+app.use("/api/v1/admin/knowledge-groups", adminKnowledgeGroupsRouter); // legacy alias
 app.use("/api/v1/admin/audit-logs", adminAuditLogsRouter);
 app.use("/api/v1/analytics", analyticsRouter);
 app.use("/api/v1/provisioning", provisioningRouter);
+app.use("/api/v1/employee-invite", employeeInviteRouter);
 
 // Public endpoint for fetching business units (no auth required)
 app.get("/api/v1/public/business-units", async (_req, res) => {
@@ -134,6 +140,31 @@ app.get("/api/v1/public/business-units", async (_req, res) => {
       { value: "UPDC", label: "UPDC (UPDC)", name: "UPDC" }
     ];
     res.json({ businessUnits: fallbackUnits });
+  }
+});
+
+// Public contact form (landing page)
+app.post("/api/v1/public/contact", async (req, res) => {
+  try {
+    const { name, email, company, message, intent } = req.body as Record<string, string | undefined>;
+    if (!name?.trim() || !email?.trim() || !message?.trim()) {
+      return res.status(400).json({ error: "Name, email, and message are required." });
+    }
+    const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email).trim());
+    if (!emailOk) {
+      return res.status(400).json({ error: "Please enter a valid email address." });
+    }
+    await sendContactFormInquiry({
+      name: name.trim(),
+      email: email.trim().toLowerCase(),
+      company: company?.trim(),
+      message: message.trim(),
+      intent: intent === "demo" ? "demo" : "contact"
+    });
+    res.json({ ok: true, message: "Thanks — we received your message." });
+  } catch (error) {
+    logger.error("Public contact form error", { error });
+    res.status(500).json({ error: "Could not send your message right now. Please try again later." });
   }
 });
 

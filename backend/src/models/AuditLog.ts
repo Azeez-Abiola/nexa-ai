@@ -62,7 +62,7 @@ const AuditLogSchema = new Schema<AuditLogDocument>(
     userId: { type: String, default: null },
     adminId: { type: String, default: null },
     adminEmail: { type: String, default: null },
-    businessUnit: { type: String, required: true },
+    businessUnit: { type: String, required: true, trim: true },
     action: { type: String, required: true },
     details: { type: String, required: true },
     documentId: { type: Schema.Types.ObjectId, default: null },

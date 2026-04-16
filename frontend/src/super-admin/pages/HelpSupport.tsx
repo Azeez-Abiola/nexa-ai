@@ -76,7 +76,7 @@ const HelpSupport: React.FC = () => {
   );
 
   return (
-    <div className="space-y-12 animate-in fade-in duration-700 pb-20">
+    <div className="min-w-0 max-w-full space-y-12 pb-20 animate-in fade-in duration-700">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div className="space-y-1">
           <h1 className="text-3xl font-bold tracking-tight text-slate-900 font-['Sen'] flex items-center gap-3">

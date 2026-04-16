@@ -13,42 +13,69 @@ import {
 import { streamAIResponse } from "../services/openaiService";
 import { buildContextForQuery } from "../utils/contextBuilder";
 
-import { Policy } from "../models/Policy";
+import { RagDocument } from "../models/RagDocument";
+import { KnowledgeGroup } from "../models/KnowledgeGroup";
+import { Types } from "mongoose";
 import logger from "../utils/logger";
 
 export const chatRouter = express.Router();
 
-chatRouter.get("/suggestions", async (req, res) => {
+const TYPE_LABELS: Record<string, string> = {
+  policy: "Policy",
+  procedure: "S&OP / procedure",
+  handbook: "Handbook",
+  contract: "Contract",
+  report: "Financial reports",
+  other: "Other"
+};
+
+// Authenticated — suggestions must respect the same access control as retrieval, otherwise
+// a user removed from a restricted doc's group could still see that doc as a chip on their home screen.
+chatRouter.get("/suggestions", authMiddleware, async (req: AuthenticatedRequest, res) => {
   try {
-    const { businessUnit } = req.query;
-    if (!businessUnit) {
-      return res.status(400).json({ error: "businessUnit is required" });
+    const bu = String(req.businessUnit || req.query.businessUnit || "").trim();
+    if (!bu) return res.status(400).json({ error: "businessUnit is required" });
+
+    // Build the same access filter ragService uses, so suggestions mirror what the user can actually retrieve.
+    const userGrade = req.grade || "";
+    const gradeOr: Record<string, unknown>[] = [
+      { allowedGrades: { $size: 0 } },
+      { allowedGrades: { $in: ["ALL"] } }
+    ];
+    if (userGrade) gradeOr.push({ allowedGrades: { $in: [userGrade] } });
+
+    const groupOr: Record<string, unknown>[] = [
+      { allowedGroupIds: { $exists: false } },
+      { allowedGroupIds: { $size: 0 } }
+    ];
+    if (req.userId && Types.ObjectId.isValid(req.userId)) {
+      const uid = new Types.ObjectId(req.userId);
+      const groups = await KnowledgeGroup.find({ businessUnit: bu, memberUserIds: uid })
+        .select("_id")
+        .lean();
+      const ids = groups.map((g) => g._id as Types.ObjectId);
+      if (ids.length > 0) groupOr.push({ allowedGroupIds: { $in: ids } });
     }
 
-    // Fetch up to 4 policies for the business unit
-    const policies = await Policy.find({ businessUnit: businessUnit as string })
+    const docs = await RagDocument.find({
+      businessUnit: bu,
+      isLatestVersion: true,
+      processingStatus: "completed",
+      $and: [{ $or: gradeOr }, { $or: groupOr }]
+    })
       .sort({ createdAt: -1 })
       .limit(4)
-      .select("title category")
+      .select("title documentType")
       .lean();
 
-    const suggestions = policies.map(p => ({
-      title: p.title,
-      category: p.category,
-      prompt: `Tell me about ${p.title}`
+    const suggestions = docs.map((d: { title: string; documentType: string }) => ({
+      title: d.title,
+      category: TYPE_LABELS[d.documentType] || d.documentType,
+      prompt: `Tell me about ${d.title}`
     }));
 
-    // If no policies found, return some defaults
-    if (suggestions.length === 0) {
-      const defaults = [
-        { title: "Work Hours", category: "Policy", prompt: "What are the standard work hours?" },
-        { title: "Leave Policy", category: "HR", prompt: "How do I apply for leave?" },
-        { title: "Code of Conduct", category: "Compliance", prompt: "What is the company code of conduct?" },
-        { title: "Benefits", category: "HR", prompt: "What are my employee benefits?" }
-      ];
-      return res.json({ suggestions: defaults });
-    }
-
+    // No dummy defaults: if the user has no KB access (or the BU has uploaded nothing),
+    // return an empty list so the home screen stays clean rather than advertising docs they can't use.
     res.json({ suggestions });
   } catch (error) {
     console.error("Get suggestions error stack:", error);
@@ -174,7 +201,9 @@ chatRouter.post("/", authMiddleware, buRateLimiter, async (req: AuthenticatedReq
     const buAbbr = buConfig?.abbr || businessUnit;
 
     // Build context: RAG first, keyword fallback, Google in parallel
-    const context = await buildContextForQuery(userMessage, businessUnit, req.grade || "");
+    const context = await buildContextForQuery(userMessage, businessUnit, req.grade || "", {
+      userId: req.userId
+    });
 
     if (context.accessDenied) {
       return res.json({

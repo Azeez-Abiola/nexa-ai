@@ -375,13 +375,9 @@ export const Admin: React.FC = () => {
         }
 
         if (editingId) {
-          await adminAxios.put(`/api/v1/admin/policies/${editingId}`, formData, {
-            headers: { "Content-Type": "multipart/form-data" }
-          });
+          await adminAxios.put(`/api/v1/admin/policies/${editingId}`, formData);
         } else {
-          await adminAxios.post("/api/v1/admin/policies", formData, {
-            headers: { "Content-Type": "multipart/form-data" }
-          });
+          await adminAxios.post("/api/v1/admin/policies", formData);
         }
       } else {
         // Upload with text content
@@ -740,6 +736,9 @@ export const Admin: React.FC = () => {
           {/* Footer Card */}
           <div className={styles.footerCard}>
             <p className={styles.footerText}>© 2026 Nexa AI. All rights reserved.</p>
+            <p className={styles.footerText} style={{ marginTop: "0.35rem", fontSize: "0.7rem", opacity: 0.85 }}>
+              Powered by 1879 Tech Hub
+            </p>
             <button
               type="button"
               className={styles.footerLink}

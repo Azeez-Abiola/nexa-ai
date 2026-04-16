@@ -149,7 +149,7 @@ const AuditLogs: React.FC = () => {
   ];
 
   return (
-    <div className="space-y-10 animate-in fade-in duration-700 pb-20">
+    <div className="min-w-0 max-w-full space-y-10 pb-20 animate-in fade-in duration-700">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div>
           <h1 className="text-3xl font-bold tracking-tight text-slate-900 font-['Sen'] flex items-center gap-3">
@@ -251,14 +251,14 @@ const AuditLogs: React.FC = () => {
 
       {/* Main Logs Table */}
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-        <div className="p-8 border-b border-slate-50 flex items-center justify-between bg-slate-50/30">
-          <div className="flex items-center gap-4">
+        <div className="flex flex-col gap-3 border-b border-slate-50 bg-slate-50/30 p-6 sm:flex-row sm:items-center sm:justify-between sm:p-8">
+          <div className="flex flex-wrap items-center gap-3">
             <h2 className="text-xl font-bold font-['Sen'] text-slate-900">Operation Records</h2>
             <Badge className="bg-[var(--brand-color)]/10 text-[var(--brand-color)] border-none font-bold text-[10px] tracking-widest uppercase rounded-full px-4 py-1">
               Live Feed
             </Badge>
           </div>
-          <p className="text-xs font-bold text-slate-400 uppercase tracking-[0.2em]">{total} SECURE RECORDS</p>
+          <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">{total} SECURE RECORDS</p>
         </div>
 
         {isLoading ? (
@@ -275,6 +275,7 @@ const AuditLogs: React.FC = () => {
           </div>
         ) : (
           <>
+            <div className="w-full min-w-0 overflow-x-auto">
             <Table>
               <TableHeader className="bg-slate-50/50">
                 <TableRow className="hover:bg-transparent border-slate-50">
@@ -325,8 +326,9 @@ const AuditLogs: React.FC = () => {
                 ))}
               </TableBody>
             </Table>
+            </div>
 
-            <div className="p-8 bg-slate-50/30 border-t border-slate-50 flex items-center justify-between">
+            <div className="flex flex-col gap-4 border-t border-slate-50 bg-slate-50/30 p-6 sm:flex-row sm:items-center sm:justify-between sm:p-8">
               <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Page {page} of {Math.ceil(total / limit)}</span>
               <div className="flex gap-2">
                 <Button

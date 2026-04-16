@@ -1,4 +1,6 @@
+import { Types } from "mongoose";
 import { DocumentChunk } from "../models/DocumentChunk";
+import { KnowledgeGroup } from "../models/KnowledgeGroup";
 import { generateEmbedding } from "./embeddingService";
 import logger from "../utils/logger";
 
@@ -6,6 +8,8 @@ export interface RAGQuery {
   query: string;
   businessUnit: string;
   userGrade: string;
+  /** When set, knowledge-group restrictions on chunks are enforced */
+  userId?: string;
   topK?: number;
 }
 
@@ -16,6 +20,20 @@ export interface RetrievedChunk {
   documentType: string;
   chunkIndex: number;
   documentId: string;
+  documentSeriesId?: string;
+  version?: number;
+  /** When false, chunk belongs to a superseded upload (kept for non-policy types) */
+  isLatestVersion?: boolean;
+}
+
+/** Policy-like types: retrieval keeps only the latest version chunk set */
+const LATEST_ONLY_DOCUMENT_TYPES = new Set(["policy", "procedure"]);
+
+function applyLatestVersionFilter(chunks: RetrievedChunk[]): RetrievedChunk[] {
+  return chunks.filter((c) => {
+    if (!LATEST_ONLY_DOCUMENT_TYPES.has(c.documentType)) return true;
+    return c.isLatestVersion !== false;
+  });
 }
 
 export interface RAGResult {
@@ -57,21 +75,41 @@ export async function retrieveRelevantChunks(query: RAGQuery): Promise<RAGResult
   // Step 2: Atlas Vector Search with pre-filter
   const retrievalStart = Date.now();
 
+  const gradeOr = [
+    { allowedGrades: { $size: 0 } },
+    { allowedGrades: { $in: ["ALL"] } },
+    { allowedGrades: { $in: [query.userGrade] } }
+  ];
+
+  const groupOr: Record<string, unknown>[] = [
+    { allowedGroupIds: { $exists: false } },
+    { allowedGroupIds: { $size: 0 } }
+  ];
+  if (query.userId && Types.ObjectId.isValid(query.userId)) {
+    const uid = new Types.ObjectId(query.userId);
+    const groups = await KnowledgeGroup.find({
+      businessUnit: query.businessUnit,
+      memberUserIds: uid
+    })
+      .select("_id")
+      .lean();
+    const ids = groups.map((g) => g._id as Types.ObjectId);
+    if (ids.length > 0) {
+      groupOr.push({ allowedGroupIds: { $in: ids } });
+    }
+  }
+
   const pipeline: any[] = [
     {
       $vectorSearch: {
         index: "document_chunks_vector_index",
         path: "embedding",
         queryVector: queryEmbedding,
-        numCandidates: topK * 10, // over-fetch for better recall
-        limit: topK * 2, // fetch more, then apply score threshold
+        numCandidates: Math.min(Math.max(topK * 20, 40), 200),
+        limit: Math.min(Math.max(topK * 10, 20), 100), // over-fetch; then threshold + version filter
         filter: {
           businessUnit: { $eq: query.businessUnit },
-          $or: [
-            { allowedGrades: { $size: 0 } },              // empty = open to all grades
-            { allowedGrades: { $in: ["ALL"] } },           // explicitly granted to all
-            { allowedGrades: { $in: [query.userGrade] } }  // or user's grade is listed
-          ]
+          $and: [{ $or: gradeOr }, { $or: groupOr }]
         }
       }
     },
@@ -82,6 +120,9 @@ export async function retrieveRelevantChunks(query: RAGQuery): Promise<RAGResult
         documentId: 1,
         "metadata.documentTitle": 1,
         "metadata.documentType": 1,
+        "metadata.documentSeriesId": 1,
+        "metadata.version": 1,
+        "metadata.isLatestVersion": 1,
         score: { $meta: "vectorSearchScore" }
       }
     }
@@ -91,23 +132,28 @@ export async function retrieveRelevantChunks(query: RAGQuery): Promise<RAGResult
   const retrievalLatencyMs = Date.now() - retrievalStart;
   const totalLatencyMs = Date.now() - totalStart;
 
-  // Filter by score threshold and take topK
-  const chunks: RetrievedChunk[] = rawResults
+  const mapped = rawResults
     .filter((r: any) => r.score >= SCORE_THRESHOLD)
-    .slice(0, topK)
     .map((r: any) => ({
       content: r.content,
       score: r.score,
       documentTitle: r.metadata?.documentTitle || "Unknown",
       documentType: r.metadata?.documentType || "unknown",
       chunkIndex: r.chunkIndex,
-      documentId: r.documentId?.toString() || ""
+      documentId: r.documentId?.toString() || "",
+      documentSeriesId: r.metadata?.documentSeriesId || "",
+      version: typeof r.metadata?.version === "number" ? r.metadata.version : 1,
+      isLatestVersion: r.metadata?.isLatestVersion !== false
     }));
+
+  const versionFiltered = applyLatestVersionFilter(mapped);
+  const chunks: RetrievedChunk[] = versionFiltered.sort((a, b) => b.score - a.score).slice(0, topK);
 
   logger.info("[RAG] Retrieval complete", {
     query: query.query.substring(0, 80),
     businessUnit: query.businessUnit,
     userGrade: query.userGrade,
+    userId: query.userId || null,
     chunksReturned: chunks.length,
     topScore: chunks[0]?.score ?? 0,
     queryEmbeddingLatencyMs,
@@ -125,8 +171,11 @@ export function buildRAGContext(chunks: RetrievedChunk[]): string {
 
   const lines = chunks.map((chunk, i) => {
     const score = (chunk.score * 100).toFixed(0);
+    const v =
+      chunk.version != null && chunk.version > 1 ? ` — file version v${chunk.version}` : "";
+    const superseded = chunk.isLatestVersion === false ? " (superseded upload)" : "";
     return [
-      `[Chunk ${i + 1}] Source: ${chunk.documentTitle} (${chunk.documentType}) — relevance: ${score}%`,
+      `[Chunk ${i + 1}] Source: ${chunk.documentTitle} (${chunk.documentType})${v}${superseded} — relevance: ${score}%`,
       chunk.content,
       "---"
     ].join("\n");

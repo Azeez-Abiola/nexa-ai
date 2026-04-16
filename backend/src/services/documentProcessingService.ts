@@ -1,3 +1,4 @@
+import { Types } from "mongoose";
 import { RagDocument } from "../models/RagDocument";
 import { DocumentChunk } from "../models/DocumentChunk";
 import { getDocumentBuffer } from "./cloudinaryService";
@@ -17,6 +18,8 @@ export interface ProcessingJob {
   mimeType: string;
   businessUnit: string;
   allowedGrades: string[];
+  /** Hex string ObjectIds from the job queue */
+  allowedGroupIds: string[];
   sensitivityLevel: string;
   uploadedBy: {
     adminId: string;
@@ -48,7 +51,20 @@ async function extractText(buffer: Buffer, mimeType: string): Promise<string> {
 }
 
 export async function processDocument(job: ProcessingJob): Promise<void> {
-  const { documentId, cloudinaryPublicId, cloudinaryUrl, mimeType, businessUnit, allowedGrades, sensitivityLevel } = job;
+  const {
+    documentId,
+    cloudinaryPublicId,
+    cloudinaryUrl,
+    mimeType,
+    businessUnit,
+    allowedGrades,
+    allowedGroupIds: allowedGroupIdStrings,
+    sensitivityLevel
+  } = job;
+
+  const allowedGroupObjectIds: Types.ObjectId[] = (allowedGroupIdStrings || [])
+    .filter((id) => Types.ObjectId.isValid(id))
+    .map((id) => new Types.ObjectId(id));
 
   logger.info("[DocumentProcessing] Starting", { documentId });
 
@@ -90,6 +106,7 @@ export async function processDocument(job: ProcessingJob): Promise<void> {
       documentId: doc._id,
       businessUnit,
       allowedGrades,
+      allowedGroupIds: allowedGroupObjectIds,
       sensitivityLevel,
       chunkIndex: chunk.chunkIndex,
       content: chunk.content,
@@ -98,6 +115,9 @@ export async function processDocument(job: ProcessingJob): Promise<void> {
       metadata: {
         documentTitle: doc.title,
         documentType: doc.documentType,
+        documentSeriesId: doc.documentSeriesId,
+        version: doc.version,
+        isLatestVersion: doc.isLatestVersion,
         sourceRange: chunk.sourceRange
       }
     }));

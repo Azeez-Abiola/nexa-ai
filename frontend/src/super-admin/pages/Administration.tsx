@@ -145,13 +145,13 @@ const Administration: React.FC = () => {
   };
 
   return (
-    <div className="space-y-10 animate-in fade-in duration-500">
-      <div className="flex justify-between items-end">
-        <div>
+    <div className="min-w-0 max-w-full space-y-10 animate-in fade-in duration-500">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0">
           <h2 className="text-3xl font-black font-['Sen'] text-slate-900 leading-tight">Administration hub</h2>
           <p className="text-slate-400 font-medium text-sm">Manage platform administrators and direct provisioning.</p>
         </div>
-        <div className="flex gap-3">
+        <div className="flex flex-wrap gap-3">
           <button
             onClick={() => {
               const rows = [['Name', 'Email', 'Business Unit', 'Role'], ...admins.map((a: any) => [a.fullName, a.email, a.businessUnit, 'Admin'])];

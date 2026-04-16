@@ -50,7 +50,8 @@ const UserConversationsSchema = new Schema<UserConversationsDocument>(
     businessUnit: {
       type: String,
       required: true,
-      index: true
+      index: true,
+      trim: true
     },
     conversationGroups: { type: [ConversationGroupSchema], default: [] }
   },

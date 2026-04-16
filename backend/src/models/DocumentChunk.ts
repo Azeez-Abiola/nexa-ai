@@ -4,6 +4,8 @@ export interface DocumentChunkDocument extends Document {
   documentId: Types.ObjectId;
   businessUnit: string;
   allowedGrades: string[];
+  /** Empty = all BU users (subject to grade rules). Non-empty = only members of these user groups. */
+  allowedGroupIds: Types.ObjectId[];
   sensitivityLevel: string;
   chunkIndex: number;
   content: string;
@@ -12,6 +14,10 @@ export interface DocumentChunkDocument extends Document {
   metadata: {
     documentTitle: string;
     documentType: string;
+    /** Same logical document across versions (mirrors RagDocument) */
+    documentSeriesId?: string;
+    version?: number;
+    isLatestVersion?: boolean;
     pageNumber?: number;
     sourceRange: {
       start: number;
@@ -24,8 +30,9 @@ export interface DocumentChunkDocument extends Document {
 const DocumentChunkSchema = new Schema<DocumentChunkDocument>(
   {
     documentId: { type: Schema.Types.ObjectId, ref: "RagDocument", required: true, index: true },
-    businessUnit: { type: String, required: true, index: true },
+    businessUnit: { type: String, required: true, index: true, trim: true },
     allowedGrades: { type: [String], default: [] },
+    allowedGroupIds: { type: [{ type: Schema.Types.ObjectId, ref: "KnowledgeGroup" }], default: [] },
     sensitivityLevel: { type: String, required: true },
     chunkIndex: { type: Number, required: true },
     content: { type: String, required: true },
@@ -36,6 +43,9 @@ const DocumentChunkSchema = new Schema<DocumentChunkDocument>(
     metadata: {
       documentTitle: { type: String, required: true },
       documentType: { type: String, required: true },
+      documentSeriesId: { type: String, default: "" },
+      version: { type: Number, default: 1 },
+      isLatestVersion: { type: Boolean, default: true },
       pageNumber: { type: Number, default: null },
       sourceRange: {
         start: { type: Number, required: true },

@@ -19,7 +19,7 @@ const AdminInviteSchema = new Schema<IAdminInvite>(
   {
     email: { type: String, required: true, lowercase: true, trim: true },
     fullName: { type: String, required: true },
-    businessUnit: { type: String, required: true },
+    businessUnit: { type: String, required: true, trim: true },
     tenantId: { type: String, required: true },
     token: { type: String, required: true },
     status: { type: String, enum: ["pending", "accepted", "expired"], default: "pending" },

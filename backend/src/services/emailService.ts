@@ -90,6 +90,61 @@ export async function sendAdminInviteEmail(
   }
 }
 
+/** BU admin — signed link for employee self-serve signup (no forged business unit). */
+function escapeHtml(s: string): string {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/** Public marketing / contact form — delivered to CONTACT_INBOX_EMAIL or hi@nexa.com */
+export async function sendContactFormInquiry(payload: {
+  name: string;
+  email: string;
+  company?: string;
+  message: string;
+  intent?: string;
+}): Promise<void> {
+  const inbox = process.env.CONTACT_INBOX_EMAIL || "hi@nexa.com";
+  const prefix = payload.intent === "demo" ? "[Demo request] " : "[Contact] ";
+  const html = `
+    <p><strong>Name:</strong> ${escapeHtml(payload.name)}</p>
+    <p><strong>Email:</strong> ${escapeHtml(payload.email)}</p>
+    ${payload.company ? `<p><strong>Company:</strong> ${escapeHtml(payload.company)}</p>` : ""}
+    ${payload.intent ? `<p><strong>Intent:</strong> ${escapeHtml(payload.intent)}</p>` : ""}
+    <p><strong>Message:</strong></p>
+    <p style="white-space:pre-wrap">${escapeHtml(payload.message)}</p>
+  `;
+  await sendEmail(inbox, `${prefix}${escapeHtml(payload.name)} — Nexa.ai`, html);
+}
+
+export async function sendEmployeeInviteEmail(
+  email: string,
+  fullName: string,
+  businessUnitLabel: string,
+  inviterLabel: string,
+  rawToken: string,
+  expiryDays: number
+): Promise<void> {
+  const acceptLink = `${FRONTEND_URL}/accept-employee-invite?token=${encodeURIComponent(rawToken)}`;
+  try {
+    const html = await renderTemplate("employee-invite", {
+      fullName,
+      businessUnitLabel,
+      inviterLabel,
+      acceptLink,
+      expiryDays
+    });
+    await sendEmail(email, `You're invited to ${businessUnitLabel} on Nexa AI`, html);
+    console.log(`Employee invite sent to ${email}`);
+  } catch (error) {
+    console.error("Error sending employee invite email:", error);
+    throw error;
+  }
+}
+
 /**
  * Notify a single employee that a new document is available in their knowledge base.
  * Called in a fire-and-forget loop — never throws (errors are swallowed and logged).
@@ -125,7 +180,8 @@ export async function sendWelcomeEmail(
   email: string,
   fullName: string,
   businessUnit: string,
-  tenantInfo?: { label?: string; logo?: string; colorCode?: string; slug?: string }
+  tenantInfo?: { label?: string; logo?: string; colorCode?: string; slug?: string },
+  opts?: { initialPassword?: string; adminCreated?: boolean }
 ): Promise<void> {
   const chatUrl = `${FRONTEND_URL}/user-chat`;
   const brandColor = tenantInfo?.colorCode || '#ed0000';
@@ -141,6 +197,8 @@ export async function sendWelcomeEmail(
       buLabel,
       brandColor,
       logoUrl,
+      initialPassword: opts?.initialPassword,
+      adminCreated: opts?.adminCreated === true,
       year: new Date().getFullYear()
     });
     await sendEmail(email, `Welcome to ${buLabel} on Nexa AI — Your Account is Active!`, html);

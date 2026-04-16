@@ -11,7 +11,7 @@ import CTASection from "@/landing/CTASection";
 import Footer from "@/landing/Footer";
 
 const NewLandingPage = () => (
-  <div className="min-h-screen bg-background">
+  <div id="marketing-top" className="min-h-screen bg-background overflow-x-hidden">
     <Navbar />
     <HeroSection />
     <ProblemSection />

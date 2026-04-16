@@ -41,7 +41,8 @@ const UserSchema = new Schema<UserDocument>(
     businessUnit: {
       type: String,
       required: true,
-      index: true
+      index: true,
+      trim: true
     },
     grade: {
       type: String,

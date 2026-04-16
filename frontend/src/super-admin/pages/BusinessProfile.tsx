@@ -21,6 +21,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from "@/lib/use-toast";
 import { cn } from '@/lib/utils';
+import { normalizeHexToRrggbb } from '@/lib/brandCss';
 
 const BusinessProfile: React.FC = () => {
   const { toast } = useToast();
@@ -58,7 +59,7 @@ const BusinessProfile: React.FC = () => {
         setUser(parsed);
         setProfileData({
           label: parsed.tenantLabel || '',
-          colorCode: parsed.tenantColor || '#ed0000',
+          colorCode: normalizeHexToRrggbb(parsed.tenantColor || '#ed0000'),
           fullName: parsed.fullName || '',
           name: parsed.businessUnit || '',
           slug: parsed.tenantSlug || ''
@@ -67,7 +68,7 @@ const BusinessProfile: React.FC = () => {
         
         // Ensure color is applied on mount
         if (parsed.tenantColor) {
-          document.documentElement.style.setProperty('--brand-color', parsed.tenantColor);
+          document.documentElement.style.setProperty('--brand-color', normalizeHexToRrggbb(parsed.tenantColor));
         }
       }
     };
@@ -104,17 +105,15 @@ const BusinessProfile: React.FC = () => {
 
       const formData = new FormData();
       formData.append('label', profileData.label);
-      formData.append('colorCode', profileData.colorCode);
+      formData.append('colorCode', normalizeHexToRrggbb(profileData.colorCode));
       formData.append('fullName', profileData.fullName);
       formData.append('name', profileData.name);
       formData.append('slug', profileData.slug);
       if (logoFile) formData.append('logo', logoFile);
 
+      // Do not set Content-Type manually — FormData needs the multipart boundary axios adds automatically.
       const { data } = await axios.put('/api/v1/admin/auth/profile', formData, {
-        headers: { 
-          Authorization: `Bearer ${activeToken}`,
-          'Content-Type': 'multipart/form-data' 
-        }
+        headers: { Authorization: `Bearer ${activeToken}` }
       });
 
       const updatedUser = {
@@ -122,7 +121,7 @@ const BusinessProfile: React.FC = () => {
         fullName: data.admin?.fullName || profileData.fullName,
         businessUnit: data.businessUnit.name,
         tenantLabel: data.businessUnit.label,
-        tenantColor: data.businessUnit.colorCode,
+        tenantColor: normalizeHexToRrggbb(data.businessUnit.colorCode),
         tenantSlug: data.businessUnit.slug,
         tenantLogo: data.businessUnit.logo
       };
@@ -132,7 +131,10 @@ const BusinessProfile: React.FC = () => {
         localStorage.setItem('cpanelUser', JSON.stringify(updatedUser));
       }
       
-      document.documentElement.style.setProperty('--brand-color', data.businessUnit.colorCode);
+      document.documentElement.style.setProperty(
+        '--brand-color',
+        normalizeHexToRrggbb(data.businessUnit.colorCode)
+      );
 
       // Dispatch event to update SuperAdminMain.tsx header
       window.dispatchEvent(new CustomEvent('nexa-profile-update'));
@@ -227,27 +229,29 @@ const BusinessProfile: React.FC = () => {
   }
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-700 pb-20">
+    <div className="min-w-0 max-w-full space-y-8 pb-20 animate-in fade-in duration-700">
       <div>
         <h1 className="text-3xl font-bold tracking-tight text-slate-900 font-['Sen']">Profile Settings</h1>
         <p className="text-slate-500 font-medium mt-1">Configure your environment branding and security parameters.</p>
       </div>
 
       <Tabs defaultValue="branding" className="space-y-8" onValueChange={setActiveTab}>
-        <TabsList className="bg-slate-100 p-1.5 rounded-2xl h-14 w-full sm:w-[500px] gap-2">
+        <TabsList className="grid h-auto w-full min-w-0 max-w-full grid-cols-1 gap-2 rounded-2xl bg-slate-100 p-1.5 sm:grid-cols-2 sm:gap-2">
           <TabsTrigger
             value="branding"
-            className="rounded-xl flex-1 h-full font-bold text-sm data-[state=active]:bg-white data-[state=active]:text-slate-900 data-[state=active]:shadow-sm gap-2"
+            className="flex min-h-[48px] w-full items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm font-bold data-[state=active]:bg-white data-[state=active]:text-slate-900 data-[state=active]:shadow-sm sm:h-12 sm:py-0"
           >
-            <Palette size={18} />
-            Organization identity
+            <Palette size={18} className="shrink-0" />
+            <span className="min-w-0 sm:hidden">Organization</span>
+            <span className="hidden min-w-0 sm:inline">Organization identity</span>
           </TabsTrigger>
           <TabsTrigger
             value="security"
-            className="rounded-xl flex-1 h-full font-bold text-sm data-[state=active]:bg-red-600 data-[state=active]:text-white data-[state=active]:shadow-sm gap-2"
+            className="flex min-h-[48px] w-full items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm font-bold data-[state=active]:bg-red-600 data-[state=active]:text-white data-[state=active]:shadow-sm sm:h-12 sm:py-0"
           >
-            <Lock size={18} />
-            Security credentials
+            <Lock size={18} className="shrink-0" />
+            <span className="min-w-0 sm:hidden">Security</span>
+            <span className="hidden min-w-0 sm:inline">Security credentials</span>
           </TabsTrigger>
         </TabsList>
 
@@ -291,7 +295,7 @@ const BusinessProfile: React.FC = () => {
                           />
                         </div>
 
-                        <div className="grid grid-cols-2 gap-6">
+                        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
                           <div className="space-y-3">
                             <label className="text-sm font-bold text-slate-700 ml-1">Business label</label>
                             <Input
@@ -328,11 +332,14 @@ const BusinessProfile: React.FC = () => {
                               <div className="relative flex-1">
                                 <div
                                   className="absolute left-4 top-1/2 -translate-y-1/2 w-8 h-8 rounded-xl border border-black/5 shadow-sm transition-transform hover:scale-110 pointer-events-none"
-                                  style={{ backgroundColor: profileData.colorCode }}
+                                  style={{ backgroundColor: normalizeHexToRrggbb(profileData.colorCode) }}
                                 />
                                 <Input
                                   value={profileData.colorCode}
                                   onChange={(e) => setProfileData({ ...profileData, colorCode: e.target.value })}
+                                  onBlur={() =>
+                                    setProfileData((p) => ({ ...p, colorCode: normalizeHexToRrggbb(p.colorCode) }))
+                                  }
                                   className="h-14 w-full rounded-2xl border-slate-100 bg-slate-50 font-bold text-slate-900 pl-16 focus:ring-slate-900/10 focus:border-slate-900 text-lg"
                                   placeholder="#ED0000"
                                 />
@@ -340,7 +347,7 @@ const BusinessProfile: React.FC = () => {
                               <div className="relative group">
                                 <Input
                                   type="color"
-                                  value={profileData.colorCode}
+                                  value={normalizeHexToRrggbb(profileData.colorCode)}
                                   onChange={(e) => setProfileData({ ...profileData, colorCode: e.target.value })}
                                   className="w-14 h-14 p-1 rounded-2xl border-slate-100 cursor-pointer overflow-hidden transition-all group-hover:shadow-md"
                                 />

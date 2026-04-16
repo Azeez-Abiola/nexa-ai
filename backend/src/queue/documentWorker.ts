@@ -18,6 +18,7 @@ function startWorker() {
         mimeType: job.data.mimeType,
         businessUnit: job.data.businessUnit,
         allowedGrades: job.data.allowedGrades,
+        allowedGroupIds: job.data.allowedGroupIds || [],
         sensitivityLevel: job.data.sensitivityLevel,
         uploadedBy: job.data.uploadedBy
       });

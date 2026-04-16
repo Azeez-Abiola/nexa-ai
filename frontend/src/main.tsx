@@ -13,7 +13,13 @@ document.addEventListener("dragover", (e) => e.preventDefault(), false);
 document.addEventListener("drop", (e) => e.preventDefault(), false);
 document.addEventListener("touchmove", (e) => {
   // Allow free scrolling in chat messages and sidebar
-  if (e.target.closest(".chat-messages") || e.target.closest(".sidebar-conversations")) return;
+  if (
+    e.target.closest(".chat-messages") ||
+    e.target.closest(".sidebar-conversations") ||
+    e.target.closest(".user-chat-profile-page")
+  ) {
+    return;
+  }
   e.preventDefault();
 }, { passive: false });
 document.addEventListener("wheel", (e) => {

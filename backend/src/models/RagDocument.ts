@@ -1,8 +1,15 @@
-import mongoose, { Schema, Document } from "mongoose";
+import mongoose, { Schema, Document, Types } from "mongoose";
 
 export type DocumentType = "policy" | "procedure" | "handbook" | "contract" | "report" | "other";
 export type SensitivityLevel = "public" | "internal" | "confidential" | "restricted";
-export type ProcessingStatus = "pending" | "extracting" | "chunking" | "embedding" | "completed" | "failed";
+export type ProcessingStatus =
+  | "pending"
+  | "extracting"
+  | "chunking"
+  | "embedding"
+  | "completed"
+  | "failed"
+  | "superseded";
 
 export interface RagDocumentDocument extends Document {
   title: string;
@@ -10,6 +17,12 @@ export interface RagDocumentDocument extends Document {
   documentType: DocumentType;
   sensitivityLevel: SensitivityLevel;
   allowedGrades: string[];
+  /** Stable id for all versions of the same logical document */
+  documentSeriesId: string;
+  version: number;
+  isLatestVersion: boolean;
+  supersedesDocumentId?: Types.ObjectId | null;
+  allowedGroupIds: Types.ObjectId[];
   uploadedBy: {
     adminId: string;
     adminEmail: string;
@@ -32,7 +45,7 @@ export interface RagDocumentDocument extends Document {
 const RagDocumentSchema = new Schema<RagDocumentDocument>(
   {
     title: { type: String, required: true },
-    businessUnit: { type: String, required: true, index: true },
+    businessUnit: { type: String, required: true, index: true, trim: true },
     documentType: {
       type: String,
       enum: ["policy", "procedure", "handbook", "contract", "report", "other"],
@@ -48,6 +61,11 @@ const RagDocumentSchema = new Schema<RagDocumentDocument>(
       enum: ["ALL", "Executive", "Senior VP", "VP", "Associate", "Senior Analyst", "Analyst"],
       default: []
     },
+    documentSeriesId: { type: String, index: true, default: "" },
+    version: { type: Number, default: 1 },
+    isLatestVersion: { type: Boolean, default: true, index: true },
+    supersedesDocumentId: { type: Schema.Types.ObjectId, ref: "RagDocument", default: null },
+    allowedGroupIds: [{ type: Schema.Types.ObjectId, ref: "KnowledgeGroup", default: [] }],
     uploadedBy: {
       adminId: { type: String, required: true },
       adminEmail: { type: String, required: true },
@@ -60,7 +78,7 @@ const RagDocumentSchema = new Schema<RagDocumentDocument>(
     fileSize: { type: Number, required: true },
     processingStatus: {
       type: String,
-      enum: ["pending", "extracting", "chunking", "embedding", "completed", "failed"],
+      enum: ["pending", "extracting", "chunking", "embedding", "completed", "failed", "superseded"],
       default: "pending",
       index: true
     },
@@ -73,5 +91,23 @@ const RagDocumentSchema = new Schema<RagDocumentDocument>(
 );
 
 RagDocumentSchema.index({ businessUnit: 1, sensitivityLevel: 1 });
+RagDocumentSchema.index({ documentSeriesId: 1, version: -1 });
+
+RagDocumentSchema.pre("validate", function (next) {
+  const d = this as RagDocumentDocument;
+  if (!d.documentSeriesId) {
+    d.documentSeriesId = new Types.ObjectId().toString();
+  }
+  if (d.version == null || d.version < 1) {
+    d.version = 1;
+  }
+  if (d.isLatestVersion == null) {
+    d.isLatestVersion = true;
+  }
+  if (!d.allowedGroupIds) {
+    d.allowedGroupIds = [];
+  }
+  next();
+});
 
 export const RagDocument = mongoose.model<RagDocumentDocument>("RagDocument", RagDocumentSchema);

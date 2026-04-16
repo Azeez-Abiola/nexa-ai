@@ -13,7 +13,7 @@ const DifferentiationSection = () => (
     <div className="container mx-auto max-w-5xl">
       <motion.div initial={{ opacity: 0 }} whileInView={{ opacity: 1 }} viewport={{ once: true }} className="text-center mb-16">
         <p className="mono-text text-xs text-primary mb-3 uppercase tracking-widest">Why Nexa AI</p>
-        <h2 className="text-3xl md:text-5xl font-black tracking-tight text-balance mb-4">
+        <h2 className="text-2xl sm:text-3xl md:text-5xl font-black tracking-tight text-balance mb-4 px-1">
           Not Another <span className="gradient-text">Chatbot</span>
         </h2>
         <p className="text-muted-foreground max-w-2xl mx-auto text-lg">

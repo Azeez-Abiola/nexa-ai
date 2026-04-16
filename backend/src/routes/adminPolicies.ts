@@ -36,7 +36,7 @@ function normalizeCategory(category: string): string | null {
 // Configure multer for file uploads (in-memory storage)
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+  limits: { fileSize: 30 * 1024 * 1024 }, // 30MB limit
   fileFilter: (req, file, cb) => {
     // Accept .docx, .pdf, and text files
     if (

@@ -7,6 +7,7 @@ import { AdminUser } from "../models/AdminUser";
 import { BusinessUnit as BusinessUnitModel } from "../models/BusinessUnit";
 import { BusinessUnitEmailMapping } from "../models/BusinessUnitEmailMapping";
 import { sendVerificationEmail, sendPasswordResetEmail, sendWelcomeEmail } from "../services/emailService";
+import { authMiddleware, AuthenticatedRequest } from "../middleware/auth";
 
 export const authRouter = express.Router();
 
@@ -19,6 +20,65 @@ interface AuthRequest {
 }
 
 const JWT_SECRET = process.env.NEXA_AI_JWT_SECRET || "your-secret-key-change-in-production";
+
+/** Match tenant when `name` and admin acronym drift (same logic as profile resolve slug-as-BU). */
+function sanitizeBuAsSlug(bu: string): string {
+  return bu
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+async function findBusinessUnitDoc(businessUnit: string) {
+  const asSlug = sanitizeBuAsSlug(businessUnit);
+  if (asSlug) {
+    const bySlug = await BusinessUnitModel.findOne({ slug: asSlug });
+    if (bySlug) return bySlug;
+  }
+  const byName = await BusinessUnitModel.findOne({
+    name: { $regex: new RegExp(`^${businessUnit.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i") }
+  });
+  if (byName) return byName;
+  return BusinessUnitModel.findOne({
+    label: { $regex: new RegExp(`^${businessUnit.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i") }
+  });
+}
+
+function mapTenantFromBuDoc(buDoc: {
+  tenantId: string;
+  slug: string;
+  logo?: string;
+  colorCode?: string;
+  label: string;
+  contactEmail?: string;
+}) {
+  return {
+    tenantId: buDoc.tenantId,
+    tenantSlug: buDoc.slug,
+    tenantLogo: buDoc.logo,
+    tenantColor: buDoc.colorCode,
+    tenantLabel: buDoc.label,
+    tenantContactEmail: buDoc.contactEmail || undefined
+  };
+}
+
+/** Branding + support contact for a BU (used on GET /me and helpers). */
+async function tenantProfileForBu(businessUnit: string | undefined): Promise<{
+  tenantId?: string;
+  tenantSlug?: string;
+  tenantLogo?: string;
+  tenantColor?: string;
+  tenantLabel?: string;
+  tenantContactEmail?: string;
+}> {
+  if (!businessUnit || businessUnit === "SUPERADMIN") return {};
+  const buDoc = await findBusinessUnitDoc(businessUnit);
+  if (!buDoc) return {};
+  return mapTenantFromBuDoc(buDoc);
+}
 
 // Helper function to generate 6-digit OTP
 function generateOTP(): string {
@@ -36,14 +96,18 @@ authRouter.post("/register", async (req: Request<{}, {}, AuthRequest>, res: Resp
   try {
     const { email, password, fullName, businessUnit, grade } = req.body;
 
-    if (!email || !password || !fullName || !businessUnit || !grade) {
-      return res.status(400).json({ error: "Email, password, fullName, businessUnit, and grade are required" });
+    if (!email || !password || !fullName || !businessUnit) {
+      return res.status(400).json({ error: "Email, password, fullName, and businessUnit are required" });
     }
 
-    if (!EMPLOYEE_GRADES.includes(grade as any)) {
-      return res.status(400).json({
-        error: `Invalid grade. Must be one of: ${EMPLOYEE_GRADES.join(", ")}`
-      });
+    let resolvedGrade: (typeof EMPLOYEE_GRADES)[number] = "Analyst";
+    if (grade != null && String(grade).trim() !== "") {
+      if (!EMPLOYEE_GRADES.includes(grade as any)) {
+        return res.status(400).json({
+          error: `Invalid grade. Must be one of: ${EMPLOYEE_GRADES.join(", ")}`
+        });
+      }
+      resolvedGrade = grade as (typeof EMPLOYEE_GRADES)[number];
     }
 
     // Validate password strength
@@ -55,6 +119,11 @@ authRouter.post("/register", async (req: Request<{}, {}, AuthRequest>, res: Resp
     const validBU = await BusinessUnitModel.findOne({ name: businessUnit });
     if (!validBU) {
       return res.status(400).json({ error: "Invalid business unit" });
+    }
+    if (validBU.isActive === false) {
+      return res.status(403).json({
+        error: "This organization is not active yet and is not accepting new registrations."
+      });
     }
 
     // Validate email domain matches business unit (if mapping exists for this specific BU)
@@ -88,7 +157,7 @@ authRouter.post("/register", async (req: Request<{}, {}, AuthRequest>, res: Resp
       password: hashedPassword,
       fullName,
       businessUnit,
-      grade,
+      grade: resolvedGrade,
       emailVerified: false,
       emailVerificationOTP: otp,
       emailVerificationOTPExpiry: new Date(Date.now() + 10 * 60 * 1000) // 10 minutes
@@ -282,24 +351,15 @@ authRouter.post("/login", async (req: Request<{}, {}, AuthRequest>, res: Respons
       return res.status(401).json({ error: "Invalid email or password" });
     }
 
-    // Fetch tenant info
-    let tenantId: string | undefined;
-    let tenantSlug: string | undefined;
-    let tenantLogo: string | undefined;
-    let tenantColor: string | undefined;
-    let tenantLabel: string | undefined;
-
+    let tenant: Awaited<ReturnType<typeof tenantProfileForBu>> = {};
     if (user.businessUnit !== "SUPERADMIN") {
-      const buDoc = await BusinessUnitModel.findOne({
-        name: { $regex: new RegExp(`^${user.businessUnit.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') }
-      });
-      if (buDoc) {
-        tenantId = buDoc.tenantId;
-        tenantSlug = buDoc.slug;
-        tenantLogo = buDoc.logo;
-        tenantColor = buDoc.colorCode;
-        tenantLabel = buDoc.label;
+      const buDoc = await findBusinessUnitDoc(user.businessUnit);
+      if (buDoc && buDoc.isActive === false) {
+        return res.status(403).json({
+          error: "This organization is not active yet. Please contact your administrator."
+        });
       }
+      if (buDoc) tenant = mapTenantFromBuDoc(buDoc);
     }
 
     const payload: any = { 
@@ -307,10 +367,10 @@ authRouter.post("/login", async (req: Request<{}, {}, AuthRequest>, res: Respons
       email: user.email, 
       businessUnit: user.businessUnit, 
       grade: user.grade || "ADMIN", 
-      tenantId, 
-      tenantSlug,
-      tenantLogo,
-      tenantColor,
+      tenantId: tenant.tenantId, 
+      tenantSlug: tenant.tenantSlug,
+      tenantLogo: tenant.tenantLogo,
+      tenantColor: tenant.tenantColor,
       isAdmin: isAdminAccount || user.businessUnit === "SUPERADMIN"
     };
 
@@ -324,11 +384,7 @@ authRouter.post("/login", async (req: Request<{}, {}, AuthRequest>, res: Respons
         fullName: user.fullName,
         businessUnit: user.businessUnit,
         grade: user.grade,
-        tenantId,
-        tenantSlug,
-        tenantLogo,
-        tenantColor,
-        tenantLabel,
+        ...tenant,
         emailVerified: user.emailVerified,
         isAdmin: payload.isAdmin
       }
@@ -425,6 +481,101 @@ authRouter.post("/reset-password", async (req: Request<{}, {}, { token: string; 
     });
   } catch (error) {
     console.error("Reset password error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/** Current employee session (tenant branding + support email). Not for admin JWTs. */
+authRouter.get("/me", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (req.isAdmin) {
+      return res.status(403).json({ error: "Use the admin console for administrator accounts." });
+    }
+    const user = await User.findById(req.userId);
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    const tenant = await tenantProfileForBu(user.businessUnit);
+    res.json({
+      user: {
+        id: user._id,
+        email: user.email,
+        fullName: user.fullName,
+        businessUnit: user.businessUnit,
+        grade: user.grade,
+        ...tenant,
+        emailVerified: user.emailVerified,
+        isAdmin: false
+      }
+    });
+  } catch (error) {
+    console.error("GET /auth/me error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/** Employee (User) profile — not for admin JWTs */
+authRouter.patch("/me", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (req.isAdmin) {
+      return res.status(403).json({ error: "Use the admin console to update your administrator profile." });
+    }
+    const { fullName } = req.body as { fullName?: string };
+    if (fullName === undefined) {
+      return res.status(400).json({ error: "fullName is required" });
+    }
+    const trimmed = String(fullName).trim();
+    if (trimmed.length < 1 || trimmed.length > 120) {
+      return res.status(400).json({ error: "fullName must be between 1 and 120 characters" });
+    }
+    const user = await User.findById(req.userId);
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    user.fullName = trimmed;
+    await user.save();
+    const tenant = await tenantProfileForBu(user.businessUnit);
+    res.json({
+      user: {
+        id: user._id,
+        email: user.email,
+        fullName: user.fullName,
+        businessUnit: user.businessUnit,
+        grade: user.grade,
+        ...tenant,
+        emailVerified: user.emailVerified,
+        isAdmin: false
+      }
+    });
+  } catch (error) {
+    console.error("PATCH /auth/me error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/** Employee (User) password change */
+authRouter.put("/me/password", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (req.isAdmin) {
+      return res.status(403).json({ error: "Use the admin console to change your administrator password." });
+    }
+    const { currentPassword, newPassword } = req.body as { currentPassword?: string; newPassword?: string };
+    if (!currentPassword || !newPassword || newPassword.length < 6) {
+      return res.status(400).json({ error: "Current password and new password (min 6 characters) are required" });
+    }
+    const user = await User.findById(req.userId);
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    const passwordMatch = await bcryptjs.compare(currentPassword, user.password);
+    if (!passwordMatch) {
+      return res.status(401).json({ error: "Current password is incorrect" });
+    }
+    user.password = await bcryptjs.hash(newPassword, 10);
+    await user.save();
+    res.json({ message: "Password updated successfully" });
+  } catch (error) {
+    console.error("PUT /auth/me/password error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });

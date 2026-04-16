@@ -29,7 +29,8 @@ const SharedConversationSchema = new Schema<SharedConversationDocument>(
     businessUnit: {
       type: String,
       required: true,
-      index: true
+      index: true,
+      trim: true
     }
   },
   { timestamps: { createdAt: true, updatedAt: false } }

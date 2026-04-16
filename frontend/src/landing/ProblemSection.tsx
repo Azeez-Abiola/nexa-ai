@@ -9,7 +9,7 @@ const problems = [
 ];
 
 const ProblemSection = () => (
-  <section className="py-32 px-6 bg-white overflow-hidden relative">
+  <section className="py-16 sm:py-24 md:py-32 px-4 sm:px-6 bg-white overflow-hidden relative">
     {/* Floating Orb Background Element */}
     <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-primary/5 rounded-full blur-[120px] pointer-events-none" />
     
@@ -24,7 +24,7 @@ const ProblemSection = () => (
           <span className="text-[11px] font-bold text-primary uppercase tracking-wider">The Problem</span>
         </div>
         
-        <h2 className="text-4xl md:text-6xl lg:text-7xl font-extrabold tracking-tight text-[#1A1A1A] mb-10 font-sans leading-[1.1]">
+        <h2 className="text-3xl sm:text-4xl md:text-6xl lg:text-7xl font-extrabold tracking-tight text-[#1A1A1A] mb-8 sm:mb-10 font-sans leading-[1.1] px-1">
           Your Organization Knows More <br className="hidden md:block" />
           Than It Can <span className="gradient-text italic">Access</span>
         </h2>
@@ -44,7 +44,7 @@ const ProblemSection = () => (
             className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 bg-gradient-to-br from-primary/20 via-accent/20 to-primary/10 rounded-full blur-3xl opacity-60 -z-10"
           />
           
-          <p className="text-xl md:text-2xl text-muted-foreground leading-relaxed font-medium">
+          <p className="text-base sm:text-xl md:text-2xl text-muted-foreground leading-relaxed font-medium px-1">
             Nexa is your friendly AI chatbot designed to make daily conversations smarter and easier. 
             Whether you need quick answers, creative ideas, or just someone to chat with, Nexa fits 
             perfectly into your everyday life and workflow.
@@ -52,7 +52,7 @@ const ProblemSection = () => (
         </div>
       </motion.div>
 
-      <div className="grid md:grid-cols-2 gap-8 max-w-5xl mx-auto">
+      <div className="grid md:grid-cols-2 gap-5 sm:gap-8 max-w-5xl mx-auto">
         {problems.map((p, i) => (
           <motion.div
             key={i}
@@ -60,7 +60,7 @@ const ProblemSection = () => (
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
             transition={{ delay: i * 0.1 }}
-            className="group relative p-10 rounded-[2.5rem] bg-white border border-border/40 hover:border-primary/20 shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_20px_50px_rgba(0,0,0,0.1)] transition-all duration-500 overflow-hidden"
+            className="group relative p-6 sm:p-8 md:p-10 rounded-2xl sm:rounded-[2.5rem] bg-white border border-border/40 hover:border-primary/20 shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_20px_50px_rgba(0,0,0,0.1)] transition-all duration-500 overflow-hidden"
           >
             {/* Subtle background pattern on hover */}
             <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />

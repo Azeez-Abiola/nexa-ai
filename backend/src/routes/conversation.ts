@@ -10,6 +10,7 @@ import {
   ImageAttachment
 } from "../services/openaiService";
 import { buildContextForQuery } from "../utils/contextBuilder";
+import { KNOWLEDGE_BASE_VERSIONING_RULES } from "../prompts/knowledgeBaseBehavior";
 import { uploadDocument } from "../services/cloudinaryService";
 import { userDocumentQueue } from "../queue/userDocumentQueue";
 import {
@@ -205,7 +206,9 @@ function buildSystemPrompt(
    - 📄 for user-uploaded document answers
    - 📋 for company knowledge base answers
    - 💭 for general knowledge (when no document context is available)
-6. Be professional, helpful, and concise.`);
+6. Be professional, helpful, and concise.
+
+${KNOWLEDGE_BASE_VERSIONING_RULES}`);
 
   return sections.join("\n\n");
 }
@@ -480,7 +483,7 @@ conversationRouter.post("/:id/message", authMiddleware, async (req: Authenticate
     const [sessionStatus, hasSessionChunks, globalContext] = await Promise.all([
       getSessionDocumentStatus(userId, chatSessionId),
       hasReadySessionChunks(userId, chatSessionId),
-      buildContextForQuery(content, businessUnit, req.grade || "")
+      buildContextForQuery(content, businessUnit, req.grade || "", { userId: req.userId })
     ]);
 
     // Access denied by global RAG grade restriction
@@ -660,7 +663,7 @@ conversationRouter.post("/:id/message/:index/edit", authMiddleware, async (req: 
     const [sessionStatus, hasSessionChunks, globalContext] = await Promise.all([
       getSessionDocumentStatus(userId, chatSessionId),
       hasReadySessionChunks(userId, chatSessionId),
-      buildContextForQuery(content, businessUnit, req.grade || "")
+      buildContextForQuery(content, businessUnit, req.grade || "", { userId: req.userId })
     ]);
 
     if (globalContext.accessDenied && !hasSessionChunks) {
@@ -876,7 +879,7 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
     const [sessionStatus, hasSessionChunks, globalContext] = await Promise.all([
       getSessionDocumentStatus(userId, chatSessionId),
       hasReadySessionChunks(userId, chatSessionId),
-      buildContextForQuery(content, businessUnit, req.grade || "")
+      buildContextForQuery(content, businessUnit, req.grade || "", { userId: req.userId })
     ]);
 
     if (globalContext.accessDenied && !hasSessionChunks) {

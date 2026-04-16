@@ -18,7 +18,10 @@ export function buildPublicId(businessUnit: string, filename: string): string {
     .basename(filename, path.extname(filename))
     .replace(/[^a-zA-Z0-9_-]/g, "_")
     .substring(0, 60);
-  return `${BASE_FOLDER}/${businessUnit}/${uuid}-${sanitized}`;
+  // Cloudinary rejects public_ids containing whitespace (leading, trailing, or embedded).
+  // Sanitize BU the same way as filename so legacy "1879 Tech hub " → "1879_Tech_hub".
+  const sanitizedBu = businessUnit.trim().replace(/[^a-zA-Z0-9_-]/g, "_") || "default";
+  return `${BASE_FOLDER}/${sanitizedBu}/${uuid}-${sanitized}`;
 }
 
 export async function uploadDocument(

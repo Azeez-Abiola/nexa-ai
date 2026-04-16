@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import styles from "./styles/home.module.css";
+import { PrivacyPolicyFooter } from "./components/PrivacyPolicy";
 
 interface AdminHomeProps {
   onEnter?: () => void;
@@ -109,6 +110,8 @@ export const AdminHome: React.FC<AdminHomeProps> = ({ onEnter, admin }) => {
           </div>
         </div>
       </div>
+
+      <PrivacyPolicyFooter type="admin" />
     </div>
   );
 };

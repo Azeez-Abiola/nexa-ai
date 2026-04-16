@@ -6,6 +6,8 @@ interface PrivacyPolicyProps {
   isOpen?: boolean;
   onClose?: () => void;
   type?: "user" | "admin";
+  /** Light panel for login / marketing; default dark (admin). */
+  variant?: "dark" | "light";
 }
 
 const userPolicyContent = (
@@ -164,7 +166,12 @@ const adminPolicyContent = (
   </>
 );
 
-export const PrivacyPolicy: React.FC<PrivacyPolicyProps> = ({ isOpen = false, onClose, type = "user" }) => {
+export const PrivacyPolicy: React.FC<PrivacyPolicyProps> = ({
+  isOpen = false,
+  onClose,
+  type = "user",
+  variant = "dark"
+}) => {
   const [open, setOpen] = useState(isOpen);
 
   const handleClose = () => {
@@ -185,8 +192,14 @@ export const PrivacyPolicy: React.FC<PrivacyPolicyProps> = ({ isOpen = false, on
   }
 
   return (
-    <div className={styles.modalBackdrop} onClick={handleClose}>
-      <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
+    <div
+      className={`${styles.modalBackdrop} ${variant === "light" ? styles.modalBackdropLight : ""}`}
+      onClick={handleClose}
+    >
+      <div
+        className={`${styles.modal} ${variant === "light" ? styles.modalLight : ""}`}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className={styles.modalHeader}>
           <h2 className={styles.modalTitle}>
             {type === "admin" ? "Data Information Policy & Privacy Notice" : "Privacy Policy"}
@@ -225,6 +238,10 @@ export const PrivacyPolicyFooter: React.FC<{ type?: "user" | "admin" }> = ({ typ
       <footer className={styles.footer_}>
         <div className={styles.footerContent}>
           <p className={styles.copyright}>© {new Date().getFullYear()} Nexa AI. All rights reserved.</p>
+          <div className={styles.poweredBy1879}>
+            <img src="/1879-22.png" alt="" width={14} height={14} className={styles.poweredBy1879Logo} />
+            <span>Powered by 1879 Tech Hub</span>
+          </div>
         </div>
       </footer>
       {showPolicy && (

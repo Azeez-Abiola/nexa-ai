@@ -31,8 +31,26 @@
             <td style="background:#ffffff;padding:44px 40px 36px;">
               <p style="color:#18181b;font-size:18px;font-weight:700;margin:0 0 8px;">Hi <%= fullName %>,</p>
               <p style="color:#52525b;font-size:15px;line-height:1.7;margin:0 0 28px;">
-                Your email has been verified and your account is now fully active. Welcome aboard! As a member of <strong style="color:#18181b;"><%= buLabel %></strong>, you now have access to an AI-powered assistant that's been trained specifically on your organization's knowledge base.
+                <% if (typeof initialPassword !== 'undefined' && initialPassword) { %>
+                  Your administrator added you to <strong style="color:#18181b;"><%= buLabel %></strong> on Nexa AI. Use the temporary password below to sign in, then change it from your account settings.
+                <% } else if (typeof adminCreated !== 'undefined' && adminCreated) { %>
+                  Your administrator created your Nexa AI account for <strong style="color:#18181b;"><%= buLabel %></strong>. Sign in with this email address and the password they provided you, then explore the AI assistant trained on your organization’s documents.
+                <% } else { %>
+                  Your email has been verified and your account is now fully active. Welcome aboard! As a member of <strong style="color:#18181b;"><%= buLabel %></strong>, you now have access to an AI-powered assistant that's been trained specifically on your organization's knowledge base.
+                <% } %>
               </p>
+
+              <% if (typeof initialPassword !== 'undefined' && initialPassword) { %>
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 24px;background:#fafafa;border-radius:12px;border:1px solid #f0f0f0;">
+                <tr>
+                  <td style="padding:18px 20px;">
+                    <p style="color:#71717a;font-size:12px;font-weight:700;margin:0 0 8px;text-transform:uppercase;letter-spacing:0.06em;">Temporary password</p>
+                    <p style="color:#18181b;font-size:18px;font-weight:800;margin:0;font-family:ui-monospace,monospace;letter-spacing:0.04em;"><%= initialPassword %></p>
+                    <p style="color:#a1a1aa;font-size:12px;margin:10px 0 0;line-height:1.5;">Sign in with this email address and the password above. You can change your password after logging in.</p>
+                  </td>
+                </tr>
+              </table>
+              <% } %>
 
               <!-- Feature cards -->
               <table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 32px;">

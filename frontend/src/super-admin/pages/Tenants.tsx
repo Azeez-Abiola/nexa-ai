@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import axios from 'axios';
 import {
@@ -37,6 +38,14 @@ import {
   SheetFooter
 } from '@/components/ui/sheet';
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle
+} from "@/components/ui/dialog";
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -48,8 +57,18 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import Directory from './Directory';
 
 const Tenants: React.FC = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const mainTab = searchParams.get('tab') === 'registered' ? 'registered' : 'registry';
+
+  const setMainTab = (tab: 'registry' | 'registered') => {
+    if (tab === 'registered') setSearchParams({ tab: 'registered' });
+    else setSearchParams({});
+  };
+
   const [tenants, setTenants] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [isLoading, setIsLoading] = useState(true);
@@ -59,6 +78,11 @@ const Tenants: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const { toast } = useToast();
+
+  const activeUsersCount = useMemo(
+    () => tenants.filter((t) => t.isActive).reduce((acc, t) => acc + (t.userCount || 0), 0),
+    [tenants]
+  );
 
   // Stats from summary
   const [stats, setStats] = useState({ total: 0, active: 0, inactive: 0 });
@@ -114,43 +138,60 @@ const Tenants: React.FC = () => {
   );
 
   return (
-    <div className="space-y-12 animate-in fade-in slide-in-from-bottom-4 duration-700">
+    <div className="min-w-0 max-w-full space-y-12 animate-in fade-in slide-in-from-bottom-4 duration-700">
       <div className="flex flex-col lg:flex-row justify-between items-start lg:items-end gap-6">
         <div>
           <h2 className="text-3xl font-bold text-slate-900 tracking-tight font-['Sen']">Tenants</h2>
-          <p className="text-slate-400 font-medium mt-1 text-sm">Manage access for all business units.</p>
+          <p className="text-slate-400 font-medium mt-1 text-sm">
+            {mainTab === 'registered'
+              ? 'Directory of business units integrated with Nexa AI.'
+              : 'Manage access for all business units.'}
+          </p>
         </div>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => {
-              const rows = [['Name', 'Label', 'Slug', 'Status', 'Users'], ...tenants.map(t => [t.name, t.label, t.slug, t.isActive ? 'Active' : 'Inactive', t.userCount || 0])];
-              const csv = rows.map(r => r.join(',')).join('\n');
-              const blob = new Blob([csv], { type: 'text/csv' });
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement('a');
-              a.href = url;
-              a.download = `nexa-tenants-${new Date().toISOString().split('T')[0]}.csv`;
-              a.click();
-              URL.revokeObjectURL(url);
-            }}
-            className="h-11 px-5 bg-white border border-slate-200 rounded-[1.25rem] text-xs font-bold text-slate-600 flex items-center gap-2 hover:bg-slate-50 hover:border-slate-300 transition-all active:scale-95"
-          >
-            <Download size={14} />
-            Export CSV
-          </button>
-          <Button
-            onClick={() => { setEditingTenant(null); setIsDrawerOpen(true); }}
-            className="bg-[#ed0000] hover:bg-[#c40000] text-white rounded-[1.25rem] h-11 px-6 shadow-2xl shadow-red-500/30 flex items-center gap-3 group font-bold transition-all hover:-translate-y-1"
-          >
-            <PlusCircle size={20} className="group-hover:rotate-90 transition-transform duration-300" />
-            Add new tenant
-          </Button>
-        </div>
+        {mainTab === 'registry' && (
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => {
+                const rows = [['Name', 'Label', 'Slug', 'Status', 'Users'], ...tenants.map(t => [t.name, t.label, t.slug, t.isActive ? 'Active' : 'Pending', t.userCount || 0])];
+                const csv = rows.map(r => r.join(',')).join('\n');
+                const blob = new Blob([csv], { type: 'text/csv' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `nexa-tenants-${new Date().toISOString().split('T')[0]}.csv`;
+                a.click();
+                URL.revokeObjectURL(url);
+              }}
+              className="h-11 px-5 bg-white border border-slate-200 rounded-[1.25rem] text-xs font-bold text-slate-600 flex items-center gap-2 hover:bg-slate-50 hover:border-slate-300 transition-all active:scale-95"
+            >
+              <Download size={14} />
+              Export CSV
+            </button>
+            <Button
+              onClick={() => { setEditingTenant(null); setIsDrawerOpen(true); }}
+              className="bg-[#ed0000] hover:bg-[#c40000] text-white rounded-[1.25rem] h-11 px-6 shadow-2xl shadow-red-500/30 flex items-center gap-3 group font-bold transition-all hover:-translate-y-1"
+            >
+              <PlusCircle size={20} className="group-hover:rotate-90 transition-transform duration-300" />
+              Add new tenant
+            </Button>
+          </div>
+        )}
       </div>
 
+      <Tabs value={mainTab} onValueChange={(v) => setMainTab(v as 'registry' | 'registered')} className="w-full">
+        <TabsList className="h-12 rounded-2xl bg-slate-100/80 p-1 w-full max-w-md">
+          <TabsTrigger value="registry" className="rounded-xl font-bold data-[state=active]:shadow-md flex-1">
+            Tenant registry
+          </TabsTrigger>
+          <TabsTrigger value="registered" className="rounded-xl font-bold data-[state=active]:shadow-md flex-1">
+            Registered BUs
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="registry" className="mt-10 space-y-12 focus-visible:outline-none">
       {/* Top Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
-        {isLoading ? [1, 2, 3, 4, 5].map(i => (
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        {isLoading ? [1, 2, 3, 4].map(i => (
           <Card key={i} className="border-none shadow-xl shadow-slate-200/50 rounded-2xl bg-rose-50/50 p-8">
             <CardContent className="p-0 w-full">
               <div className="flex justify-between items-start">
@@ -166,13 +207,13 @@ const Tenants: React.FC = () => {
         )) : (<>
           <MiniStatCard label="Total units" value={stats.total} icon={<Building2 size={20} />} trend="Global" />
           <MiniStatCard label="Active Tenants" value={stats.active} icon={<ShieldCheck size={20} />} trend="Online" />
-          <MiniStatCard label="Platform reach" value={tenants.reduce((acc, t) => acc + (t.userCount || 0), 0)} icon={<Users size={20} />} trend="Staff" />
-          <MiniStatCard label="Inactive" value={stats.inactive} icon={<ShieldAlert size={20} />} trend="Paused" />
+          <MiniStatCard label="Active users" value={activeUsersCount} icon={<Users size={20} />} trend="Staff" />
+          <MiniStatCard label="Pending" value={stats.inactive} icon={<ShieldAlert size={20} />} trend="Setup" />
         </>)}
       </div>
 
       <div className="space-y-6">
-        <div className="relative w-full lg:w-[450px]">
+        <div className="relative w-full min-w-0 max-w-full lg:max-w-md">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={20} />
           <Input
             placeholder="Search registry by name, label or slug..."
@@ -184,12 +225,13 @@ const Tenants: React.FC = () => {
 
         {/* Main Table */}
         <Card className="border-none shadow-2xl shadow-slate-200/50 rounded-2xl overflow-hidden bg-rose-50/50">
+          <div className="w-full min-w-0 overflow-x-auto">
           <Table>
             <TableHeader className="bg-slate-50/50 border-b border-slate-100">
               <TableRow className="hover:bg-transparent">
                 <TableHead className="py-6 px-10 font-bold text-slate-800 text-xs">Entity</TableHead>
                 <TableHead className="font-bold text-slate-800 text-xs">Slug</TableHead>
-                <TableHead className="font-bold text-slate-800 text-xs">Network</TableHead>
+                <TableHead className="font-bold text-slate-800 text-xs">Subdomain</TableHead>
                 <TableHead className="font-bold text-slate-800 text-xs">Status</TableHead>
                 <TableHead className="font-bold text-slate-800 text-xs text-right px-10">Control</TableHead>
               </TableRow>
@@ -235,11 +277,14 @@ const Tenants: React.FC = () => {
                     </a>
                   </TableCell>
                   <TableCell>
-                    <Badge className={cn(
-                      "px-4 py-1.5 rounded-full border-none font-bold text-[10px] uppercase tracking-wider",
-                      t.isActive ? "bg-emerald-50 text-emerald-600" : "bg-red-50 text-red-600"
-                    )} variant="outline">
-                      {t.isActive ? "Online" : "Offline"}
+                    <Badge
+                      className={cn(
+                        "px-4 py-1.5 rounded-full border-none font-bold text-[10px] uppercase tracking-wider",
+                        t.isActive ? "bg-emerald-50 text-emerald-600" : "bg-amber-50 text-amber-800"
+                      )}
+                      variant="outline"
+                    >
+                      {t.isActive ? "Active" : "Pending"}
                     </Badge>
                   </TableCell>
                   <TableCell className="text-right px-10">
@@ -268,8 +313,22 @@ const Tenants: React.FC = () => {
               ))}
             </TableBody>
           </Table>
+          </div>
         </Card>
       </div>
+        </TabsContent>
+
+        <TabsContent value="registered" className="mt-10 focus-visible:outline-none">
+          <Directory
+            embedded
+            onRequestAddTenant={() => {
+              setMainTab('registry');
+              setEditingTenant(null);
+              setIsDrawerOpen(true);
+            }}
+          />
+        </TabsContent>
+      </Tabs>
 
       {/* Add / Edit Tenant Drawer */}
       <CreateTenantDrawer
@@ -349,6 +408,8 @@ const CreateTenantDrawer = ({ isOpen, onClose, onSuccess, tenant }: any) => {
   const [logo, setLogo] = useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [showBrandColorModal, setShowBrandColorModal] = useState(false);
+  const [brandDraft, setBrandDraft] = useState("#ed0000");
   const { toast } = useToast();
 
   useEffect(() => {
@@ -396,8 +457,8 @@ const CreateTenantDrawer = ({ isOpen, onClose, onSuccess, tenant }: any) => {
           headers: { Authorization: `Bearer ${token}` }
         });
         toast({
-          title: "Tenant Provisioned",
-          description: `Successfully added ${response.data.tenant.name} to the registry.`,
+          title: "Tenant provisioned",
+          description: `${response.data.tenant?.name || formData.name} was added as Pending. Activate it in the registry when the business unit is ready for users.`,
         });
       }
       onSuccess();
@@ -410,6 +471,7 @@ const CreateTenantDrawer = ({ isOpen, onClose, onSuccess, tenant }: any) => {
   };
 
   return (
+    <>
     <Sheet open={isOpen} onOpenChange={(o) => !o && onClose()}>
       <SheetContent side="right" className="sm:max-w-xl bg-white p-0 flex flex-col border-none shadow-2xl animate-in slide-in-from-right duration-500">
         <SheetHeader className="p-12 pb-0">
@@ -420,7 +482,9 @@ const CreateTenantDrawer = ({ isOpen, onClose, onSuccess, tenant }: any) => {
             {isEditing ? 'Update tenant info' : 'Add new tenant'}
           </SheetTitle>
           <SheetDescription className="text-slate-400 text-sm font-medium mt-2 leading-relaxed">
-            {isEditing ? `Editing ${tenant.name}. Update the fields below and save.` : 'Create a new business unit and configure its infrastructure.'}
+            {isEditing
+              ? `Editing ${tenant.name}. Update the fields below and save.`
+              : "Create a new business unit and configure its infrastructure. New tenants start as Pending until you activate them in the registry (employees cannot register until then)."}
           </SheetDescription>
         </SheetHeader>
 
@@ -476,29 +540,33 @@ const CreateTenantDrawer = ({ isOpen, onClose, onSuccess, tenant }: any) => {
           </div>
 
           <div className="space-y-3">
-            <Label className="text-slate-700 font-medium text-sm ml-1">Brand color code</Label>
-            <div className="flex items-center gap-4">
-              <div className="relative flex-1">
-                <Input
-                  placeholder="#ed0000"
-                  className="h-12 rounded-2xl border-none bg-slate-50 focus-visible:ring-[#ed0000] font-medium text-slate-900 pl-16 pr-6 uppercase"
-                  value={formData.colorCode}
-                  onChange={e => setFormData({ ...formData, colorCode: e.target.value })}
-                />
-                <div
-                  className="absolute left-4 top-1/2 -translate-y-1/2 w-8 h-8 rounded-xl border-2 border-white shadow-md cursor-pointer"
-                  style={{ backgroundColor: formData.colorCode || '#ed0000' }}
-                  onClick={() => {
-                    const input = document.createElement('input');
-                    input.type = 'color';
-                    input.value = formData.colorCode || '#ed0000';
-                    input.addEventListener('input', (ev: any) => setFormData(prev => ({ ...prev, colorCode: ev.target.value })));
-                    input.click();
-                  }}
-                />
-              </div>
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <Label className="text-slate-700 font-medium text-sm ml-1">Brand color</Label>
+              <Button
+                type="button"
+                variant="outline"
+                className="rounded-xl h-10 px-4 text-xs font-bold border-slate-200"
+                onClick={() => {
+                  setBrandDraft(formData.colorCode || "#ed0000");
+                  setShowBrandColorModal(true);
+                }}
+              >
+                Change brand color…
+              </Button>
             </div>
-            <p className="text-[10px] text-slate-400 font-bold ml-1">This color will be used as the secondary theme for their dashboard and chat interface.</p>
+            <div className="flex items-center gap-3 ml-1">
+              <div
+                className="w-10 h-10 rounded-xl border-2 border-white shadow-md shrink-0"
+                style={{ backgroundColor: formData.colorCode || "#ed0000" }}
+                aria-hidden
+              />
+              <span className="text-sm font-mono font-bold text-slate-800 tracking-tight">
+                {(formData.colorCode || "#ed0000").toUpperCase()}
+              </span>
+            </div>
+            <p className="text-[10px] text-slate-400 font-bold ml-1">
+              Accent for their dashboard and chat. Use the dialog for a precise picker and hex value.
+            </p>
           </div>
 
           <div className="space-y-3">
@@ -548,6 +616,52 @@ const CreateTenantDrawer = ({ isOpen, onClose, onSuccess, tenant }: any) => {
         </SheetFooter>
       </SheetContent>
     </Sheet>
+
+    <Dialog open={showBrandColorModal} onOpenChange={setShowBrandColorModal}>
+      <DialogContent className="sm:max-w-md rounded-2xl">
+        <DialogHeader>
+          <DialogTitle className="font-['Sen'] text-xl">Change brand color</DialogTitle>
+          <DialogDescription>
+            Pick an accent color for this tenant’s admin portal and chat. It saves when you apply here; the tenant sheet still needs{" "}
+            <span className="font-semibold text-foreground">Update tenant info</span> to persist to the server.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex flex-col gap-4 py-2">
+          <div className="flex items-center gap-4">
+            <input
+              type="color"
+              aria-label="Color picker"
+              className="h-12 w-20 cursor-pointer rounded-xl border border-slate-200 bg-white p-1"
+              value={/^#[0-9A-Fa-f]{6}$/.test(brandDraft) ? brandDraft : "#ed0000"}
+              onChange={(e) => setBrandDraft(e.target.value)}
+            />
+            <Input
+              placeholder="#ed0000"
+              className="h-12 rounded-xl border-slate-200 font-mono font-semibold uppercase"
+              value={brandDraft}
+              onChange={(e) => setBrandDraft(e.target.value)}
+            />
+          </div>
+        </div>
+        <DialogFooter className="gap-2 sm:gap-0">
+          <Button type="button" variant="ghost" className="rounded-xl font-bold" onClick={() => setShowBrandColorModal(false)}>
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            className="rounded-xl font-bold bg-[#ed0000] hover:bg-[#c40000] text-white"
+            onClick={() => {
+              const v = brandDraft.trim() || "#ed0000";
+              setFormData((prev) => ({ ...prev, colorCode: v.startsWith("#") ? v : `#${v}` }));
+              setShowBrandColorModal(false);
+            }}
+          >
+            Apply to form
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    </>
   );
 };
 

@@ -4,23 +4,38 @@ import axios from "axios";
 import {
   BiPaperPlane, BiPencil, BiHomeAlt, BiHistory, BiLibrary, BiGridAlt,
   BiUserCircle, BiCog, BiMessageSquareAdd, BiSearch, BiImage, BiCodeBlock,
-  BiBoltCircle, BiShareAlt, BiHelpCircle, BiChevronDown, BiSidebar,
+  BiBoltCircle, BiShareAlt, BiHelpCircle, BiChevronDown,
   BiUpArrowAlt, BiMessageRounded, BiPlus, BiDotsHorizontalRounded,
-  BiPaperclip, BiMicrophone, BiMoon, BiSun
+  BiPaperclip, BiMicrophone, BiMoon, BiSun, BiCamera, BiCopy
 } from "react-icons/bi";
 import { MdPushPin, MdAutoAwesome } from "react-icons/md";
 import { FiLogOut, FiDownload, FiTrash2, FiExternalLink } from "react-icons/fi";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
+import { ChatGptStyleMenuIcon } from "./components/ChatGptStyleMenuIcon";
+import { UserChatProfile } from "./UserChatProfile";
 import { Admin } from "./Admin";
 import { Login } from "./Login";
 import { Home } from "./Home";
 import NewLandingPage from "./landing";
+import ContactPage from "./landing/ContactPage";
+import PrivacyPage from "./landing/PrivacyPage";
+import TermsPage from "./landing/TermsPage";
 import { AcceptInvite } from "./AcceptInvite";
+import { AcceptEmployeeInvite } from "./AcceptEmployeeInvite";
 import SuperAdminMain from "./super-admin/SuperAdminMain";
 import SuperAdminLogin from "./super-admin/pages/SuperAdminLogin";
 import { parseMarkdown } from "./utils/parseMarkdown";
 import LoginLoadingScreen from "./components/LoginLoadingScreen";
 import { exportConversationToDocx, exportConversationToPdf, generateExportFilename } from "./utils/chatExport";
+import { hexToHslSpace, DEFAULT_RING_HSL, normalizeHexToRrggbb } from "./lib/brandCss";
+import { cn } from "@/lib/utils";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 interface Message {
   role: "user" | "assistant";
@@ -41,12 +56,70 @@ interface User {
   email: string;
   fullName: string;
   businessUnit: string;
+  grade?: string;
+  tenantLabel?: string;
+  tenantContactEmail?: string;
+  tenantId?: string;
+  tenantSlug?: string;
+  tenantLogo?: string;
+  tenantColor?: string;
+  emailVerified?: boolean;
+  isAdmin?: boolean;
 }
 
 type View = "chat" | "admin";
 
+/** Document types for the chat “Files” picker (images use Camera / Photos). */
+const CHAT_DOCUMENT_ACCEPT =
+  ".pdf,.doc,.docx,.txt,.csv,.xlsx,.xls,.ppt,.pptx,.ppt,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+function applyTenantBrandFromSession(tenantColor: string | undefined) {
+  const brandHex = normalizeHexToRrggbb(tenantColor);
+  document.documentElement.style.setProperty("--brand-color", brandHex);
+  const ring = tenantColor?.trim() ? hexToHslSpace(brandHex) : DEFAULT_RING_HSL;
+  document.documentElement.style.setProperty("--ring", ring);
+  document.documentElement.style.setProperty("--sidebar-ring", ring);
+  document.documentElement.style.setProperty("--primary", ring);
+  if (tenantColor?.trim()) {
+    document.documentElement.style.setProperty("--accent", ring);
+    document.documentElement.style.setProperty("--accent-foreground", "0 0% 100%");
+  } else {
+    document.documentElement.style.setProperty("--accent", "0 85% 38%");
+    document.documentElement.style.setProperty("--accent-foreground", "0 0% 100%");
+  }
+}
+
+function resolveTenantLogoUrl(logo: string | undefined | null): string | null {
+  if (!logo || !String(logo).trim()) return null;
+  const s = String(logo).trim();
+  if (s.startsWith("http://") || s.startsWith("https://")) return s;
+  const base = (import.meta.env.VITE_API_URL || "").replace(/\/$/, "");
+  const path = s.replace(/^\/logos\//, "");
+  return base ? `${base}/logos/${path}` : `/logos/${path}`;
+}
+
+function buildUserChatHelpFaqs(orgDisplay: string) {
+  const org = orgDisplay.trim();
+  const here = org ? ` at ${org}` : "";
+  return [
+    {
+      q: `What can Nexa help me with${here}?`,
+      a: `You can ask everyday work questions, brainstorm, summarize text you paste or attach, and get suggestions. When it helps, Nexa may also use information your company has chosen to make available to the assistant.`,
+    },
+    {
+      q: `How do I change my name or password?`,
+      a: `Tap your name at the bottom of the sidebar to open Profile. From there you can update your display name and change your password.`,
+    },
+    {
+      q: `What should I know about privacy?`,
+      a: `Avoid sharing passwords, bank details, or highly personal information in chat. Your employer sets its own rules for workplace tools—if you are unsure what is appropriate, ask your manager or use Contact support below.`,
+    },
+  ];
+}
+
 export const App: React.FC = () => {
   const location = useLocation();
+  const navigate = useNavigate();
   // Track when loading started for minimum 3 second display
   const loadingStartTimeRef = useRef<number | null>(null);
 
@@ -117,17 +190,23 @@ export const App: React.FC = () => {
   const [isHistoryCollapsed, setIsHistoryCollapsed] = useState(false);
   const [isHomeRecentCollapsed, setIsHomeRecentCollapsed] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
+  const [attachMenuOpen, setAttachMenuOpen] = useState(false);
+  const [copiedMessageIndex, setCopiedMessageIndex] = useState<number | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [selectedAvatar, setSelectedAvatar] = useState<string>(() => localStorage.getItem("nexa-avatar") || "");
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
   const recognitionRef = useRef<any>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const imageInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const photosInputRef = useRef<HTMLInputElement>(null);
+  const attachMenuWrapRef = useRef<HTMLDivElement>(null);
+  const copyFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const messagesContainerRef = useRef<HTMLElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const isAdminPage = location.pathname.startsWith('/admin');
   const isSuperAdminPage = location.pathname.startsWith('/super-admin');
-  const isChatPage = location.pathname === '/user-chat';
+  const isUserChatProfile = location.pathname === "/user-chat/profile";
+  const isChatPage = location.pathname === "/user-chat";
   const userInitials = user
     ? `${user.fullName?.split(' ').map(n => n[0]).join('').toUpperCase() || ""}`
     : "";
@@ -190,9 +269,7 @@ export const App: React.FC = () => {
         axios.defaults.headers.common["Authorization"] = `Bearer ${savedToken}`;
 
         const userData = JSON.parse(savedUser);
-        if (userData.tenantColor) {
-          document.documentElement.style.setProperty('--brand-color', userData.tenantColor);
-        }
+        applyTenantBrandFromSession(userData.tenantColor);
 
         // Wait for backend to be ready before loading conversations
         const backendReady = await waitForBackend();
@@ -207,6 +284,17 @@ export const App: React.FC = () => {
             }
           })();
           if (!isAdmin) {
+            try {
+              const { data } = await axios.get<{ user: User }>("/api/v1/auth/me");
+              if (data?.user) {
+                const merged = { ...userData, ...data.user };
+                setUser(merged);
+                localStorage.setItem("nexa-user", JSON.stringify(merged));
+                applyTenantBrandFromSession(merged.tenantColor);
+              }
+            } catch {
+              /* session still valid without refresh */
+            }
             loadingStartTimeRef.current = Date.now();
             if (window.location.pathname === "/" || window.location.pathname === "/login") {
               window.history.replaceState(null, "", "/user-chat");
@@ -239,6 +327,8 @@ export const App: React.FC = () => {
       document.title = "Nexa AI - Admin";
     } else if (isSuperAdminPage) {
       document.title = "Nexa AI - Control Panel";
+    } else if (isUserChatProfile) {
+      document.title = "Nexa AI - Profile";
     } else if (isChatPage) {
       document.title = "Nexa AI - Chat";
     } else if (location.pathname === "/login") {
@@ -246,12 +336,35 @@ export const App: React.FC = () => {
     } else {
       document.title = "Nexa AI";
     }
-  }, [isAdminPage, isSuperAdminPage, isChatPage, location.pathname]);
+  }, [isAdminPage, isSuperAdminPage, isChatPage, isUserChatProfile, location.pathname]);
+
+  /** Employee chat + profile: keep CSS tokens aligned with BU branding (e.g. after GET /auth/me merge). */
+  useEffect(() => {
+    if (!isAuthenticated || !user || user.isAdmin === true) return;
+    if (!isChatPage && !isUserChatProfile) return;
+    applyTenantBrandFromSession(user.tenantColor);
+  }, [isAuthenticated, user?.isAdmin, user?.tenantColor, user?.id, isChatPage, isUserChatProfile]);
+
+  // Public/auth routes must never inherit a tenant's color — force the default red so a stale BU session
+  // in localStorage can't bleed into the landing, login, invite-acceptance, or marketing sub-pages.
+  useEffect(() => {
+    const NEUTRAL_ROUTES = new Set([
+      "/",
+      "/login",
+      "/super-admin/login",
+      "/contact",
+      "/privacy",
+      "/terms",
+      "/accept-invite",
+      "/accept-employee-invite"
+    ]);
+    if (NEUTRAL_ROUTES.has(location.pathname)) applyTenantBrandFromSession(undefined);
+  }, [location.pathname]);
 
   // Scroll to bottom when messages change or conversation changes
   useEffect(() => {
     scrollToBottom(true);
-  }, [currentConversation?._id, currentConversation?.messages.length]);
+  }, [currentConversation?._id, currentConversation?.messages?.length]);
 
   // Persist pinned conversations to localStorage
   useEffect(() => {
@@ -342,12 +455,13 @@ export const App: React.FC = () => {
     // Role-based redirection
     if (authUser.businessUnit === 'SUPERADMIN') {
       window.location.href = "/super-admin/dashboard";
-    } else if (authUser.isAdmin) {
+    } else if (authUser.isAdmin === true) {
       window.location.href = "/admin/dashboard";
     } else {
       window.history.pushState(null, "", "/user-chat");
       setIsConversationsLoading(true);
       axios.defaults.headers.common["Authorization"] = `Bearer ${authToken}`;
+      applyTenantBrandFromSession(authUser.tenantColor);
       await loadConversations(authToken);
       if (!localStorage.getItem("nexa-avatar")) {
         setShowAvatarPicker(true);
@@ -369,6 +483,9 @@ export const App: React.FC = () => {
     setCurrentConversation(null);
     delete axios.defaults.headers.common["Authorization"];
     setLogoutConfirmOpen(false);
+    // `window.history.replaceState` bypasses React Router, so the neutral-route effect
+    // keyed on `location.pathname` won't fire — reset brand inline to clear the BU color.
+    applyTenantBrandFromSession(undefined);
     // Navigate back to the landing page
     window.history.replaceState(null, "", "/");
   };
@@ -397,6 +514,9 @@ export const App: React.FC = () => {
 
   const handleNewChat = async () => {
     if (!token) return;
+    if (location.pathname === "/user-chat/profile") {
+      navigate("/user-chat");
+    }
 
     try {
       const { data } = await axios.post<{ conversation: Conversation }>(
@@ -408,6 +528,9 @@ export const App: React.FC = () => {
       setConversations([data.conversation, ...conversations]);
       setCurrentConversation(data.conversation);
       setInput("");
+      if (typeof window !== "undefined" && window.innerWidth <= 768) {
+        setSidebarOpen(false);
+      }
     } catch (error) {
       console.error("Create conversation error:", error);
     }
@@ -432,7 +555,7 @@ export const App: React.FC = () => {
 
       // If the deleted conversation was selected, switch to the first remaining one
       if (currentConversation?._id === conversationToDelete) {
-        setCurrentConversation(updated.length > 0 ? updated[0] : null);
+        setCurrentConversation(null);
       }
 
       setDeleteConfirmOpen(false);
@@ -703,14 +826,56 @@ export const App: React.FC = () => {
 
   const handleFileAttach = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
-    setAttachedFiles(prev => [...prev, ...files]);
-    // Reset inputs so same file can be selected again if removed
+    if (files.length > 0) {
+      setAttachedFiles((prev) => [...prev, ...files]);
+      setAttachMenuOpen(false);
+    }
     if (fileInputRef.current) fileInputRef.current.value = "";
-    if (imageInputRef.current) imageInputRef.current.value = "";
+    if (cameraInputRef.current) cameraInputRef.current.value = "";
+    if (photosInputRef.current) photosInputRef.current.value = "";
   };
+
+  useEffect(() => {
+    if (!attachMenuOpen) return;
+    const onPointerDown = (ev: PointerEvent) => {
+      const el = attachMenuWrapRef.current;
+      if (el && !el.contains(ev.target as Node)) setAttachMenuOpen(false);
+    };
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === "Escape") setAttachMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [attachMenuOpen]);
+
+  useEffect(() => {
+    return () => {
+      if (copyFeedbackTimerRef.current) clearTimeout(copyFeedbackTimerRef.current);
+    };
+  }, []);
 
   const removeAttachedFile = (index: number) => {
     setAttachedFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const copyMessageText = async (text: string, messageIndex: number) => {
+    const t = text.trim();
+    if (!t || typeof navigator === "undefined" || !navigator.clipboard) return;
+    try {
+      await navigator.clipboard.writeText(t);
+      if (copyFeedbackTimerRef.current) clearTimeout(copyFeedbackTimerRef.current);
+      setCopiedMessageIndex(messageIndex);
+      copyFeedbackTimerRef.current = setTimeout(() => {
+        setCopiedMessageIndex(null);
+        copyFeedbackTimerRef.current = null;
+      }, 2000);
+    } catch {
+      // ignore
+    }
   };
 
   const handleSend = async () => {
@@ -809,6 +974,19 @@ export const App: React.FC = () => {
   if (location.pathname === "/accept-invite") {
     return <AcceptInvite />;
   }
+  if (location.pathname === "/accept-employee-invite") {
+    return <AcceptEmployeeInvite />;
+  }
+
+  if (location.pathname === "/contact") {
+    return <ContactPage />;
+  }
+  if (location.pathname === "/privacy") {
+    return <PrivacyPage />;
+  }
+  if (location.pathname === "/terms") {
+    return <TermsPage />;
+  }
 
   // If user is visiting the old admin URL, redirect to new one
   if (isAdminPage) {
@@ -862,13 +1040,13 @@ export const App: React.FC = () => {
     }
   }
 
-  // /user-chat — requires authentication
-  if (location.pathname === "/user-chat") {
+  // /user-chat and /user-chat/profile — require authentication
+  if (location.pathname === "/user-chat" || location.pathname === "/user-chat/profile") {
     if (!isAuthenticated) {
       window.history.replaceState(null, "", "/login");
       return <Login onLoginSuccess={handleLogin} />;
     }
-    // Authenticated — render chat interface below
+    // Authenticated — render chat shell below
   }
 
   // Any other unmatched route for unauthenticated users → landing page
@@ -877,6 +1055,78 @@ export const App: React.FC = () => {
   }
 
   const toggleSidebar = () => setSidebarOpen(!sidebarOpen);
+  const chatHeaderTenantLogoUrl = resolveTenantLogoUrl(user?.tenantLogo);
+
+  const renderAttachPicker = (buttonClass: string) => (
+    <div className="attach-menu-wrap" ref={attachMenuWrapRef}>
+      <button
+        type="button"
+        className={buttonClass}
+        title="Attach"
+        aria-expanded={attachMenuOpen}
+        aria-haspopup="menu"
+        onClick={(e) => {
+          e.stopPropagation();
+          setAttachMenuOpen((o) => !o);
+        }}
+      >
+        <BiPlus />
+      </button>
+      <AnimatePresence>
+        {attachMenuOpen && (
+          <motion.div
+            role="menu"
+            aria-label="Attachment options"
+            className="attach-picker-popover"
+            initial={{ opacity: 0, y: 12, scale: 0.92 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 8, scale: 0.95 }}
+            transition={{ type: "spring", stiffness: 440, damping: 32, mass: 0.65 }}
+          >
+            <button
+              type="button"
+              role="menuitem"
+              className="attach-picker-item"
+              onClick={() => {
+                cameraInputRef.current?.click();
+              }}
+            >
+              <span className="attach-picker-icon-circle">
+                <BiCamera size={22} />
+              </span>
+              <span className="attach-picker-item-label">Camera</span>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="attach-picker-item"
+              onClick={() => {
+                photosInputRef.current?.click();
+              }}
+            >
+              <span className="attach-picker-icon-circle">
+                <BiImage size={22} />
+              </span>
+              <span className="attach-picker-item-label">Photos</span>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="attach-picker-item"
+              onClick={() => {
+                fileInputRef.current?.click();
+              }}
+            >
+              <span className="attach-picker-icon-circle">
+                <BiPaperclip size={22} />
+              </span>
+              <span className="attach-picker-item-label">Files</span>
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
 
   return (
     <>
@@ -896,7 +1146,6 @@ export const App: React.FC = () => {
             <button className="new-chat-btn-v2" onClick={handleNewChat}>
               <BiPlus size={20} />
               <span>New Chat</span>
-              <span className="shortcut-key">⌥ N</span>
             </button>
           </div>
 
@@ -988,8 +1237,26 @@ export const App: React.FC = () => {
               <span>{theme === 'light' ? 'Dark Mode' : 'Light Mode'}</span>
             </button>
             <button className="theme-toggle-btn" onClick={() => setShowAvatarPicker(true)}>
-              <img src={selectedAvatar || "/avatar-1.png"} alt="" style={{ width: 18, height: 18, borderRadius: 4, objectFit: 'cover' }} />
-              <span>Change AI Assistant</span>
+              <span
+                style={{
+                  width: 22,
+                  height: 22,
+                  borderRadius: 6,
+                  overflow: "hidden",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                  background: "#f3f4f6",
+                }}
+              >
+                <img
+                  src={selectedAvatar || "/avatar-1.png"}
+                  alt=""
+                  style={{ width: "100%", height: "100%", objectFit: "contain", objectPosition: "center", display: "block" }}
+                />
+              </span>
+              <span>Change AI avatar</span>
             </button>
             <button className="sidebar-logout-btn" onClick={() => setLogoutConfirmOpen(true)}>
               <FiLogOut size={18} />
@@ -997,39 +1264,223 @@ export const App: React.FC = () => {
             </button>
           </div>
 
-          <div className="user-profile-v2">
+          <button
+            type="button"
+            className="user-profile-v2"
+            onClick={() => {
+              navigate("/user-chat/profile");
+              if (typeof window !== "undefined" && window.innerWidth <= 768) {
+                setSidebarOpen(false);
+              }
+            }}
+            aria-label="Open profile settings"
+          >
             <div className="user-avatar-v2">
               {userInitials || "U"}
             </div>
             <div className="user-info-v2">
+              <div className="user-name-v2">{user?.fullName || "Account"}</div>
               <div className="user-email-v2">{user?.email}</div>
             </div>
-            <BiChevronDown size={18} />
-          </div>
+          </button>
         </aside>
+
+        {sidebarOpen ? (
+          <div
+            className="chat-sidebar-backdrop"
+            aria-hidden
+            onClick={() => setSidebarOpen(false)}
+          />
+        ) : null}
 
         <main className="chat-layout" onClick={() => {
           if (sidebarOpen && typeof window !== 'undefined' && window.innerWidth <= 768) {
             setSidebarOpen(false);
           }
         }}>
-          <header className="chat-header-v2">
+          <header
+            className="chat-header-v2"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="header-left-v2">
-              {/* Sidebar toggle removed per user request */}
+              <button
+                type="button"
+                className="sidebar-toggle-btn-header"
+                aria-label={sidebarOpen ? "Close conversation menu" : "Open conversation menu"}
+                aria-expanded={sidebarOpen}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleSidebar();
+                }}
+              >
+                <ChatGptStyleMenuIcon size={22} />
+              </button>
             </div>
-            <div className="header-brand-v2">
-              <span className="brand-name-v2" style={{ color: '#111827' }}>Nexa</span>
+            <div
+              className="header-brand-v2"
+              aria-label={user?.tenantLabel || user?.businessUnit || "Nexa"}
+            >
+              {chatHeaderTenantLogoUrl ? (
+                <img
+                  src={chatHeaderTenantLogoUrl}
+                  alt=""
+                  className="header-tenant-logo-v2"
+                  width={32}
+                  height={32}
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).style.display = "none";
+                  }}
+                />
+              ) : null}
+              <span className="brand-name-v2">{user?.tenantLabel || user?.businessUnit || "Nexa"}</span>
             </div>
             <div className="header-actions-v2">
-              <button className="header-action-btn-v2">
-                <BiHelpCircle size={18} />
-                <span>Help</span>
-              </button>
+              <DropdownMenu modal={false}>
+                <DropdownMenuTrigger asChild>
+                  <button type="button" className="header-action-btn-v2" aria-label="Help and frequently asked questions">
+                    <BiHelpCircle size={18} />
+                    <span className="header-action-label-v2">Help</span>
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="end"
+                  sideOffset={8}
+                  className={cn(
+                    "max-h-[min(70vh,28rem)] w-[min(calc(100vw-2rem),22rem)] overflow-y-auto rounded-xl p-0 shadow-lg",
+                    theme === "dark"
+                      ? "border border-[#3f3f3f] bg-[#2a2a2a] text-gray-100"
+                      : "border border-slate-200 bg-white text-slate-900 shadow-md"
+                  )}
+                >
+                  <DropdownMenuLabel
+                    className={cn(
+                      "px-3 py-2.5 text-xs font-bold uppercase tracking-wide",
+                      theme === "dark" ? "text-gray-500" : "text-slate-500"
+                    )}
+                  >
+                    {"Help & FAQ"}
+                  </DropdownMenuLabel>
+                  <div
+                    className={cn(
+                      "max-h-[min(52vh,20rem)] space-y-1.5 overflow-y-auto border-b px-2.5 pb-2.5",
+                      theme === "dark" ? "border-[#3f3f3f]" : "border-slate-200"
+                    )}
+                    onPointerDown={(e) => e.stopPropagation()}
+                  >
+                    {user
+                      ? buildUserChatHelpFaqs(user.tenantLabel || user.businessUnit || "").map((faq, i) => (
+                          <details
+                            key={i}
+                            className={cn(
+                              "group rounded-lg border px-2.5 py-2 text-left text-sm",
+                              theme === "dark"
+                                ? "border-[#3f3f3f] bg-[#1a1a1a]/90"
+                                : "border-slate-200 bg-slate-50/90"
+                            )}
+                          >
+                            <summary
+                              className={cn(
+                                "cursor-pointer list-none font-semibold outline-none [&::-webkit-details-marker]:hidden",
+                                theme === "dark" ? "text-gray-100" : "text-slate-800"
+                              )}
+                            >
+                              <span className="flex items-start justify-between gap-2">
+                                <span className="min-w-0 flex-1 leading-snug">{faq.q}</span>
+                                <BiChevronDown
+                                  className={cn(
+                                    "mt-0.5 h-4 w-4 shrink-0 transition-transform group-open:rotate-180",
+                                    theme === "dark" ? "text-gray-500" : "text-slate-500"
+                                  )}
+                                />
+                              </span>
+                            </summary>
+                            <p
+                              className={cn(
+                                "mt-2 border-t pt-2 text-xs leading-relaxed",
+                                theme === "dark" ? "border-[#3f3f3f] text-gray-400" : "border-slate-200 text-slate-600"
+                              )}
+                            >
+                              {faq.a}
+                            </p>
+                          </details>
+                        ))
+                      : null}
+                  </div>
+                  <div className={cn("p-2", theme === "dark" ? "" : "bg-white")}>
+                    {user?.tenantContactEmail ? (
+                      <DropdownMenuItem
+                        asChild
+                        className={cn(
+                          "cursor-pointer rounded-lg font-bold",
+                          theme === "dark" ? "focus:bg-[#333] focus:text-gray-100" : "text-slate-800 focus:bg-slate-100 focus:text-slate-900"
+                        )}
+                      >
+                        <a
+                          href={`mailto:${user.tenantContactEmail}?subject=${encodeURIComponent(`Nexa AI support — ${user.tenantLabel || user.businessUnit || ""}`)}&body=${encodeURIComponent(`Hi,\n\nI'm writing from Nexa AI (signed in as ${user.email}).\n\nPlease describe your question:\n\n`)}`}
+                          className="flex w-full items-center justify-center gap-2 py-2.5"
+                        >
+                          Contact support
+                        </a>
+                      </DropdownMenuItem>
+                    ) : (
+                      <p
+                        className={cn(
+                          "px-2 py-2 text-center text-xs leading-relaxed",
+                          theme === "dark" ? "text-gray-500" : "text-slate-600"
+                        )}
+                      >
+                        Support email is not available here yet. Ask your manager or IT how to get help.
+                      </p>
+                    )}
+                  </div>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </header>
 
+          {isUserChatProfile && user ? (
+            <UserChatProfile
+              user={user}
+              theme={theme}
+              selectedAvatar={selectedAvatar}
+              onAvatarChange={(path) => {
+                setSelectedAvatar(path);
+                localStorage.setItem("nexa-avatar", path);
+              }}
+              onUserUpdated={(next) => {
+                setUser(next as User);
+                localStorage.setItem("nexa-user", JSON.stringify(next));
+              }}
+              onBack={() => navigate("/user-chat")}
+            />
+          ) : (
+          <>
           <section className="chat-content-v2">
-            {!currentConversation?.messages.length && !loading ? (
+            <input
+              ref={cameraInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              style={{ display: "none" }}
+              onChange={handleFileAttach}
+            />
+            <input
+              ref={photosInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              style={{ display: "none" }}
+              onChange={handleFileAttach}
+            />
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept={CHAT_DOCUMENT_ACCEPT}
+              multiple
+              style={{ display: "none" }}
+              onChange={handleFileAttach}
+            />
+            {!(currentConversation?.messages?.length) && !loading ? (
               <div className="chat-home-v2">
                 <div className="home-greeting-wrapper-v2">
                   <h2 className="welcome-name-v2">Welcome, {user?.fullName?.split(' ')[0] || 'there'}!</h2>
@@ -1098,35 +1549,16 @@ export const App: React.FC = () => {
                   />
                   <div className="input-footer-v2">
                     <div className="input-toolbar-icons">
-                      <input
-                        type="file"
-                        ref={imageInputRef}
-                        style={{ display: 'none' }}
-                        accept="image/*"
-                        multiple
-                        onChange={handleFileAttach}
-                      />
-                      <input
-                        type="file"
-                        ref={fileInputRef}
-                        style={{ display: 'none' }}
-                        accept="*"
-                        multiple
-                        onChange={handleFileAttach}
-                      />
-                      <button className="input-tool-btn" onClick={() => imageInputRef.current?.click()} title="Add image">
-                        <BiPlus />
-                      </button>
-                      <button className="input-tool-btn" onClick={() => fileInputRef.current?.click()} title="Attach file">
-                        <BiPaperclip />
-                      </button>
-                      <button
-                        className={`input-tool-btn ${isRecording ? 'recording' : ''}`}
-                        onClick={startVoiceRecording}
-                        title="Voice record"
-                      >
-                        <BiMicrophone style={{ color: isRecording ? 'var(--brand-color, #ed0000)' : 'inherit' }} />
-                      </button>
+                      {renderAttachPicker("input-tool-btn")}
+                      <div className={`voice-mic-frame-v2${isRecording ? " voice-mic-frame-v2--active" : ""}`}>
+                        <button
+                          className={`input-tool-btn ${isRecording ? 'recording' : ''}`}
+                          onClick={startVoiceRecording}
+                          title={isRecording ? "Stop dictation" : "Speak to type"}
+                        >
+                          <BiMicrophone style={{ color: isRecording ? 'var(--brand-color, #ed0000)' : 'inherit' }} />
+                        </button>
+                      </div>
                     </div>
                     <button
                       className="send-btn-v2"
@@ -1137,8 +1569,6 @@ export const App: React.FC = () => {
                     </button>
                   </div>
                 </div>
-
-                <p className="collaborate-text-v2">Collaborate with Nexa using documents, images and more</p>
 
                 <div className="recent-chats-section-v2">
                   <div
@@ -1161,44 +1591,69 @@ export const App: React.FC = () => {
                     </div>
                   )}
                 </div>
+
+                <p className="footer-disclaimer-v2">
+                  <img src="/1879-22.png" alt="" width={16} height={16} className="footer-disclaimer-logo-v2" />
+                  <span>Powered by 1879 Tech Hub</span>
+                </p>
               </div>
             ) : (
               <div className="messages-container-v2" ref={messagesContainerRef}>
-                {currentConversation?.messages.map((m, idx) => (
-                  <div key={idx} className={`message-row-v2 ${m.role}`}>
-                    {m.role === 'assistant' && (
-                      <div className="message-avatar-v2">
+                <div className="messages-thread-center-v2">
+                  {(currentConversation?.messages ?? []).map((m, idx) => (
+                    <div key={idx} className={`message-row-v2 ${m.role}`}>
+                      {m.role === 'assistant' && (
+                        <div className="message-avatar-v2">
+                          <img src={selectedAvatar || "/avatar-1.png"} alt="Nexa" className="bot-avatar-img" />
+                        </div>
+                      )}
+                      <div className="message-bubble-wrap-v2">
+                        <div className="message-bubble-v2">
+                          {m.content.split("\n").map((line, lIdx) => (
+                            <p key={lIdx}>{parseMarkdown(line)}</p>
+                          ))}
+                        </div>
+                        <div className="message-copy-stack-v2">
+                          <button
+                            type="button"
+                            className="message-copy-btn-v2"
+                            title="Copy message"
+                            aria-label="Copy message"
+                            onClick={() => void copyMessageText(m.content, idx)}
+                          >
+                            <BiCopy size={16} />
+                          </button>
+                          {copiedMessageIndex === idx ? (
+                            <span className="message-copied-label-v2" role="status">
+                              Copied
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  {loading && (
+                    <div className="message-row-v2 assistant">
+                      <div className="message-avatar-v2 message-avatar-thinking-v2">
                         <img src={selectedAvatar || "/avatar-1.png"} alt="Nexa" className="bot-avatar-img" />
                       </div>
-                    )}
-                    <div className="message-bubble-v2">
-                      {m.content.split("\n").map((line, lIdx) => (
-                        <p key={lIdx}>{parseMarkdown(line)}</p>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-                {loading && (
-                  <div className="message-row-v2 assistant">
-                    <div className="message-avatar-v2">
-                      <BiBoltCircle size={18} />
-                    </div>
-                    <div className="message-content-v2">
-                      <div className="typing-v2">
-                        <span className="dot-v2"></span>
-                        <span className="dot-v2"></span>
-                        <span className="dot-v2"></span>
+                      <div className="message-content-v2">
+                        <div className="typing-v2">
+                          <span className="dot-v2"></span>
+                          <span className="dot-v2"></span>
+                          <span className="dot-v2"></span>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                )}
-                <div ref={messagesEndRef} />
+                  )}
+                  <div ref={messagesEndRef} />
+                </div>
               </div>
             )}
           </section>
 
           {((currentConversation?.messages?.length ?? 0) > 0 || loading) && (
-            <footer className="footer-input-v2">
+            <footer className="footer-input-v2" onClick={(e) => e.stopPropagation()}>
               {attachedFiles.length > 0 && (
                 <div className="footer-attached-preview">
                   {attachedFiles.map((file, i) => (
@@ -1213,13 +1668,16 @@ export const App: React.FC = () => {
                 </div>
               )}
               <div className="footer-input-container-v2">
-                <input type="file" ref={imageInputRef} style={{ display: 'none' }} accept="image/*" multiple onChange={handleFileAttach} />
-                <input type="file" ref={fileInputRef} style={{ display: 'none' }} accept="*" multiple onChange={handleFileAttach} />
-                <button className="footer-tool-btn" onClick={() => imageInputRef.current?.click()} title="Add image"><BiPlus /></button>
-                <button className="footer-tool-btn" onClick={() => fileInputRef.current?.click()} title="Attach file"><BiPaperclip /></button>
-                <button className={`footer-tool-btn ${isRecording ? 'recording' : ''}`} onClick={startVoiceRecording} title={isRecording ? "Stop recording" : "Voice record"}>
-                  <BiMicrophone style={{ color: isRecording ? 'var(--brand-color, #ed0000)' : 'inherit' }} />
-                </button>
+                {renderAttachPicker("footer-tool-btn")}
+                <div className={`voice-mic-frame-v2${isRecording ? " voice-mic-frame-v2--active" : ""}`}>
+                  <button
+                    className={`footer-tool-btn ${isRecording ? 'recording' : ''}`}
+                    onClick={startVoiceRecording}
+                    title={isRecording ? "Stop dictation" : "Speak to type"}
+                  >
+                    <BiMicrophone style={{ color: isRecording ? 'var(--brand-color, #ed0000)' : 'inherit' }} />
+                  </button>
+                </div>
                 <textarea
                   className="footer-textarea-v2"
                   placeholder="Send a message..."
@@ -1236,8 +1694,13 @@ export const App: React.FC = () => {
                   <BiUpArrowAlt size={20} />
                 </button>
               </div>
-              <p className="footer-disclaimer-v2">Nexa may display inaccurate info, so please double check the response</p>
+              <p className="footer-disclaimer-v2">
+                <img src="/1879-22.png" alt="" width={16} height={16} className="footer-disclaimer-logo-v2" />
+                <span>Powered by 1879 Tech Hub</span>
+              </p>
             </footer>
+          )}
+          </>
           )}
         </main>
 
@@ -1299,8 +1762,8 @@ export const App: React.FC = () => {
                 <div className="avatar-picker-icon">
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
                 </div>
-                <h3>Choose Your AI Assistant</h3>
-                <p>Select the avatar you'd like as your Nexa AI assistant</p>
+                <h3>Choose your AI avatar</h3>
+                <p>Select the avatar you would like for your Nexa AI assistant.</p>
               </div>
               <div className="avatar-picker-grid">
                 {["/avatar-1.png", "/avatar-2.png"].map((avatar) => (
@@ -1309,7 +1772,7 @@ export const App: React.FC = () => {
                     className={`avatar-picker-option ${selectedAvatar === avatar ? "selected" : ""}`}
                     onClick={() => setSelectedAvatar(avatar)}
                   >
-                    <img src={avatar} alt="AI Assistant" />
+                    <img src={avatar} alt="AI avatar option" />
                     <span className="avatar-picker-label">{avatar === "/avatar-1.png" ? "Nexa" : "Nex"}</span>
                     {selectedAvatar === avatar && (
                       <div className="avatar-picker-check">
@@ -1373,9 +1836,13 @@ export const App: React.FC = () => {
           display: flex;
           flex-direction: column;
           padding: 16px;
-          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+          transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s ease;
           border-right: 1px solid #e5e7eb;
           z-index: 50;
+        }
+
+        .chat-sidebar-backdrop {
+          display: none;
         }
 
         .sidebar-header-main {
@@ -1446,16 +1913,6 @@ export const App: React.FC = () => {
         .new-chat-btn-v2:hover {
           background: #f9fafb;
           border-color: #d1d5db;
-        }
-
-        .shortcut-key {
-          margin-left: auto;
-          font-size: 12px;
-          color: #9ca3af;
-          background: #f3f4f6;
-          padding: 2px 6px;
-          border-radius: 4px;
-          border: 1px solid #e5e7eb;
         }
 
         .sidebar-conversations-v2 {
@@ -1633,10 +2090,28 @@ export const App: React.FC = () => {
           align-items: center;
           gap: 10px;
           padding: 8px;
+          width: 100%;
           background: white;
           border-radius: 10px;
           border: 1px solid #e5e7eb;
           cursor: pointer;
+          font: inherit;
+          text-align: left;
+          -webkit-tap-highlight-color: transparent;
+        }
+
+        .user-name-v2 {
+          font-size: 13px;
+          font-weight: 600;
+          color: #111827;
+          line-height: 1.3;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .dark-theme .user-name-v2 {
+          color: #f9fafb;
         }
 
         .user-avatar-v2 {
@@ -1661,9 +2136,11 @@ export const App: React.FC = () => {
           font-size: 12px;
           color: #111827;
           font-weight: 500;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
+          line-height: 1.4;
+          margin-top: 2px;
+          overflow-wrap: anywhere;
+          word-break: break-word;
+          white-space: normal;
         }
 
         /* Main Chat Area */
@@ -1674,30 +2151,76 @@ export const App: React.FC = () => {
           background: #ffffff;
           overflow: hidden;
           position: relative;
+          min-width: 0;
+          min-height: 0;
         }
 
         .chat-header-v2 {
-          height: 64px;
-          padding: 0 24px;
-          display: flex;
+          height: 56px;
+          padding: 0 16px;
+          display: grid;
+          grid-template-columns: auto 1fr auto;
           align-items: center;
-          justify-content: space-between;
+          gap: 8px;
           border-bottom: 1px solid #f3f4f6;
           background: #ffffff;
+          position: relative;
+          z-index: 2;
+        }
+
+        @media (min-width: 640px) {
+          .chat-header-v2 {
+            height: 64px;
+            padding: 0 24px;
+          }
+        }
+
+        .header-left-v2 {
+          display: flex;
+          align-items: center;
+          min-height: 44px;
+          position: relative;
+          z-index: 3;
         }
 
         .header-brand-v2 {
           display: flex;
           align-items: center;
+          justify-content: center;
           gap: 8px;
+          min-width: 0;
           color: var(--brand-color, #ed0000);
           cursor: pointer;
+          pointer-events: none;
+        }
+
+        .header-tenant-logo-v2 {
+          height: 30px;
+          width: 30px;
+          object-fit: contain;
+          flex-shrink: 0;
+          border-radius: 8px;
         }
 
         .brand-name-v2 {
           font-weight: 700;
           font-size: 18px;
           letter-spacing: -0.02em;
+          color: #111827;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          max-width: min(42vw, 200px);
+        }
+
+        @media (min-width: 640px) {
+          .brand-name-v2 {
+            max-width: min(36vw, 280px);
+          }
+        }
+
+        .dark-theme .brand-name-v2 {
+          color: #f9fafb;
         }
 
         .plan-badge {
@@ -1708,7 +2231,13 @@ export const App: React.FC = () => {
 
         .header-actions-v2 {
           display: flex;
-          gap: 12px;
+          gap: 8px;
+          align-items: center;
+          justify-content: flex-end;
+        }
+
+        .header-action-label-v2 {
+          display: inline;
         }
 
         .header-action-btn-v2 {
@@ -1723,6 +2252,7 @@ export const App: React.FC = () => {
           font-weight: 500;
           color: #4b5563;
           cursor: pointer;
+          min-height: 40px;
         }
 
         .header-action-btn-v2:hover {
@@ -1733,20 +2263,41 @@ export const App: React.FC = () => {
         .chat-content-v2 {
           flex: 1;
           overflow-y: auto;
+          overflow-x: hidden;
           display: flex;
           flex-direction: column;
-          padding: 24px;
+          padding: 16px;
+          min-height: 0;
+        }
+
+        @media (min-width: 640px) {
+          .chat-content-v2 {
+            padding: 24px;
+          }
         }
 
         .chat-home-v2 {
           max-width: 800px;
           margin: 0 auto;
           width: 100%;
+          min-width: 0;
           display: flex;
           flex-direction: column;
           align-items: center;
-          padding-top: 60px;
+          padding-top: 24px;
           text-align: center;
+        }
+
+        @media (min-width: 640px) {
+          .chat-home-v2 {
+            padding-top: 48px;
+          }
+        }
+
+        @media (min-width: 900px) {
+          .chat-home-v2 {
+            padding-top: 60px;
+          }
         }
 
         .home-badge-v2 {
@@ -1778,13 +2329,15 @@ export const App: React.FC = () => {
         }
 
         .home-greeting-v2 {
-          font-size: 38px;
+          font-size: clamp(1.5rem, 5.5vw, 2.375rem);
           font-weight: 700;
           margin: 0;
           color: #111827;
           background: linear-gradient(135deg, #111827 0%, var(--brand-color, #ed0000) 100%);
           -webkit-background-clip: text;
           -webkit-text-fill-color: transparent;
+          line-height: 1.15;
+          padding: 0 4px;
         }
 
         @keyframes fadeInDown {
@@ -1798,24 +2351,53 @@ export const App: React.FC = () => {
 
         .suggestion-cards-top {
           display: grid;
-          grid-template-columns: repeat(3, 1fr);
-          gap: 16px;
+          grid-template-columns: 1fr;
+          gap: 12px;
           width: 100%;
-          margin-bottom: 32px;
+          margin-bottom: 24px;
+        }
+
+        @media (min-width: 640px) {
+          .suggestion-cards-top {
+            grid-template-columns: repeat(2, 1fr);
+            gap: 16px;
+            margin-bottom: 28px;
+          }
+        }
+
+        @media (min-width: 900px) {
+          .suggestion-cards-top {
+            grid-template-columns: repeat(3, 1fr);
+            margin-bottom: 32px;
+          }
         }
 
         .suggestion-card-v2 {
           background: #ffffff;
           border: 1px solid #e5e7eb;
           border-radius: 16px;
-          padding: 24px;
+          padding: 16px;
           text-align: left;
           cursor: pointer;
           transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
           box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
           display: flex;
           align-items: flex-start;
-          gap: 16px;
+          gap: 12px;
+          min-width: 0;
+        }
+
+        @media (min-width: 640px) {
+          .suggestion-card-v2 {
+            padding: 20px;
+            gap: 16px;
+          }
+        }
+
+        @media (min-width: 900px) {
+          .suggestion-card-v2 {
+            padding: 24px;
+          }
         }
 
         .suggestion-icon-wrapper {
@@ -1854,13 +2436,22 @@ export const App: React.FC = () => {
 
         .main-input-container-v2 {
           width: 100%;
+          min-width: 0;
           background: #ffffff;
-          border-radius: 20px;
-          padding: 16px;
+          border-radius: 16px;
+          padding: 12px;
           box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
-          margin-bottom: 16px;
+          margin-bottom: 12px;
           position: relative;
           z-index: 1;
+        }
+
+        @media (min-width: 640px) {
+          .main-input-container-v2 {
+            border-radius: 20px;
+            padding: 16px;
+            margin-bottom: 16px;
+          }
         }
 
         .border-beam-svg {
@@ -2044,6 +2635,16 @@ export const App: React.FC = () => {
           border-bottom-color: #333;
         }
 
+        .dark-theme .header-action-btn-v2 {
+          background: #262626;
+          border-color: #404040;
+          color: #e5e7eb;
+        }
+
+        .dark-theme .header-action-btn-v2:hover {
+          background: #333;
+        }
+
         .dark-theme .chat-layout {
           background: #1a1a1a;
         }
@@ -2075,9 +2676,8 @@ export const App: React.FC = () => {
         }
 
         .dark-theme .user-profile-v2 {
-          background: #2a2a2a;
-          border-color: #3f3f3f;
-          color: #f9fafb;
+          background: #262626;
+          border-color: #404040;
         }
 
         .dark-theme .user-email-v2 {
@@ -2190,13 +2790,20 @@ export const App: React.FC = () => {
 
         .main-textarea-v2 {
           width: 100%;
+          min-width: 0;
           border: none;
           resize: none;
           outline: none;
           font-size: 16px;
           color: #111827;
           background: transparent;
-          min-height: 80px;
+          min-height: 72px;
+        }
+
+        @media (min-width: 640px) {
+          .main-textarea-v2 {
+            min-height: 80px;
+          }
         }
 
         .input-footer-v2 {
@@ -2269,10 +2876,104 @@ export const App: React.FC = () => {
           gap: 4px;
         }
 
+        .attach-menu-wrap {
+          position: relative;
+          display: inline-flex;
+          align-items: center;
+        }
+
+        .attach-picker-popover {
+          position: absolute;
+          bottom: calc(100% + 12px);
+          left: 0;
+          right: auto;
+          min-width: min(232px, calc(100vw - 24px));
+          max-width: calc(100vw - 24px);
+          padding: 8px;
+          background: #ffffff;
+          border-radius: 22px;
+          box-shadow: 0 12px 40px rgba(15, 23, 42, 0.12), 0 4px 12px rgba(15, 23, 42, 0.06);
+          border: 1px solid rgba(226, 232, 240, 0.95);
+          z-index: 200;
+          transform-origin: bottom left;
+        }
+
+        .footer-input-container-v2 .attach-menu-wrap .attach-picker-popover {
+          left: auto;
+          right: 0;
+          transform-origin: bottom right;
+        }
+
+        .dark-theme .attach-picker-popover {
+          background: #1e293b;
+          border-color: rgba(51, 65, 85, 0.95);
+          box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+        }
+
+        .attach-picker-item {
+          display: flex;
+          align-items: center;
+          gap: 14px;
+          width: 100%;
+          border: none;
+          background: transparent;
+          padding: 12px 12px;
+          border-radius: 16px;
+          cursor: pointer;
+          font-size: 15px;
+          font-weight: 500;
+          color: #111827;
+          text-align: left;
+          transition: background 0.15s ease;
+        }
+
+        .dark-theme .attach-picker-item {
+          color: #f1f5f9;
+        }
+
+        .attach-picker-item:hover {
+          background: #f1f5f9;
+        }
+
+        .dark-theme .attach-picker-item:hover {
+          background: #334155;
+        }
+
+        .attach-picker-icon-circle {
+          width: 42px;
+          height: 42px;
+          border-radius: 50%;
+          background: #f1f5f9;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          flex-shrink: 0;
+          color: #0f172a;
+        }
+
+        .dark-theme .attach-picker-icon-circle {
+          background: #334155;
+          color: #f8fafc;
+        }
+
+        .attach-picker-item-label {
+          font-weight: 600;
+          letter-spacing: -0.01em;
+        }
+
         .collaborate-text-v2 {
           font-size: 13px;
           color: #9ca3af;
-          margin-bottom: 40px;
+          margin-bottom: 28px;
+          max-width: 36rem;
+          padding: 0 4px;
+          line-height: 1.45;
+        }
+
+        @media (min-width: 640px) {
+          .collaborate-text-v2 {
+            margin-bottom: 40px;
+          }
         }
 
         .quick-actions-v2 {
@@ -2320,9 +3021,16 @@ export const App: React.FC = () => {
 
         .recent-cards-v2 {
           display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-          gap: 16px;
+          grid-template-columns: 1fr;
+          gap: 12px;
           width: 100%;
+        }
+
+        @media (min-width: 520px) {
+          .recent-cards-v2 {
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 16px;
+          }
         }
 
         .recent-card-v2 {
@@ -2359,52 +3067,188 @@ export const App: React.FC = () => {
           color: #9ca3af;
         }
 
-        /* Message view */
+        /* Message view — outer scroll; inner column centered with side margins */
         .messages-container-v2 {
           flex: 1;
           overflow-y: auto;
+          overflow-x: hidden;
           width: 100%;
+          min-height: 0;
+          display: flex;
+          flex-direction: column;
+          align-items: stretch;
+          padding: 12px clamp(8px, 2vw, 28px) 16px;
+          padding-bottom: 200px;
+          scroll-behavior: smooth;
+        }
+
+        @media (min-width: 640px) {
+          .messages-container-v2 {
+            padding: 20px clamp(12px, 3vw, 28px);
+            padding-bottom: 220px;
+          }
+        }
+
+        .messages-thread-center-v2 {
+          width: 100%;
+          max-width: min(880px, 100%);
+          margin-inline: auto;
           display: flex;
           flex-direction: column;
           gap: 24px;
-          padding: 24px;
-          padding-bottom: 220px;
-          scroll-behavior: smooth;
         }
 
         .message-row-v2 {
           display: flex;
           gap: 12px;
-          max-width: min(75%, 850px);
+          max-width: 100%;
+          width: 100%;
           animation: messageIn 0.3s ease-out forwards;
         }
 
         .message-row-v2.user {
           align-self: flex-end;
           flex-direction: row-reverse;
+          width: fit-content;
+          max-width: 100%;
         }
 
         .message-row-v2.assistant {
           align-self: flex-start;
+          width: fit-content;
+          max-width: 100%;
+        }
+
+        .message-bubble-wrap-v2 {
+          display: flex;
+          flex-direction: column;
+          align-items: flex-start;
+          gap: 6px;
+          max-width: 100%;
+        }
+
+        .message-row-v2.user .message-bubble-wrap-v2 {
+          align-items: flex-end;
+        }
+
+        .message-copy-stack-v2 {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 2px;
+          min-height: 22px;
+        }
+
+        .message-row-v2.user .message-copy-stack-v2 {
+          align-items: center;
+        }
+
+        .message-copied-label-v2 {
+          font-size: 10px;
+          font-weight: 700;
+          letter-spacing: 0.04em;
+          text-transform: uppercase;
+          color: #64748b;
+          animation: copiedFade 0.2s ease-out;
+        }
+
+        .dark-theme .message-copied-label-v2 {
+          color: #94a3b8;
+        }
+
+        @keyframes copiedFade {
+          from { opacity: 0; transform: translateY(2px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+
+        .message-copy-btn-v2 {
+          border: none;
+          background: transparent;
+          color: #9ca3af;
+          cursor: pointer;
+          padding: 4px 6px;
+          border-radius: 8px;
+          line-height: 0;
+          opacity: 0;
+          transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
+        }
+
+        .message-row-v2:hover .message-copy-btn-v2 {
+          opacity: 1;
+        }
+
+        @media (hover: none) {
+          .message-copy-btn-v2 {
+            opacity: 0.5;
+          }
+        }
+
+        .message-copy-btn-v2:hover {
+          color: var(--brand-color, #ed0000);
+          background: rgba(15, 23, 42, 0.06);
+        }
+
+        .dark-theme .message-copy-btn-v2:hover {
+          background: rgba(255, 255, 255, 0.08);
+        }
+
+        .voice-mic-frame-v2 {
+          display: inline-flex;
+          padding: 3px;
+          border-radius: 9999px;
+          transition: border-color 0.25s ease, box-shadow 0.25s ease, background-color 0.25s ease;
+          border: 2px solid transparent;
+        }
+
+        .voice-mic-frame-v2--active {
+          border-color: var(--brand-color, #ed0000);
+          background-color: color-mix(in srgb, var(--brand-color, #ed0000) 14%, transparent);
+          box-shadow:
+            0 0 0 4px color-mix(in srgb, var(--brand-color, #ed0000) 22%, transparent),
+            0 0 26px color-mix(in srgb, var(--brand-color, #ed0000) 38%, transparent);
+          animation: voiceFramePulse 1.4s ease-in-out infinite;
+        }
+
+        @keyframes voiceFramePulse {
+          0%, 100% {
+            box-shadow:
+              0 0 0 3px color-mix(in srgb, var(--brand-color, #ed0000) 20%, transparent),
+              0 0 18px color-mix(in srgb, var(--brand-color, #ed0000) 32%, transparent);
+          }
+          50% {
+            box-shadow:
+              0 0 0 8px color-mix(in srgb, var(--brand-color, #ed0000) 12%, transparent),
+              0 0 32px color-mix(in srgb, var(--brand-color, #ed0000) 48%, transparent);
+          }
         }
 
         .message-avatar-v2 {
-          width: 32px;
-          height: 32px;
-          border-radius: 8px;
+          width: 40px;
+          height: 40px;
+          border-radius: 10px;
           display: flex;
           align-items: center;
           justify-content: center;
           font-size: 12px;
           font-weight: 600;
           flex-shrink: 0;
+          align-self: flex-start;
           overflow: hidden;
+        }
+
+        @media (min-width: 640px) {
+          .message-avatar-v2 {
+            width: 48px;
+            height: 48px;
+          }
         }
         
         .bot-avatar-img {
           width: 100%;
           height: 100%;
-          object-fit: cover;
+          object-fit: contain;
+          object-position: center center;
+          display: block;
         }
 
         .message-row-v2.user .message-avatar-v2 {
@@ -2417,12 +3261,21 @@ export const App: React.FC = () => {
         }
 
         .message-bubble-v2 {
-          padding: 12px 16px;
+          padding: 10px 14px;
           border-radius: 12px;
           font-size: 15px;
           line-height: 1.5;
           position: relative;
           box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+          max-width: min(100%, calc(100vw - 5.5rem));
+          word-break: break-word;
+        }
+
+        @media (min-width: 640px) {
+          .message-bubble-v2 {
+            padding: 12px 16px;
+            max-width: 100%;
+          }
         }
 
         .message-row-v2.user .message-bubble-v2 {
@@ -2457,6 +3310,15 @@ export const App: React.FC = () => {
           background: #333;
         }
 
+        .message-avatar-thinking-v2 img {
+          animation: thinkingAvatarPulse 1.25s ease-in-out infinite;
+        }
+
+        @keyframes thinkingAvatarPulse {
+          0%, 100% { opacity: 1; filter: brightness(1); }
+          50% { opacity: 0.88; filter: brightness(0.95); }
+        }
+
         .typing-v2 {
           display: flex;
           gap: 4px;
@@ -2481,7 +3343,7 @@ export const App: React.FC = () => {
           bottom: 0;
           left: 0;
           right: 0;
-          padding: 24px;
+          padding: 12px 12px max(12px, env(safe-area-inset-bottom, 0px));
           background: linear-gradient(180deg, transparent 0%, white 40%);
           display: flex;
           flex-direction: column;
@@ -2489,41 +3351,68 @@ export const App: React.FC = () => {
           z-index: 10;
         }
 
+        @media (min-width: 640px) {
+          .footer-input-v2 {
+            padding: 20px 24px 24px;
+          }
+        }
+
         .footer-input-container-v2 {
           width: 100%;
           max-width: 800px;
+          min-width: 0;
           background: white;
           border: 2px solid #e5e7eb;
-          border-radius: 24px;
-          padding: 8px 16px;
+          border-radius: 20px;
+          padding: 6px 10px;
           display: flex;
-          align-items: center;
-          gap: 12px;
+          align-items: flex-end;
+          gap: 8px;
           box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
           transition: all 0.2s;
         }
 
+        @media (min-width: 640px) {
+          .footer-input-container-v2 {
+            border-radius: 24px;
+            padding: 8px 16px;
+            gap: 12px;
+            align-items: center;
+          }
+        }
+
         .footer-input-container-v2:focus-within {
           border-color: var(--brand-color, #ed0000);
-          box-shadow: 0 0 0 4px rgba(237, 0, 0, 0.05);
+          box-shadow: 0 0 0 4px color-mix(in srgb, var(--brand-color, #ed0000) 14%, transparent);
         }
 
         .footer-textarea-v2 {
           flex: 1;
+          min-width: 0;
           border: none;
           resize: none;
           outline: none;
-          padding: 8px 0;
-          font-size: 15px;
-          max-height: 200px;
+          padding: 8px 4px;
+          font-size: 16px;
+          max-height: 160px;
+          line-height: 1.45;
+        }
+
+        @media (min-width: 640px) {
+          .footer-textarea-v2 {
+            font-size: 15px;
+            padding: 8px 0;
+            max-height: 200px;
+          }
         }
 
         .footer-send-btn-v2 {
           background: var(--brand-color, #ed0000);
           color: white;
           border: none;
-          width: 32px;
-          height: 32px;
+          width: 40px;
+          height: 40px;
+          flex-shrink: 0;
           border-radius: 50%;
           display: flex;
           align-items: center;
@@ -2531,19 +3420,84 @@ export const App: React.FC = () => {
           cursor: pointer;
         }
 
+        @media (min-width: 640px) {
+          .footer-send-btn-v2 {
+            width: 36px;
+            height: 36px;
+          }
+        }
+
         .footer-disclaimer-v2 {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
           font-size: 11px;
-          color: #9ca3af;
+          font-weight: 600;
+          color: #6b7280;
           margin-top: 12px;
         }
 
-        /* Sidebar toggle from header */
+        .footer-disclaimer-logo-v2 {
+          object-fit: contain;
+          flex-shrink: 0;
+          opacity: 0.9;
+        }
+
+        .chat-sidebar-powered-v2 {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 6px;
+          margin-top: 12px;
+          padding: 10px 8px 4px;
+          font-size: 10px;
+          font-weight: 700;
+          color: #9ca3af;
+          border-top: 1px solid #f3f4f6;
+        }
+
+        .chat-sidebar-powered-v2 img {
+          object-fit: contain;
+          opacity: 0.85;
+        }
+
+        .dark-theme .chat-sidebar-powered-v2 {
+          border-top-color: #3f3f3f;
+          color: #9ca3af;
+        }
+
+        .dark-theme .footer-disclaimer-v2 {
+          color: #9ca3af;
+        }
+
+        /* Sidebar toggle from header (mobile-first: hidden on wide screens) */
         .sidebar-toggle-btn-header {
+          display: none;
+          align-items: center;
+          justify-content: center;
+          width: 44px;
+          height: 44px;
+          margin: 0;
+          padding: 0;
           background: transparent;
           border: none;
+          border-radius: 10px;
           color: #6b7280;
           cursor: pointer;
-          margin-right: 12px;
+          position: relative;
+          z-index: 4;
+          flex-shrink: 0;
+        }
+
+        .sidebar-toggle-btn-header:hover {
+          background: #f3f4f6;
+          color: #111827;
+        }
+
+        .dark-theme .sidebar-toggle-btn-header:hover {
+          background: #333;
+          color: #f9fafb;
         }
 
         /* Modal V2 */
@@ -2821,27 +3775,92 @@ export const App: React.FC = () => {
         }
 
         @media (max-width: 768px) {
+          .ufl-root {
+            position: relative;
+          }
+
+          .chat-sidebar-backdrop {
+            display: block;
+            position: fixed;
+            inset: 0;
+            z-index: 1040;
+            background: rgba(15, 23, 42, 0.45);
+            backdrop-filter: blur(2px);
+            -webkit-tap-highlight-color: transparent;
+          }
+
+          .sidebar {
+            position: fixed;
+            left: 0;
+            top: 0;
+            height: 100dvh;
+            max-height: 100dvh;
+            width: min(288px, 88vw);
+            z-index: 1050;
+            transform: translateX(-102%);
+            box-shadow: none;
+            overflow-y: auto;
+            overscroll-behavior: contain;
+            -webkit-overflow-scrolling: touch;
+          }
+
+          .sidebar.sidebar-open {
+            transform: translateX(0);
+            box-shadow: 8px 0 32px rgba(0, 0, 0, 0.12);
+          }
+
           .sidebar-toggle-btn-header {
             display: flex;
           }
-          .header-actions-v2 {
+
+          .header-action-label-v2 {
             display: none;
           }
-          .home-greeting-v2 {
-            font-size: 24px;
+
+          .header-action-btn-v2 {
+            padding: 10px;
+            min-width: 44px;
+            min-height: 44px;
+            justify-content: center;
           }
-          .recent-cards-v2 {
-            grid-template-columns: 1fr;
+
+          .messages-container-v2 {
+            padding-bottom: max(200px, 28vh);
           }
+
+          .input-tool-btn,
+          .footer-tool-btn {
+            min-width: 44px;
+            min-height: 44px;
+            padding: 10px;
+          }
+
+          .send-btn-v2 {
+            width: 40px;
+            height: 40px;
+            flex-shrink: 0;
+          }
+
+          .modal-overlay-v2 {
+            padding: 12px;
+          }
+
+          .modal-card-v2 {
+            padding: 24px 20px;
+            max-height: min(88dvh, 640px);
+            overflow-y: auto;
+          }
+
           .avatar-picker-modal {
             padding: 28px 20px 24px;
-            max-width: 360px;
+            max-width: min(360px, calc(100vw - 24px));
           }
           .avatar-picker-option img {
             width: 90px;
             height: 90px;
           }
         }
+
       `}</style>
       </div>
     </>

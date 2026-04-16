@@ -21,10 +21,11 @@ const AdminUserSchema = new Schema<AdminUserDocument>(
   {
     email: { type: String, required: true, unique: true, lowercase: true },
     fullName: { type: String, required: true },
-    businessUnit: { 
-      type: String, 
+    businessUnit: {
+      type: String,
       required: true,
-      index: true
+      index: true,
+      trim: true
     },
     password: { type: String, required: true },
     emailVerified: { type: Boolean, default: false },

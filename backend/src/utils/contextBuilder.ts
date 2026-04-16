@@ -1,6 +1,6 @@
 import { Policy } from "../models/Policy";
 import { searchGoogle, buildHybridContext, formatSearchResultsForChat } from "../services/googleSearchService";
-import { retrieveRelevantChunks, buildRAGContext, isRAGAvailable, RetrievedChunk } from "../services/ragService";
+import { retrieveRelevantChunks, buildRAGContext, RetrievedChunk } from "../services/ragService";
 import logger from "./logger";
 
 export interface ContextBuildResult {
@@ -17,6 +17,8 @@ export interface ContextBuildOptions {
   useRAG?: boolean;
   useGoogle?: boolean;
   topK?: number;
+  /** Employee user id — used for knowledge-group access on RAG chunks */
+  userId?: string;
 }
 
 // Filter policies by grade — keeps existing semantics
@@ -69,7 +71,7 @@ export async function buildContextForQuery(
   userGrade: string,
   options: ContextBuildOptions = {}
 ): Promise<ContextBuildResult> {
-  const { useRAG = true, useGoogle = true, topK } = options;
+  const { useRAG = true, useGoogle = true, topK, userId } = options;
 
   let ragChunks: RetrievedChunk[] = [];
   let policies: any[] = [];
@@ -77,24 +79,24 @@ export async function buildContextForQuery(
   let accessDenied = false;
   let source: ContextBuildResult["source"] = "none";
 
-  // Run RAG + Google in parallel
-  const [ragOutcome, googleOutcome] = await Promise.allSettled([
-    useRAG
-      ? (async () => {
-          const ragAvailable = await isRAGAvailable(businessUnit);
-          if (!ragAvailable) return null;
-          return retrieveRelevantChunks({ query, businessUnit, userGrade, topK });
-        })()
-      : Promise.resolve(null),
-    useGoogle ? searchGoogle(query, 3) : Promise.resolve({ success: false, results: [] })
-  ]);
+  // KB first. Google is a fallback — it only runs if nothing in the company knowledge base answers
+  // the question. Saves 500–1500ms per message and keeps responses grounded in company sources.
+  // Skipped `isRAGAvailable` precheck — vector search returns empty gracefully when there are no chunks,
+  // and the countDocuments round-trip was adding 50–150ms on the critical path for zero correctness gain.
+  if (useRAG) {
+    try {
+      const ragOutcome = await retrieveRelevantChunks({ query, businessUnit, userGrade, userId, topK });
+      if (ragOutcome?.chunks?.length) {
+        ragChunks = ragOutcome.chunks;
+        source = "rag";
+      }
+    } catch (err) {
+      logger.error("[ContextBuilder] RAG retrieval failed", { error: (err as Error).message });
+    }
+  }
 
-  // Process RAG result
-  if (ragOutcome.status === "fulfilled" && ragOutcome.value?.chunks?.length) {
-    ragChunks = ragOutcome.value.chunks;
-    source = "rag";
-  } else {
-    // RAG unavailable or returned nothing — fall back to keyword search on Policy collection
+  // Keyword search on legacy Policy collection — only used when RAG had nothing.
+  if (ragChunks.length === 0) {
     try {
       const allPolicies = await keywordSearch(query, businessUnit);
       const { accessible, restricted } = filterPoliciesByGrade(allPolicies, userGrade);
@@ -103,7 +105,6 @@ export async function buildContextForQuery(
         policies = accessible;
         source = "keyword";
       } else if (restricted.length > 0) {
-        // Documents exist but user's grade isn't allowed
         accessDenied = true;
       }
     } catch (err) {
@@ -111,13 +112,19 @@ export async function buildContextForQuery(
     }
   }
 
-  // Process Google result
-  if (googleOutcome.status === "fulfilled" && googleOutcome.value?.success) {
-    googleResults = googleOutcome.value.results || [];
-  }
-
-  if (source === "none" && googleResults.length > 0) {
-    source = "google_only";
+  // Google only runs when the KB (RAG + keyword) produced nothing. Skipped for access-denied too,
+  // since the user's answer should come from the company source and not a public fallback.
+  const kbEmpty = ragChunks.length === 0 && policies.length === 0;
+  if (useGoogle && kbEmpty && !accessDenied) {
+    try {
+      const googleOutcome = await searchGoogle(query, 3);
+      if (googleOutcome?.success) {
+        googleResults = googleOutcome.results || [];
+        if (googleResults.length > 0) source = "google_only";
+      }
+    } catch (err) {
+      logger.error("[ContextBuilder] Google search failed", { error: (err as Error).message });
+    }
   }
 
   // Build the context string for the LLM prompt

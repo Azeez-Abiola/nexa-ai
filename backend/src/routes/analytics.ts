@@ -10,6 +10,7 @@ import {
   superAdminMiddleware,
   AuthenticatedRequest
 } from "../middleware/auth";
+import { resolveUserDirectoryBusinessUnit } from "../utils/tenantResolution";
 import bcrypt from "bcryptjs";
 
 export const analyticsRouter = express.Router();
@@ -18,18 +19,55 @@ export const analyticsRouter = express.Router();
 analyticsRouter.get("/dashboard", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { businessUnit, isSuperAdmin } = req;
-    const buFilter = isSuperAdmin ? {} : { businessUnit };
+    const canonicalBU =
+      !isSuperAdmin && businessUnit ? await resolveUserDirectoryBusinessUnit(req, undefined) : null;
+    const effectiveBU = canonicalBU || businessUnit;
+    const buFilter = isSuperAdmin ? {} : { businessUnit: effectiveBU };
 
-    const [totalUsers, totalAdmins, totalConversations, totalPolicies, totalTenants, totalDocs] = await Promise.all([
+    const adminScope = isSuperAdmin ? {} : { businessUnit: effectiveBU };
+
+    const [
+      totalUsers,
+      totalAdmins,
+      totalConversations,
+      totalPolicies,
+      totalTenants,
+      totalDocs,
+      usersWhoChatted,
+      activeAdmins,
+      inactiveAdmins
+    ] = await Promise.all([
       User.countDocuments(buFilter),
-      AdminUser.countDocuments(isSuperAdmin ? {} : { businessUnit }),
+      AdminUser.countDocuments(adminScope),
       Conversation.countDocuments(buFilter),
       Policy.countDocuments(buFilter),
-      BusinessUnit.countDocuments(isSuperAdmin ? {} : { name: businessUnit }),
-      import("../models/RagDocument").then(m => m.RagDocument.countDocuments(buFilter))
+      BusinessUnit.countDocuments(isSuperAdmin ? {} : { name: effectiveBU }),
+      import("../models/RagDocument").then(m => m.RagDocument.countDocuments(buFilter)),
+      Conversation.countDocuments({
+        ...buFilter,
+        conversationGroups: {
+          $elemMatch: { "messages.0": { $exists: true } }
+        }
+      }),
+      AdminUser.countDocuments({ ...adminScope, isActive: true }),
+      AdminUser.countDocuments({ ...adminScope, isActive: false })
     ]);
 
-    res.json({ totalUsers, totalAdmins, totalConversations, totalPolicies, totalTenants, totalDocs });
+    res.json({
+      totalUsers,
+      totalAdmins,
+      totalConversations,
+      totalPolicies,
+      totalTenants,
+      totalDocs,
+      /** Users with at least one chat message sent or received (not just empty threads). */
+      usersWhoChatted,
+      /** Admins with account enabled vs disabled (deactivated). */
+      activeAdmins,
+      inactiveAdmins,
+      scope: isSuperAdmin ? "platform" : "businessUnit",
+      businessUnit: isSuperAdmin ? null : effectiveBU
+    });
   } catch (error) {
     console.error("Dashboard stats error:", error);
     res.status(500).json({ error: "Internal server error", message: error instanceof Error ? error.message : "Unknown error" });
@@ -47,7 +85,8 @@ analyticsRouter.get("/business-units", adminAuthMiddleware, async (req: Authenti
       const busFromDB = await BusinessUnit.find().select("name").lean();
       buNames = busFromDB.map((bu: any) => bu.name);
     } else if (businessUnit) {
-      buNames = [businessUnit];
+      const canonical = await resolveUserDirectoryBusinessUnit(req, undefined);
+      buNames = [canonical || businessUnit];
     } else {
       return res.json({ stats: [] });
     }

@@ -34,7 +34,43 @@ async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
   throw lastError;
 }
 
+// Tiny in-memory LRU for query embeddings — skips a 200–500ms OpenAI round-trip when a user
+// repeats or rephrases slightly. 5-min TTL, 200-entry cap: cheap RAM, meaningful on the hot path.
+type CacheEntry = { embedding: number[]; expiresAt: number };
+const EMBED_CACHE_TTL_MS = 5 * 60 * 1000;
+const EMBED_CACHE_MAX = 200;
+const embedCache = new Map<string, CacheEntry>();
+
+function cacheKey(text: string): string {
+  return text.trim().toLowerCase();
+}
+
+function cacheGet(key: string): number[] | null {
+  const hit = embedCache.get(key);
+  if (!hit) return null;
+  if (hit.expiresAt < Date.now()) {
+    embedCache.delete(key);
+    return null;
+  }
+  // refresh recency (Map iteration order = insertion order; delete+set bumps to MRU)
+  embedCache.delete(key);
+  embedCache.set(key, hit);
+  return hit.embedding;
+}
+
+function cacheSet(key: string, embedding: number[]) {
+  embedCache.set(key, { embedding, expiresAt: Date.now() + EMBED_CACHE_TTL_MS });
+  if (embedCache.size > EMBED_CACHE_MAX) {
+    const oldest = embedCache.keys().next().value;
+    if (oldest !== undefined) embedCache.delete(oldest);
+  }
+}
+
 export async function generateEmbedding(text: string): Promise<number[]> {
+  const key = cacheKey(text);
+  const cached = cacheGet(key);
+  if (cached) return cached;
+
   const response = await withRetry(() =>
     openai.embeddings.create({
       model: EMBEDDING_MODEL,
@@ -42,7 +78,9 @@ export async function generateEmbedding(text: string): Promise<number[]> {
       dimensions: EMBEDDING_DIMENSIONS
     })
   );
-  return response.data[0].embedding;
+  const embedding = response.data[0].embedding;
+  cacheSet(key, embedding);
+  return embedding;
 }
 
 export async function generateEmbeddingBatch(

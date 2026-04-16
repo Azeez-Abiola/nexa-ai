@@ -6,6 +6,7 @@ import fs from "fs";
 import bcryptjs from "bcryptjs";
 import { BusinessUnit } from "../models/BusinessUnit";
 import { AdminUser } from "../models/AdminUser";
+import { User } from "../models/User";
 import { AdminInvite } from "../models/AdminInvite";
 import { superAdminMiddleware, AuthenticatedRequest } from "../middleware/auth";
 import { sendTenantCredentialsEmail } from "../services/emailService";
@@ -41,7 +42,18 @@ function hashToken(token: string): string {
 provisioningRouter.get("/tenants", superAdminMiddleware, async (_req: AuthenticatedRequest, res: Response) => {
   try {
     const tenants = await BusinessUnit.find().sort({ createdAt: -1 }).lean();
-    res.json({ tenants });
+    const { User } = await import("../models/User");
+    const { RagDocument } = await import("../models/RagDocument");
+    const enriched = await Promise.all(
+      tenants.map(async (t: any) => {
+        const [userCount, ragCount] = await Promise.all([
+          User.countDocuments({ businessUnit: t.name }),
+          RagDocument.countDocuments({ businessUnit: t.name, processingStatus: { $ne: "superseded" } })
+        ]);
+        return { ...t, userCount, ragDocumentCount: ragCount };
+      })
+    );
+    res.json({ tenants: enriched });
   } catch (error) {
     console.error("List tenants error:", error);
     res.status(500).json({ error: "Internal server error" });
@@ -83,7 +95,8 @@ provisioningRouter.post(
         logo: logoPath,
         contactEmail: contactEmail || undefined,
         colorCode: colorCode || "#ed0000",
-        isActive: true
+        /** Inactive until a super-admin activates the tenant (employees cannot register until then). */
+        isActive: false
       });
 
       // If contactEmail is provided, auto-create an Admin account
@@ -147,10 +160,26 @@ provisioningRouter.put(
   async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { id } = req.params;
-      const { label, slug, contactEmail, isActive, colorCode } = req.body;
+      const { name, label, slug, contactEmail, isActive, colorCode } = req.body;
 
       const tenant = await BusinessUnit.findById(id);
       if (!tenant) return res.status(404).json({ error: "Tenant not found" });
+
+      if (name !== undefined && String(name).trim() !== "") {
+        const nextName = String(name).trim();
+        if (nextName !== tenant.name) {
+          const nameTaken = await BusinessUnit.findOne({ name: nextName, _id: { $ne: id } });
+          if (nameTaken) {
+            return res.status(409).json({ error: `Tenant name "${nextName}" already exists` });
+          }
+          const oldName = tenant.name;
+          tenant.name = nextName;
+          await Promise.all([
+            AdminUser.updateMany({ businessUnit: oldName }, { businessUnit: nextName }),
+            User.updateMany({ businessUnit: oldName }, { businessUnit: nextName })
+          ]);
+        }
+      }
 
       if (slug && slug !== tenant.slug) {
         if (!/^[a-z0-9-]+$/.test(slug)) {

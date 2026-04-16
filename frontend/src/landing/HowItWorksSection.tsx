@@ -9,7 +9,7 @@ const steps = [
 ];
 
 const HowItWorksSection = () => (
-  <section id="how-it-works" className="py-24 md:py-32 px-6 bg-[#F8F9FF]">
+  <section id="how-it-works" className="py-16 sm:py-24 md:py-32 px-4 sm:px-6 bg-[#F8F9FF]">
     <div className="container mx-auto max-w-6xl">
       <motion.div 
         initial={{ opacity: 0, y: 20 }} 
@@ -17,15 +17,15 @@ const HowItWorksSection = () => (
         viewport={{ once: true }} 
         className="text-center mb-20"
       >
-        <h2 className="text-3xl md:text-5xl font-extrabold tracking-tight text-[#1A1A1A] mb-6 font-sans">
+        <h2 className="text-2xl sm:text-3xl md:text-5xl font-extrabold tracking-tight text-[#1A1A1A] mb-4 sm:mb-6 font-sans px-1">
           Four Steps to <span className="gradient-text italic">Organizational Intelligence</span>
         </h2>
-        <p className="text-muted-foreground max-w-2xl mx-auto text-lg leading-relaxed">
+        <p className="text-muted-foreground max-w-2xl mx-auto text-base sm:text-lg leading-relaxed px-1">
           Nexa streamlines the process of building and accessing your private AI knowledge base.
         </p>
       </motion.div>
 
-      <div className="grid md:grid-cols-4 gap-8">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-8 sm:gap-10 md:gap-8">
         {steps.map((s, i) => (
           <motion.div
             key={i}
@@ -44,9 +44,9 @@ const HowItWorksSection = () => (
               <div className="w-20 h-20 rounded-3xl bg-white shadow-lg shadow-primary/5 flex items-center justify-center mb-8 group-hover:scale-110 group-hover:bg-primary group-hover:text-white transition-all duration-500">
                 <s.icon size={32} className="group-hover:text-white transition-colors" />
               </div>
-              <div className="flex items-center gap-2 mb-4">
+              <div className="flex flex-col items-center gap-2 mb-4 sm:flex-row sm:justify-center">
                 <span className="text-xs font-bold text-primary bg-primary/10 px-2 py-1 rounded-full">{s.num}</span>
-                <h3 className="font-bold text-lg text-[#1A1A1A] font-sans">{s.title}</h3>
+                <h3 className="font-bold text-base sm:text-lg text-[#1A1A1A] font-sans text-center sm:text-left">{s.title}</h3>
               </div>
               <p className="text-[14px] text-muted-foreground leading-relaxed px-4">{s.desc}</p>
             </div>

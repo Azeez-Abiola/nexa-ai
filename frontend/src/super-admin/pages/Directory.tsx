@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import { cn } from '@/lib/utils';
 import {
   Building2,
   Search,
@@ -19,18 +20,24 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
 
-const Directory: React.FC = () => {
+export type DirectoryProps = {
+  /** When true, directory is shown inside Tenants (e.g. second tab). */
+  embedded?: boolean;
+  /** Open parent tenant add flow instead of navigating away. */
+  onRequestAddTenant?: () => void;
+};
+
+const Directory: React.FC<DirectoryProps> = ({ embedded = false, onRequestAddTenant }) => {
+  const navigate = useNavigate();
   const [bus, setBus] = useState<string[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedBU, setSelectedBU] = useState<string | null>(null);
   const [buDetails, setBuDetails] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
-  const navigate = useNavigate();
 
   useEffect(() => {
     fetchBUs();
@@ -85,7 +92,7 @@ const Directory: React.FC = () => {
   if (selectedBU) {
     if (isDetailLoading) {
       return (
-        <div className="space-y-8 animate-in fade-in duration-500">
+        <div className="min-w-0 max-w-full space-y-8 animate-in fade-in duration-500">
           <Skeleton className="h-8 w-48 rounded-lg" />
 
           <div className="flex items-center gap-5">
@@ -135,14 +142,14 @@ const Directory: React.FC = () => {
     }
 
     return (
-      <div className="space-y-8 animate-in slide-in-from-right-4 duration-300">
+      <div className="min-w-0 max-w-full space-y-8 animate-in slide-in-from-right-4 duration-300">
         <Button
           variant="ghost"
           onClick={() => setSelectedBU(null)}
           className="group text-slate-500 hover:text-slate-900 font-bold -ml-2"
         >
           <ArrowLeft size={18} className="mr-2 group-hover:-translate-x-1 transition-transform" />
-          Back to Directory
+          {embedded ? 'Back to list' : 'Back to Directory'}
         </Button>
 
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
@@ -226,7 +233,7 @@ const Directory: React.FC = () => {
   }
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-500">
+    <div className="min-w-0 max-w-full space-y-8 animate-in fade-in duration-500">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
         <div>
           <h2 className="text-3xl font-black font-['Sen']">Registered business units</h2>
@@ -251,7 +258,10 @@ const Directory: React.FC = () => {
             Export CSV
           </button>
           <Button
-            onClick={() => navigate('/super-admin/tenants')}
+            onClick={() => {
+              if (embedded) onRequestAddTenant?.();
+              else navigate('/super-admin/tenants');
+            }}
             className="bg-[#ed0000] hover:bg-[#c40000] text-white rounded-xl h-11 px-6 shadow-2xl shadow-red-500/30 flex items-center gap-3 group font-bold transition-all hover:-translate-y-1"
           >
             <PlusCircle size={20} className="group-hover:rotate-90 transition-transform duration-300" />
@@ -350,7 +360,5 @@ const ProfileStatCard = ({ value, label, icon, color }: any) => {
     </Card>
   );
 };
-
-const cn = (...classes: any) => classes.filter(Boolean).join(' ');
 
 export default Directory;

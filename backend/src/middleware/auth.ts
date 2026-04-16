@@ -8,8 +8,11 @@ export interface AuthenticatedRequest extends Request {
   grade?: string;
   tenantId?: string;
   tenantSlug?: string;
+  /** Canonical BusinessUnit.name from JWT (BU admins). */
+  tenantName?: string;
   adminId?: string;
   fullName?: string;
+  /** Set from JWT for unified auth (employee vs admin). */
   isAdmin?: boolean;
   isSuperAdmin?: boolean;
 }
@@ -36,6 +39,8 @@ export const authMiddleware = (
     req.grade = decoded.grade;
     req.tenantId = decoded.tenantId;
     req.tenantSlug = decoded.tenantSlug;
+    req.tenantName = decoded.tenantName;
+    req.isAdmin = !!decoded.isAdmin;
     next();
   } catch (error) {
     res.status(401).json({ error: "Invalid or expired token" });
@@ -72,6 +77,7 @@ export const adminAuthMiddleware = (
     req.businessUnit = decoded.businessUnit;
     req.tenantId = decoded.tenantId;
     req.tenantSlug = decoded.tenantSlug;
+    req.tenantName = decoded.tenantName;
     req.isAdmin = decoded.isAdmin;
     req.isSuperAdmin = decoded.businessUnit === "SUPERADMIN";
     next();

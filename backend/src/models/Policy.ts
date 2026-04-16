@@ -27,7 +27,7 @@ const PolicySchema = new Schema<PolicyDocument>(
     category: { type: String, required: true },
     content: { type: String, required: true },
     tags: { type: [String], default: [] },
-    businessUnit: { type: String, required: true, index: true },
+    businessUnit: { type: String, required: true, index: true, trim: true },
     allowedGrades: {
       type: [String],
       enum: ["Executive", "Senior VP", "VP", "Associate", "Senior Analyst", "Analyst", "ALL"],

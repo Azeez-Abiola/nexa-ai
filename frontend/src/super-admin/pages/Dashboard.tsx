@@ -40,7 +40,14 @@ interface DashboardStats {
   totalConversations: number;
   totalDocs: number;
   totalTenants: number;
+  /** Users with at least one chat message (not session count). */
+  usersWhoChatted?: number;
+  /** Admin accounts with isActive true / false (deactivated). */
+  activeAdmins?: number;
+  inactiveAdmins?: number;
 }
+
+type AdminFilter = "all" | "active" | "inactive";
 
 const Loader2 = ({ className, size }: { className?: string; size?: number }) => (
   <svg
@@ -59,9 +66,10 @@ const Loader2 = ({ className, size }: { className?: string; size?: number }) => 
   </svg>
 );
 
-const StatCard = ({ title, value, icon, trend, isLoading }: any) => {
+const StatCard = ({ title, value, icon, trend, isLoading, footer }: any) => {
+  const num = typeof value === "number" ? value : Number(value) || 0;
   return (
-    <Card className="border-none shadow-xl shadow-slate-200/50 rounded-2xl bg-white flex flex-col items-center justify-center p-8 gap-4 text-center group hover:-translate-y-1 transition-transform cursor-pointer border border-slate-50">
+    <Card className="border-none shadow-xl shadow-slate-200/50 rounded-2xl bg-white flex flex-col items-center justify-center p-6 sm:p-8 gap-4 text-center group hover:-translate-y-1 transition-transform cursor-pointer border border-slate-50 min-w-0">
       <CardContent className="p-0 w-full text-left">
         <div className="flex justify-between items-start">
           <div className="w-10 h-10 rounded-xl bg-white border border-slate-100 flex items-center justify-center text-slate-400 group-hover:bg-[var(--brand-color)] group-hover:text-white transition-all duration-500 shadow-sm">
@@ -81,9 +89,10 @@ const StatCard = ({ title, value, icon, trend, isLoading }: any) => {
           {isLoading ? (
             <Skeleton className="h-8 w-24 rounded-lg" />
           ) : (
-            <h3 className="text-2xl font-bold text-slate-950 tracking-tight leading-none">{value.toLocaleString()}</h3>
+            <h3 className="text-2xl font-bold text-slate-950 tracking-tight leading-none">{num.toLocaleString()}</h3>
           )}
           <p className="text-[11px] text-slate-400 font-medium mt-3 leading-relaxed uppercase tracking-wider">{title}</p>
+          {footer}
         </div>
       </CardContent>
     </Card>
@@ -150,6 +159,7 @@ const Dashboard: React.FC = () => {
 
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [showPicker, setShowPicker] = useState<'start' | 'end' | null>(null);
+  const [adminFilter, setAdminFilter] = useState<AdminFilter>("all");
 
   useEffect(() => {
     const fetchDashboardData = async () => {
@@ -203,26 +213,27 @@ const Dashboard: React.FC = () => {
   };
 
   return (
-    <div className="space-y-12 animate-in fade-in slide-in-from-bottom-4 duration-700 pb-20">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-3xl font-bold text-slate-900 tracking-tight font-['Sen']">Dashboard</h2>
-          <p className="text-slate-400 font-medium mt-1 text-sm">Real-time platform intelligence.</p>
+    <div className="min-w-0 max-w-full space-y-8 pb-16 animate-in fade-in slide-in-from-bottom-4 duration-700 sm:space-y-12 sm:pb-20">
+      <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <h2 className="text-2xl font-bold tracking-tight text-slate-900 font-['Sen'] sm:text-3xl">Dashboard</h2>
+          <p className="mt-1 text-sm font-medium text-slate-400">Real-time platform intelligence.</p>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
           <button
+            type="button"
             onClick={exportDashboardCSV}
-            className="h-11 px-5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-600 flex items-center gap-2 hover:bg-slate-50 hover:border-slate-300 transition-all active:scale-95"
+            className="flex h-11 shrink-0 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-5 text-xs font-bold text-slate-600 transition-all hover:border-slate-300 hover:bg-slate-50 active:scale-95"
           >
             <Download size={14} />
             Export CSV
           </button>
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300" size={16} />
+          <div className="relative w-full min-w-0 sm:w-[250px]">
+            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-300" />
             <input
               type="text"
               placeholder="Search metrics..."
-              className="pl-10 h-11 bg-slate-50 border-none rounded-xl text-xs font-bold w-[250px] focus:ring-2 focus:ring-[var(--brand-color)]/10 transition-all focus:bg-white focus:shadow-sm"
+              className="h-11 w-full min-w-0 rounded-xl border-none bg-slate-50 pl-10 text-xs font-bold transition-all focus:bg-white focus:shadow-sm focus:ring-2 focus:ring-[var(--brand-color)]/10"
             />
           </div>
         </div>
@@ -246,24 +257,94 @@ const Dashboard: React.FC = () => {
             </CardContent>
           </Card>
         )) : (<>
-          <StatCard title="Platform users" value={stats?.totalUsers || 0} icon={<Users size={20} />} trend="+12.5%" isLoading={false} />
-          <StatCard title="System chats" value={stats?.totalConversations || 0} icon={<MessageSquare size={20} />} trend="+5.2%" isLoading={false} />
-          <StatCard title="Knowledge docs" value={stats?.totalDocs || 0} icon={<Files size={20} />} trend="+89" isLoading={false} />
+          <StatCard
+            title={isSuperAdminContext ? "Platform users" : "BU users"}
+            value={stats?.totalUsers || 0}
+            icon={<Users size={20} />}
+            trend="+12.5%"
+            isLoading={false}
+          />
+          <StatCard
+            title={isSuperAdminContext ? "Members using AI" : "Members using AI"}
+            value={stats?.usersWhoChatted ?? 0}
+            icon={<MessageSquare size={20} />}
+            trend="Stable"
+            isLoading={false}
+          />
+          <StatCard
+            title={isSuperAdminContext ? "Knowledge policies" : "Knowledge policies"}
+            value={stats?.totalDocs || 0}
+            icon={<Files size={20} />}
+            trend="+89"
+            isLoading={false}
+          />
           {isSuperAdminContext && <StatCard title="Business units" value={stats?.totalTenants || 0} icon={<Building size={20} />} trend="Stable" isLoading={false} />}
-          <StatCard title="Admins" value={stats?.totalAdmins || 0} icon={<UserPlus size={20} />} trend="+2" isLoading={false} />
+          <StatCard
+            title={
+              isSuperAdminContext
+                ? adminFilter === "all"
+                  ? "Admins (all)"
+                  : adminFilter === "active"
+                    ? "Admins (active)"
+                    : "Admins (inactive)"
+                : "Admins"
+            }
+            value={
+              isSuperAdminContext
+                ? adminFilter === "all"
+                  ? stats?.totalAdmins ?? 0
+                  : adminFilter === "active"
+                    ? stats?.activeAdmins ?? 0
+                    : stats?.inactiveAdmins ?? 0
+                : stats?.totalAdmins || 0
+            }
+            icon={<UserPlus size={20} />}
+            trend="Stable"
+            isLoading={false}
+            footer={
+              isSuperAdminContext ? (
+                <div className="mt-4 flex flex-wrap justify-center gap-1.5">
+                  {(
+                    [
+                      { k: "all" as const, label: "All" },
+                      { k: "active" as const, label: "Active" },
+                      { k: "inactive" as const, label: "Inactive" }
+                    ] as const
+                  ).map(({ k, label }) => (
+                    <button
+                      key={k}
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setAdminFilter(k);
+                      }}
+                      className={cn(
+                        "px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wide transition-colors",
+                        adminFilter === k
+                          ? "bg-[var(--brand-color)] text-white shadow-sm"
+                          : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+                      )}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              ) : undefined
+            }
+          />
         </>)}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         <div className="lg:col-span-7 space-y-8">
           <Card className="border-none shadow-2xl shadow-slate-200/50 rounded-2xl overflow-hidden bg-white">
-            <CardHeader className="p-8 flex flex-col md:flex-row md:items-center justify-between gap-6">
-              <div className="space-y-1">
+            <CardHeader className="p-6 sm:p-8 flex flex-col md:flex-row md:items-center justify-between gap-4 md:gap-6 min-w-0">
+              <div className="min-w-0 space-y-1">
                 <CardTitle className="text-lg font-bold text-slate-900 tracking-tight font-['Sen']">User engagement</CardTitle>
                 <p className="text-xs text-slate-400 font-medium tracking-wide">Daily volume across infrastructure nodes</p>
               </div>
 
-              <div className="flex items-center gap-3 bg-slate-50 p-1.5 rounded-xl border border-slate-100 relative">
+              <div className="flex min-w-0 w-full max-w-full flex-wrap items-center gap-2 bg-slate-50 p-1.5 rounded-xl border border-slate-100 relative md:w-auto md:flex-nowrap md:gap-3">
                 <button
                   onClick={() => setShowPicker(showPicker === 'start' ? null : 'start')}
                   className="flex items-center gap-2 px-3 py-2 bg-white rounded-lg hover:bg-slate-50 transition-colors shadow-sm"
@@ -310,7 +391,7 @@ const Dashboard: React.FC = () => {
                   </div>
                 </div>
               ) : (
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                   <BarChart data={activityData}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                     <XAxis
@@ -355,7 +436,7 @@ const Dashboard: React.FC = () => {
                 {isLoading ? (
                   <div className="w-full h-full rounded-full border-8 border-slate-50 animate-pulse" />
                 ) : (
-                  <ResponsiveContainer width="100%" height="100%">
+                  <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                     <PieChart>
                       <Pie
                         data={buDistribution}

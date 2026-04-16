@@ -10,10 +10,10 @@ const pillars = [
 
 const SolutionSection = () => (
   <section className="section-padding bg-secondary/30">
-    <div className="container mx-auto max-w-5xl">
+    <div className="container mx-auto max-w-5xl px-2 sm:px-4">
       <motion.div initial={{ opacity: 0 }} whileInView={{ opacity: 1 }} viewport={{ once: true }} className="text-center mb-16">
         <p className="mono-text text-xs text-primary mb-3 uppercase tracking-widest">The Solution</p>
-        <h2 className="text-3xl md:text-5xl font-black tracking-tight text-balance mb-4">
+        <h2 className="text-2xl sm:text-3xl md:text-5xl font-black tracking-tight text-balance mb-4 px-1">
           Meet <span className="gradient-text">Nexa AI</span>
         </h2>
         <p className="text-muted-foreground max-w-2xl mx-auto text-lg">

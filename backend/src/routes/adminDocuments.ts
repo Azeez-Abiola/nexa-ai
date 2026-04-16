@@ -1,8 +1,11 @@
 import express from "express";
 import multer from "multer";
+import crypto from "crypto";
+import { Types } from "mongoose";
 import { RagDocument } from "../models/RagDocument";
 import { DocumentChunk } from "../models/DocumentChunk";
 import { User } from "../models/User";
+import { KnowledgeGroup } from "../models/KnowledgeGroup";
 import { adminAuthMiddleware, AuthenticatedRequest } from "../middleware/auth";
 import { uploadDocument, deleteDocument } from "../services/cloudinaryService";
 import { cleanupDocumentChunks } from "../services/documentProcessingService";
@@ -16,7 +19,7 @@ export const adminDocumentsRouter = express.Router();
 // multer uses memory storage — buffer is then streamed to Cloudinary
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
+  limits: { fileSize: 30 * 1024 * 1024 }, // 30MB
   fileFilter: (_req, file, cb) => {
     const allowed = [
       "application/pdf",
@@ -36,6 +39,23 @@ const upload = multer({
 
 adminDocumentsRouter.use(adminAuthMiddleware);
 
+/**
+ * Collapse a title to its stable "series key" so repeat uploads of the same logical document
+ * resolve to the same row regardless of version markers, years, or draft/final tags in the title.
+ * Kept deliberately conservative — only exact normalized matches auto-link.
+ */
+function normalizeTitleForMatching(title: string): string {
+  return title
+    .toLowerCase()
+    .trim()
+    .replace(/\b(v|ver|version|rev|revision)\s*\.?\s*\d+(\.\d+)*\b/g, "")
+    .replace(/\((final|draft|latest|current|updated)\)/g, "")
+    .replace(/\b20\d{2}\b/g, "")
+    .replace(/[-_]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 // ─── List documents ────────────────────────────────────────────────────────────
 adminDocumentsRouter.get("/", async (req: AuthenticatedRequest, res) => {
   try {
@@ -44,7 +64,11 @@ adminDocumentsRouter.get("/", async (req: AuthenticatedRequest, res) => {
     const limit = parseInt((req.query.limit as string) || "20");
     const skip = (page - 1) * limit;
 
-    const filter = isSuperAdmin ? {} : { businessUnit };
+    const includeSuperseded = req.query.includeSuperseded === "true";
+    const filter: Record<string, unknown> = isSuperAdmin ? {} : { businessUnit };
+    if (!includeSuperseded) {
+      filter.processingStatus = { $ne: "superseded" };
+    }
 
     const [documents, total] = await Promise.all([
       RagDocument.find(filter)
@@ -106,14 +130,22 @@ adminDocumentsRouter.get("/:id", async (req: AuthenticatedRequest, res) => {
 // ─── Upload new document ───────────────────────────────────────────────────────
 adminDocumentsRouter.post("/", upload.single("file"), async (req: AuthenticatedRequest, res) => {
   try {
-    const { title, documentType, sensitivityLevel, allowedGrades } = req.body;
+    const { title, documentType, sensitivityLevel, allowedGrades, content } = req.body;
     const file = req.file;
     const { businessUnit: tokenBU, adminId, email: adminEmail, fullName: adminName, isSuperAdmin } = req;
 
-    if (!file) return res.status(400).json({ error: "File is required" });
+    const textContent = typeof content === "string" ? content.trim() : "";
+    if (!file && !textContent) {
+      return res.status(400).json({ error: "Either a file or pasted content is required" });
+    }
     if (!title) return res.status(400).json({ error: "title is required" });
-    if (!documentType) return res.status(400).json({ error: "documentType is required" });
     if (!sensitivityLevel) return res.status(400).json({ error: "sensitivityLevel is required" });
+
+    const docType = (documentType || "policy").toLowerCase();
+    const allowedTypes = ["policy", "procedure", "handbook", "contract", "report", "other"];
+    if (!allowedTypes.includes(docType)) {
+      return res.status(400).json({ error: "Invalid documentType" });
+    }
 
     const targetBU = isSuperAdmin ? (req.body.businessUnit || tokenBU) : tokenBU;
     if (isSuperAdmin && !req.body.businessUnit) {
@@ -132,21 +164,143 @@ adminDocumentsRouter.post("/", upload.single("file"), async (req: AuthenticatedR
       ? ["ALL"]
       : rawGrades.filter((g) => ALL_GRADES.includes(g));
 
+    let replaceIdRaw =
+      typeof req.body.replacesDocumentId === "string" ? req.body.replacesDocumentId.trim() : "";
+    const forceNewSeries = req.body.forceNewSeries === "true" || req.body.forceNewSeries === true;
+    let documentSeriesId: string = crypto.randomUUID();
+    let nextVersion = 1;
+    let supersedesId: Types.ObjectId | null = null;
+    let autoLinkedFromAutoDetect = false;
+
+    // Auto-detect: same BU + normalized title match → treat as next version without asking the admin.
+    // The retrieval layer resolves "latest version" on its own, so the upload side just needs the
+    // series graph to be right. Skipped if admin explicitly picked a parent or opted out.
+    if (!replaceIdRaw && !forceNewSeries) {
+      const normalized = normalizeTitleForMatching(title);
+      if (normalized) {
+        const candidates = await RagDocument.find({
+          businessUnit: targetBU,
+          isLatestVersion: true,
+          processingStatus: { $ne: "superseded" }
+        })
+          .select("_id title version documentSeriesId originalFilename createdAt")
+          .lean();
+        const matches = candidates.filter((c) => normalizeTitleForMatching(c.title) === normalized);
+        if (matches.length === 1) {
+          replaceIdRaw = String(matches[0]._id);
+          autoLinkedFromAutoDetect = true;
+        } else if (matches.length > 1) {
+          return res.status(409).json({
+            error: "ambiguous_title_match",
+            message:
+              "More than one existing document has a similar title. Pick which one this upload continues, or upload as an unrelated document.",
+            candidates: matches.map((m) => ({
+              _id: String(m._id),
+              title: m.title,
+              version: m.version,
+              originalFilename: m.originalFilename,
+              createdAt: m.createdAt
+            }))
+          });
+        }
+      }
+    }
+
+    if (replaceIdRaw) {
+      if (!Types.ObjectId.isValid(replaceIdRaw)) {
+        return res.status(400).json({ error: "Invalid replacesDocumentId" });
+      }
+      const parent = await RagDocument.findById(replaceIdRaw);
+      if (!parent) return res.status(404).json({ error: "Document to replace was not found" });
+      if (parent.businessUnit !== targetBU) {
+        return res.status(403).json({ error: "Cannot replace a document from another business unit" });
+      }
+      if (parent.processingStatus === "superseded") {
+        return res.status(400).json({
+          error: "That document is already superseded; open the latest version and upload from there"
+        });
+      }
+      const series =
+        parent.documentSeriesId && String(parent.documentSeriesId).length > 0
+          ? String(parent.documentSeriesId)
+          : parent._id.toString();
+      if (!parent.documentSeriesId || String(parent.documentSeriesId).length === 0) {
+        await RagDocument.findByIdAndUpdate(parent._id, { documentSeriesId: series });
+      }
+      documentSeriesId = series;
+      nextVersion = (parent.version || 1) + 1;
+      supersedesId = parent._id as Types.ObjectId;
+
+      await cleanupDocumentChunks(parent._id.toString());
+      await RagDocument.findByIdAndUpdate(parent._id, {
+        documentSeriesId: series,
+        processingStatus: "superseded",
+        isLatestVersion: false,
+        totalChunks: 0,
+        embeddedAt: null
+      });
+    }
+
+    const allowedGroupIdsRaw = req.body.allowedGroupIds;
+    const groupIdStrings: string[] = Array.isArray(allowedGroupIdsRaw)
+      ? allowedGroupIdsRaw.map(String)
+      : typeof allowedGroupIdsRaw === "string" && allowedGroupIdsRaw.trim()
+      ? allowedGroupIdsRaw.split(",").map((s: string) => s.trim()).filter(Boolean)
+      : [];
+    const parsedGroupObjectIds: Types.ObjectId[] = [];
+    for (const gid of groupIdStrings) {
+      if (!Types.ObjectId.isValid(gid)) {
+        return res.status(400).json({ error: `Invalid user group id: ${gid}` });
+      }
+      parsedGroupObjectIds.push(new Types.ObjectId(gid));
+    }
+    if (parsedGroupObjectIds.length > 0) {
+      const found = await KnowledgeGroup.find({
+        _id: { $in: parsedGroupObjectIds },
+        businessUnit: targetBU
+      }).select("_id");
+      if (found.length !== parsedGroupObjectIds.length) {
+        return res.status(400).json({ error: "One or more user groups are invalid for this business unit" });
+      }
+    }
+
+    let uploadBuffer: Buffer;
+    let originalFilename: string;
+    let mimeType: string;
+    let fileSize: number;
+
+    if (file) {
+      uploadBuffer = file.buffer;
+      originalFilename = file.originalname;
+      mimeType = file.mimetype;
+      fileSize = file.size;
+    } else {
+      uploadBuffer = Buffer.from(textContent, "utf-8");
+      originalFilename = `pasted-content-${Date.now()}.txt`;
+      mimeType = "text/plain";
+      fileSize = uploadBuffer.length;
+    }
+
     // Upload to Cloudinary
     const { publicId, secureUrl } = await uploadDocument(
-      file.buffer,
-      file.originalname,
+      uploadBuffer,
+      originalFilename,
       targetBU!,
-      file.mimetype
+      mimeType
     );
 
     // Create RagDocument record
     const doc = await RagDocument.create({
       title,
       businessUnit: targetBU,
-      documentType,
+      documentType: docType,
       sensitivityLevel,
       allowedGrades: parsedGrades,
+      documentSeriesId,
+      version: nextVersion,
+      isLatestVersion: true,
+      supersedesDocumentId: supersedesId,
+      allowedGroupIds: parsedGroupObjectIds,
       uploadedBy: {
         adminId: adminId || "unknown",
         adminEmail: adminEmail || "unknown",
@@ -154,9 +308,9 @@ adminDocumentsRouter.post("/", upload.single("file"), async (req: AuthenticatedR
       },
       cloudinaryPublicId: publicId,
       cloudinaryUrl: secureUrl,
-      originalFilename: file.originalname,
-      mimeType: file.mimetype,
-      fileSize: file.size,
+      originalFilename,
+      mimeType,
+      fileSize,
       processingStatus: "pending"
     });
 
@@ -167,9 +321,10 @@ adminDocumentsRouter.post("/", upload.single("file"), async (req: AuthenticatedR
         documentId: doc._id.toString(),
         cloudinaryPublicId: publicId,
         cloudinaryUrl: secureUrl,
-        mimeType: file.mimetype,
+        mimeType,
         businessUnit: targetBU!,
         allowedGrades: parsedGrades,
+        allowedGroupIds: parsedGroupObjectIds.map((g) => g.toString()),
         sensitivityLevel,
         uploadedBy: {
           adminId: adminId || "unknown",
@@ -183,9 +338,9 @@ adminDocumentsRouter.post("/", upload.single("file"), async (req: AuthenticatedR
     await RagDocument.findByIdAndUpdate(doc._id, { processingJobId: job.id });
 
     logDocumentUpload(adminId || "unknown", targetBU!, doc._id.toString(), {
-      filename: file.originalname,
-      fileSize: file.size,
-      mimeType: file.mimetype,
+      filename: originalFilename,
+      fileSize,
+      mimeType,
       cloudinaryPublicId: publicId
     });
 
@@ -212,7 +367,7 @@ adminDocumentsRouter.post("/", upload.single("file"), async (req: AuthenticatedR
               user.fullName,
               targetBU!,
               title,
-              documentType,
+              docType,
               sensitivityLevel,
               adminName || "Your administrator"
             )
@@ -243,20 +398,95 @@ adminDocumentsRouter.post("/", upload.single("file"), async (req: AuthenticatedR
         _id: doc._id,
         title: doc.title,
         businessUnit: doc.businessUnit,
-        documentType: doc.documentType,
+        documentType: docType,
         sensitivityLevel: doc.sensitivityLevel,
         allowedGrades: doc.allowedGrades,
+        allowedGroupIds: doc.allowedGroupIds,
+        documentSeriesId: doc.documentSeriesId,
+        version: doc.version,
+        supersedesDocumentId: doc.supersedesDocumentId,
         originalFilename: doc.originalFilename,
         fileSize: doc.fileSize,
         processingStatus: doc.processingStatus,
         processingJobId: job.id,
         createdAt: doc.createdAt
       },
+      autoLinked: autoLinkedFromAutoDetect,
       message: "Document uploaded. Processing started in background."
     });
   } catch (err) {
     logger.error("[AdminDocuments] Upload error", { error: (err as Error).message });
     res.status(500).json({ error: "Failed to upload document" });
+  }
+});
+
+// ─── Edit access (grades + user groups) — no reprocess needed, chunks are cascaded ─
+adminDocumentsRouter.patch("/:id/access", async (req: AuthenticatedRequest, res) => {
+  try {
+    const { id } = req.params;
+    const { businessUnit: tokenBU, isSuperAdmin } = req;
+    if (!Types.ObjectId.isValid(id)) return res.status(400).json({ error: "Invalid document id" });
+
+    const doc = await RagDocument.findById(id);
+    if (!doc) return res.status(404).json({ error: "Document not found" });
+    if (!isSuperAdmin && doc.businessUnit !== tokenBU) {
+      return res.status(403).json({ error: "Access denied" });
+    }
+
+    const ALL_GRADES = ["Executive", "Senior VP", "VP", "Associate", "Senior Analyst", "Analyst"];
+    const rawGrades = req.body.allowedGrades;
+    const gradeList: string[] = Array.isArray(rawGrades)
+      ? rawGrades.map(String)
+      : typeof rawGrades === "string"
+      ? rawGrades.split(",").map((g: string) => g.trim()).filter(Boolean)
+      : [];
+    const parsedGrades = gradeList.includes("ALL")
+      ? ["ALL"]
+      : gradeList.filter((g) => ALL_GRADES.includes(g));
+
+    const rawGroupIds = req.body.allowedGroupIds;
+    const groupIdStrings: string[] = Array.isArray(rawGroupIds)
+      ? rawGroupIds.map(String)
+      : typeof rawGroupIds === "string"
+      ? rawGroupIds.split(",").map((s: string) => s.trim()).filter(Boolean)
+      : [];
+    const groupObjectIds: Types.ObjectId[] = [];
+    for (const gid of groupIdStrings) {
+      if (!Types.ObjectId.isValid(gid)) {
+        return res.status(400).json({ error: `Invalid user group id: ${gid}` });
+      }
+      groupObjectIds.push(new Types.ObjectId(gid));
+    }
+    if (groupObjectIds.length > 0) {
+      const found = await KnowledgeGroup.find({
+        _id: { $in: groupObjectIds },
+        businessUnit: doc.businessUnit
+      }).select("_id");
+      if (found.length !== groupObjectIds.length) {
+        return res.status(400).json({ error: "One or more user groups are invalid for this business unit" });
+      }
+    }
+
+    doc.allowedGrades = parsedGrades as any;
+    doc.allowedGroupIds = groupObjectIds as any;
+    await doc.save();
+
+    // Cascade access rules to the chunks — vector search pre-filter reads from chunks, not docs.
+    await DocumentChunk.updateMany(
+      { documentId: doc._id },
+      { $set: { allowedGrades: parsedGrades, allowedGroupIds: groupObjectIds } }
+    );
+
+    res.json({
+      document: {
+        _id: doc._id,
+        allowedGrades: doc.allowedGrades,
+        allowedGroupIds: doc.allowedGroupIds
+      }
+    });
+  } catch (err) {
+    logger.error("[AdminDocuments] Access edit error", { error: (err as Error).message });
+    res.status(500).json({ error: "Failed to update document access" });
   }
 });
 
@@ -271,6 +501,11 @@ adminDocumentsRouter.post("/:id/reprocess", async (req: AuthenticatedRequest, re
     if (!isSuperAdmin && doc.businessUnit !== businessUnit) {
       return res.status(403).json({ error: "Access denied" });
     }
+    if (doc.processingStatus === "superseded") {
+      return res.status(400).json({ error: "Cannot reprocess a superseded document" });
+    }
+
+    const groupStrings = (doc.allowedGroupIds || []).map((g) => g.toString());
 
     // Remove old chunks
     await cleanupDocumentChunks(id);
@@ -292,6 +527,7 @@ adminDocumentsRouter.post("/:id/reprocess", async (req: AuthenticatedRequest, re
         mimeType: doc.mimeType,
         businessUnit: doc.businessUnit,
         allowedGrades: doc.allowedGrades,
+        allowedGroupIds: groupStrings,
         sensitivityLevel: doc.sensitivityLevel,
         uploadedBy: doc.uploadedBy
       },

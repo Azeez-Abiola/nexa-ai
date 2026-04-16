@@ -21,6 +21,10 @@
         },
         {
           "type": "filter",
+          "path": "allowedGroupIds"
+        },
+        {
+          "type": "filter",
           "path": "sensitivityLevel"
         },
         {
