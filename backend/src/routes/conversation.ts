@@ -209,7 +209,11 @@ function buildSystemPrompt(
   sections.push(`INSTRUCTIONS:
 1. When answering questions about the user's uploaded documents, use the "YOUR UPLOADED DOCUMENTS" context as your PRIMARY source.
 2. For HR policies or general company knowledge, use the "COMPANY KNOWLEDGE BASE" section as your PRIMARY source.
-3. **When FRESH WEB SEARCH RESULTS are present in context, they are the authoritative source** for the user's question (they were fetched seconds ago in response to this exact query). Treat them as more current than your training data. Quote and synthesize from them directly — do NOT add disclaimers like "my knowledge is limited to 2023", "I don't have real-time access", "I can't browse the internet", or similar. Those statements are false: the web results are right there in your context. If the results don't cover the specific sub-question, say *that* — "the snippets I have don't mention X specifically" — not a blanket capability refusal.
+3. **When FRESH WEB SEARCH RESULTS are present in context, they are your source for this answer.** CRITICAL RULES for using them:
+   - ONLY state facts that are LITERALLY written in the provided snippets. Do NOT invent, extrapolate, or "fill in" specific details (match times, scores, dates, names, prices) that aren't explicitly stated in the snippets.
+   - If the snippets mention a topic but lack specific details the user wants, say: "Based on the search results, [quote what IS there]. For the full details, I'd recommend checking [source name/URL from the snippet]."
+   - NEVER fabricate fixture lists, match times, specific scores, or event details by guessing. If the snippet says "Premier League matches tomorrow" but doesn't list the actual matches, say that — don't make up a list.
+   - Do NOT add disclaimers like "my knowledge is limited to 2023" or "I can't access the internet" — the web results are right there. Just use them honestly without overpromising on specifics they don't contain.
 4. For questions outside all provided sources, answer from your own training knowledge. Only if information may be stale, add a brief "(based on what I know — details may have changed)" note. Never refuse outright.
 5. You can perform ANY task: summarization, Q&A, extraction, analysis, transformation, explanation, brainstorming, writing help.
 6. If context from uploaded documents is insufficient or missing for a document-specific question, say so honestly — do NOT hallucinate document-specific facts. This only applies to questions ABOUT uploaded documents, not general questions.
