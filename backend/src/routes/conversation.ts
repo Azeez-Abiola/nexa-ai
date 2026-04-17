@@ -1,6 +1,7 @@
 import express, { Response } from "express";
 import mongoose from "mongoose";
 import multer from "multer";
+import { Types } from "mongoose";
 import { Conversation } from "../models/Conversation";
 import { UserDocument } from "../models/UserDocument";
 import { RagDocument } from "../models/RagDocument";
@@ -229,21 +230,40 @@ ${KNOWLEDGE_BASE_VERSIONING_RULES}`);
   return sections.join("\n\n");
 }
 
-// ─── Get all conversations ────────────────────────────────────────────────────
+// ─── Get conversations (paginated) ───────────────────────────────────────────
 conversationRouter.get("/", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    let userConversations = await Conversation.findOne({ userId: req.userId });
+    const limit = Math.min(parseInt((req.query.limit as string) || "20"), 50);
+    const offset = Math.max(parseInt((req.query.offset as string) || "0"), 0);
 
-    if (!userConversations) {
-      userConversations = new Conversation({
-        userId: req.userId,
-        businessUnit: req.businessUnit,
-        conversationGroups: []
-      });
-      await userConversations.save();
+    const [result] = await Conversation.aggregate([
+      { $match: { userId: req.userId } },
+      {
+        $project: {
+          total: { $size: { $ifNull: ["$conversationGroups", []] } },
+          conversationGroups: {
+            $slice: [
+              {
+                $sortArray: {
+                  input: { $ifNull: ["$conversationGroups", []] },
+                  sortBy: { updatedAt: -1 }
+                }
+              },
+              offset,
+              limit
+            ]
+          }
+        }
+      }
+    ]);
+
+    if (!result) {
+      // First login — create the document
+      await Conversation.create({ userId: req.userId, businessUnit: req.businessUnit, conversationGroups: [] });
+      return res.json({ conversations: [], total: 0, hasMore: false });
     }
 
-    const conversations = userConversations.conversationGroups.map((group) => ({
+    const conversations = result.conversationGroups.map((group: any) => ({
       _id: group._id,
       userId: req.userId,
       title: group.title,
@@ -252,7 +272,7 @@ conversationRouter.get("/", authMiddleware, async (req: AuthenticatedRequest, re
       updatedAt: group.updatedAt
     }));
 
-    res.json({ conversations });
+    res.json({ conversations, total: result.total, hasMore: result.total > offset + limit });
   } catch (error) {
     console.error("Get conversations error:", error);
     res.status(500).json({ error: "Internal server error" });
@@ -529,11 +549,9 @@ conversationRouter.post("/:id/message", authMiddleware, async (req: Authenticate
 
     // ── Session RAG retrieval ─────────────────────────────────────────────────
     let sessionContextString = "";
-    let sessionChunkCount = 0;
 
     if (hasSessionChunks) {
       const sessionRAG = await retrieveSessionChunks({ query: content, userId, chatSessionId });
-      sessionChunkCount = sessionRAG.chunks.length;
 
       if (sessionRAG.chunks.length > 0) {
         sessionContextString = buildSessionRAGContext(sessionRAG.chunks);
@@ -780,6 +798,7 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
     const { id: chatSessionId } = req.params;
     const userId = req.userId!;
     const businessUnit = req.businessUnit!;
+    const t = { start: Date.now(), cloudinaryMs: 0, dbMs: 0, contextMs: 0, ttftMs: 0, streamMs: 0 };
 
     // Parse multipart if needed
     try {
@@ -812,45 +831,62 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
       }
     }
 
-    // Convert images to base64 for the current turn (fastest path — no round trip to Cloudinary
-     // before the model sees them). We separately upload to Cloudinary to get persistent URLs that
-     // get stored on the message, so follow-up turns about the same image still work.
+    // ── Open SSE connection immediately — browser unblocks before any async work ──
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("Access-Control-Allow-Origin", "*");
+
+    // Convert images to base64 in memory (zero latency) so the model gets them this turn.
+    // Cloudinary upload is persistence-only (needed for follow-up turns) and runs in parallel
+    // with conversation loading — it no longer blocks the LLM pipeline.
     const imageAttachments: ImageAttachment[] = imageFiles.map(f => ({
       base64: f.buffer.toString("base64"),
       mimeType: f.mimetype
     }));
 
-    // Upload images to Cloudinary in parallel; capture URLs for persistence. Failures are tolerated —
-    // the current turn still works via base64, we just lose cross-turn memory for that one image.
+    // Run Cloudinary image uploads and conversation load in parallel — both are independent.
+    const parallelStart = Date.now();
+    const [cloudinaryResults, userConversations] = await Promise.all([
+      imageFiles.length > 0
+        ? Promise.allSettled(
+            imageFiles.map((f) => uploadChatImage(f.buffer, f.originalname || "image", userId, f.mimetype))
+          )
+        : Promise.resolve([] as PromiseSettledResult<{ secureUrl: string }>[]),
+      Conversation.findOne(
+        { userId, "conversationGroups._id": new Types.ObjectId(chatSessionId) },
+        { "conversationGroups.$": 1 }
+      )
+    ]);
+    t.cloudinaryMs = imageFiles.length > 0 ? Date.now() - parallelStart : 0;
+    t.dbMs = Date.now() - parallelStart;
+
     let persistedImageUrls: string[] = [];
     if (imageFiles.length > 0) {
-      const uploads = await Promise.allSettled(
-        imageFiles.map((f) => uploadChatImage(f.buffer, f.originalname || "image", userId, f.mimetype))
-      );
-      persistedImageUrls = uploads
+      persistedImageUrls = (cloudinaryResults as PromiseSettledResult<{ secureUrl: string }>[])
         .map((u) => (u.status === "fulfilled" ? u.value.secureUrl : null))
         .filter((u): u is string => !!u);
-      const failedCount = uploads.length - persistedImageUrls.length;
+      const failedCount = imageFiles.length - persistedImageUrls.length;
       if (failedCount > 0) {
         logger.warn("[Conversation/Stream] Some chat image uploads failed", {
           userId,
-          total: uploads.length,
+          total: imageFiles.length,
           failed: failedCount
         });
       }
     }
 
-    // ── Load conversation ─────────────────────────────────────────────────────
-    const userConversations = await Conversation.findOne({ userId });
     if (!userConversations) {
-      return res.status(404).json({ error: "Conversation not found" });
+      res.write(`data: ${JSON.stringify({ error: "Conversation not found", done: true })}\n\n`);
+      res.end();
+      return;
     }
 
-    const group = userConversations.conversationGroups.find(
-      (g) => g._id.toString() === chatSessionId
-    );
+    const group = userConversations.conversationGroups[0];
     if (!group) {
-      return res.status(404).json({ error: "Conversation not found" });
+      res.write(`data: ${JSON.stringify({ error: "Conversation not found", done: true })}\n\n`);
+      res.end();
+      return;
     }
 
     // Upload document files (non-images) for RAG processing
@@ -870,12 +906,6 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
       );
       inlineDocumentText = extractions.filter(Boolean).join("\n\n");
     }
-
-    // ── Set up SSE headers early ──────────────────────────────────────────────
-    res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("Connection", "keep-alive");
-    res.setHeader("Access-Control-Allow-Origin", "*");
 
     // File-only upload with no text: auto-summarize the document
     if (!content && uploadedFiles.length > 0 && !inlineDocumentText && imageAttachments.length === 0) {
@@ -920,12 +950,17 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
     };
     group.messages.push(userMessage);
 
-    // ── Build context ─────────────────────────────────────────────────────────
-    const [sessionStatus, hasSessionChunks, globalContext] = await Promise.all([
+    // ── Build context (all parallel) ──────────────────────────────────────────
+    // Session RAG runs speculatively alongside global context — embedding is cached
+    // so the wasted call on sessions with no docs costs ~2ms (Redis L1 hit).
+    const contextStart = Date.now();
+    const [sessionStatus, hasSessionChunks, globalContext, speculativeSessionRAG] = await Promise.all([
       getSessionDocumentStatus(userId, chatSessionId),
       hasReadySessionChunks(userId, chatSessionId),
-      buildContextForQuery(content, businessUnit, req.grade || "", { userId: req.userId })
+      buildContextForQuery(content, businessUnit, req.grade || "", { userId: req.userId }),
+      retrieveSessionChunks({ query: content, userId, chatSessionId })
     ]);
+    t.contextMs = Date.now() - contextStart;
 
     if (globalContext.accessDenied && !hasSessionChunks) {
       const deniedContent =
@@ -933,32 +968,40 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
       const deniedMessage = { role: "assistant" as const, content: deniedContent, timestamp: new Date() };
       group.messages.push(deniedMessage);
 
-      if (group.messages.length === 2) {
-        try { group.title = await generateConversationTitle(content); } catch { /* ignore */ }
-      }
-
+      const isFirstDenied = group.messages.length === 2;
       await userConversations.save();
+
       const conversation = {
         _id: group._id, userId, title: group.title, messages: group.messages,
         createdAt: group.createdAt, updatedAt: group.updatedAt
       };
       res.write(`data: ${JSON.stringify({ done: true, fullResponse: deniedContent, conversation })}\n\n`);
       res.end();
+
+      if (isFirstDenied) {
+        const fallback = content.length > 50 ? content.substring(0, 50) + "..." : content;
+        generateConversationTitle(content)
+          .catch(() => fallback)
+          .then((title) =>
+            Conversation.updateOne(
+              { userId, "conversationGroups._id": new Types.ObjectId(chatSessionId) },
+              { $set: { "conversationGroups.$.title": title } }
+            )
+          )
+          .catch(() => {});
+      }
       return;
     }
 
-    // ── Session RAG ───────────────────────────────────────────────────────────
+    // ── Session RAG result (already fetched above) ────────────────────────────
     let sessionContextString = "";
-    if (hasSessionChunks) {
-      const sessionRAG = await retrieveSessionChunks({ query: content, userId, chatSessionId });
-      if (sessionRAG.chunks.length > 0) {
-        sessionContextString = buildSessionRAGContext(sessionRAG.chunks);
-        logger.info("[Conversation/Stream] Session RAG hit", {
-          userId,
-          chatSessionId,
-          chunksUsed: sessionRAG.chunks.length
-        });
-      }
+    if (hasSessionChunks && speculativeSessionRAG.chunks.length > 0) {
+      sessionContextString = buildSessionRAGContext(speculativeSessionRAG.chunks);
+      logger.info("[Conversation/Stream] Session RAG hit", {
+        userId,
+        chatSessionId,
+        chunksUsed: speculativeSessionRAG.chunks.length
+      });
     }
 
     const hasGlobalContext = globalContext.source !== "none" && !globalContext.accessDenied;
@@ -998,7 +1041,9 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
         imageAttachments.length > 0 ? imageAttachments : undefined
       );
 
+      let firstChunk = true;
       for await (const chunk of generator) {
+        if (firstChunk) { t.ttftMs = Date.now() - t.start; firstChunk = false; }
         fullResponse += chunk;
         res.write(`data: ${JSON.stringify({ chunk, fullResponse })}\n\n`);
       }
@@ -1042,14 +1087,7 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
       };
       group.messages.push(assistantMessage);
 
-      if (group.messages.length === 2) {
-        try {
-          group.title = await generateConversationTitle(content);
-        } catch {
-          const firstUserContent = content.substring(0, 50);
-          group.title = firstUserContent.length === 50 ? firstUserContent + "..." : firstUserContent;
-        }
-      }
+      const isFirstMessage = group.messages.length === 2;
 
       await userConversations.save();
 
@@ -1071,6 +1109,34 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
         })}\n\n`
       );
       res.end();
+      t.streamMs = Date.now() - t.start;
+
+      logger.info("[Stream/Perf]", {
+        userId,
+        chatSessionId,
+        businessUnit,
+        hasImages: imageFiles.length > 0,
+        ragSource: globalContext.source,
+        cloudinaryMs: t.cloudinaryMs,
+        dbMs: t.dbMs,
+        contextMs: t.contextMs,
+        ttftMs: t.ttftMs,
+        streamMs: t.streamMs
+      });
+
+      // Generate and persist title after stream ends — doesn't block the client.
+      if (isFirstMessage) {
+        const fallback = content.length > 50 ? content.substring(0, 50) + "..." : content;
+        generateConversationTitle(content)
+          .catch(() => fallback)
+          .then((title) =>
+            Conversation.updateOne(
+              { userId, "conversationGroups._id": new Types.ObjectId(chatSessionId) },
+              { $set: { "conversationGroups.$.title": title } }
+            )
+          )
+          .catch(() => {});
+      }
     } catch (error) {
       console.error("Stream error:", error);
       res.write(`data: ${JSON.stringify({ error: "Failed to generate response", done: true })}\n\n`);

@@ -162,6 +162,9 @@ export const App: React.FC = () => {
   });
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [conversationsHasMore, setConversationsHasMore] = useState(false);
+  const [conversationsOffset, setConversationsOffset] = useState(0);
+  const [isLoadingMoreConversations, setIsLoadingMoreConversations] = useState(false);
   const [currentConversation, setCurrentConversation] = useState<Conversation | null>(null);
   const [input, setInput] = useState("");
 
@@ -428,40 +431,54 @@ export const App: React.FC = () => {
   async function loadConversations(authToken: string) {
     setIsConversationsLoading(true);
     try {
-      const { data } = await axios.get<{ conversations: Conversation[] }>(
-        "/api/v1/conversations",
+      const { data } = await axios.get<{ conversations: Conversation[]; total: number; hasMore: boolean }>(
+        "/api/v1/conversations?limit=20&offset=0",
         { headers: { Authorization: `Bearer ${authToken}` } }
       );
       setConversations(data.conversations);
+      setConversationsHasMore(data.hasMore ?? false);
+      setConversationsOffset(20);
 
       if (data.conversations.length > 0) {
-        // Try to restore the last viewed conversation
         const savedConversationId = localStorage.getItem("lastConversationId");
         const lastConversation = savedConversationId
           ? data.conversations.find(c => c._id === savedConversationId)
           : null;
-
-        // Use the last viewed conversation if it still exists, otherwise use the first one
         setCurrentConversation(lastConversation || data.conversations[0]);
       }
     } catch (error) {
       console.error("Load conversations error:", error);
     } finally {
-      // Ensure loading state displays for at least 3 seconds
       const elapsedTime = Date.now() - (loadingStartTimeRef.current || Date.now());
       const remainingTime = Math.max(0, 3000 - elapsedTime);
 
       if (remainingTime > 0) {
         setTimeout(() => {
           setIsConversationsLoading(false);
-          // Scroll after loading is complete
           setTimeout(() => scrollToBottom(true), 100);
         }, remainingTime);
       } else {
         setIsConversationsLoading(false);
-        // Scroll after loading is complete
         setTimeout(() => scrollToBottom(true), 100);
       }
+    }
+  };
+
+  async function loadMoreConversations() {
+    if (!token || isLoadingMoreConversations || !conversationsHasMore) return;
+    setIsLoadingMoreConversations(true);
+    try {
+      const { data } = await axios.get<{ conversations: Conversation[]; total: number; hasMore: boolean }>(
+        `/api/v1/conversations?limit=20&offset=${conversationsOffset}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setConversations(prev => [...prev, ...data.conversations]);
+      setConversationsHasMore(data.hasMore ?? false);
+      setConversationsOffset(prev => prev + 20);
+    } catch (error) {
+      console.error("Load more conversations error:", error);
+    } finally {
+      setIsLoadingMoreConversations(false);
     }
   };
 
@@ -500,6 +517,8 @@ export const App: React.FC = () => {
     setUser(null);
     setToken(null);
     setConversations([]);
+    setConversationsHasMore(false);
+    setConversationsOffset(0);
     setCurrentConversation(null);
     delete axios.defaults.headers.common["Authorization"];
     setLogoutConfirmOpen(false);
@@ -1255,11 +1274,15 @@ export const App: React.FC = () => {
                   );
                 })())
             )}
-            {!isHistoryCollapsed && conversations.length > 10 && (
-              <div className="show-more-btn">
+            {!isHistoryCollapsed && conversationsHasMore && (
+              <button
+                className="show-more-btn"
+                onClick={loadMoreConversations}
+                disabled={isLoadingMoreConversations}
+              >
                 <BiChevronDown size={18} />
-                <span>Show more</span>
-              </div>
+                <span>{isLoadingMoreConversations ? "Loading..." : "Show more"}</span>
+              </button>
             )}
           </div>
 

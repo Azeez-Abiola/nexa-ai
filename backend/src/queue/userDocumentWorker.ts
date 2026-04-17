@@ -2,6 +2,7 @@ import { Worker, Job } from "bullmq";
 import { redisConnection } from "./connection";
 import { UserDocumentJobData } from "./userDocumentQueue";
 import { processUserDocument } from "../services/userDocumentProcessingService";
+import { invalidateRAGCache } from "../services/ragService";
 import { UserDocument } from "../models/UserDocument";
 import logger from "../utils/logger";
 
@@ -39,6 +40,7 @@ function startUserDocumentWorker() {
       documentId: job.data.documentId,
       fileName: job.data.fileName
     });
+    void invalidateRAGCache();
   });
 
   worker.on("failed", async (job, error) => {
