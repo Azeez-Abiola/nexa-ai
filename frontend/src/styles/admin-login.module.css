@@ -876,9 +876,13 @@ select.input option:checked {
     gap: 1.5rem;
   }
 
-  .avatarLargeImage {
-    width: 300px;
-    height: 380px;
+  .avatarSection {
+    display: none;
+  }
+
+  .formWrapper {
+    margin-top: 2rem;
+    max-width: 100%;
   }
 
   .logoContainer {
@@ -888,10 +892,6 @@ select.input option:checked {
 
   .card {
     padding: 2rem 1.5rem;
-  }
-
-  .formWrapper {
-    margin-top: 2rem;
   }
 
   .logoWrapper {

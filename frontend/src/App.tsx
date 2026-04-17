@@ -1699,18 +1699,7 @@ export const App: React.FC = () => {
                                     ) : null}
                                   </>
                                 );
-                                return s.url ? (
-                                  <a
-                                    key={s.documentId}
-                                    className="message-source-pill-v2"
-                                    href={s.url}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    title={`${s.title} (${s.documentType})`}
-                                  >
-                                    {content}
-                                  </a>
-                                ) : (
+                                return (
                                   <span
                                     key={s.documentId}
                                     className="message-source-pill-v2 message-source-pill-v2--static"

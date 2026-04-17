@@ -14,18 +14,17 @@ const adminAxios = axios.create();
 interface Document {
   _id: string;
   title: string;
-  category: string;
-  content: string;
-  tags: string[];
+  documentType: string;
+  sensitivityLevel: string;
+  processingStatus?: string;
+  version?: number;
+  originalFilename?: string;
+  fileSize?: number;
+  createdAt?: string;
   uploadedBy?: {
     adminId: string;
     adminEmail: string;
     adminName?: string;
-  };
-  sourceFile?: {
-    filename: string;
-    fileType: "text" | "docx" | "pdf";
-    uploadedAt: string;
   };
 }
 
@@ -36,139 +35,24 @@ interface AdminUser {
   businessUnit: string;
 }
 
-const emptyForm: Omit<Document, "_id"> = {
+interface DocumentForm {
+  title: string;
+  documentType: string;
+  sensitivityLevel: string;
+  content: string;
+}
+
+const emptyForm: DocumentForm = {
   title: "",
-  category: "",
-  content: "",
-  tags: []
+  documentType: "policy",
+  sensitivityLevel: "internal",
+  content: ""
 };
 
 interface FileUploadState {
   file: File | null;
   isDragging: boolean;
 }
-
-// Smart content analysis for auto-categorization and tagging
-const intelligentContentAnalysis = (content: string, hasDefault: boolean = true): { category: string; tags: string[] } => {
-  // If content is empty, return empty category
-  if (!content.trim()) {
-    return { category: "", tags: [] };
-  }
-
-  const lowerContent = content.toLowerCase();
-  
-  // Category mapping based on keywords
-  const categoryMap: Record<string, string[]> = {
-    "Time Off & Leave": ["leave", "vacation", "holiday", "time off", "days off", "absent", "sick leave", "annual leave", "personal day", "pto", "unpaid leave", "bereavement"],
-    "Compensation & Salary": ["salary", "pay", "wage", "compensation", "bonus", "allowance", "payroll", "stipend", "commission", "incentive", "raise", "paycheck"],
-    "Benefits": ["benefit", "health", "insurance", "medical", "dental", "pension", "retirement", "401k", "healthcare", "coverage", "wellness", "esa"],
-    "Work Schedule & Hours": ["work hours", "working hours", "office hours", "schedule", "shift", "timing", "9 to 5", "flexible hours", "overtime", "flextime", "core hours"],
-    "Attendance": ["attendance", "present", "check in", "punctuality", "lateness", "absence", "sign in", "clock in", "tardy"],
-    "Remote Work": ["remote", "work from home", "wfh", "home office", "telecommute", "virtual", "hybrid", "distributed"],
-    "Code of Conduct": ["conduct", "behavior", "dress code", "ethics", "discipline", "professionalism", "respect", "policy", "professional"],
-    "Training & Development": ["training", "development", "course", "certification", "learning", "upskilling", "workshop", "seminar", "mentor", "professional development"],
-    "Harassment & Safety": ["harassment", "discrimination", "bullying", "toxic", "respect", "safe", "safety", "abuse", "assault", "hostile", "eeoc"],
-    "Performance": ["performance", "review", "evaluation", "appraisal", "rating", "feedback", "assessment", "improvement plan", "competency"]
-  };
-
-  // Find matching category
-  let matchedCategory = hasDefault ? "General Document" : "";
-  let maxMatches = 0;
-  
-  for (const [category, keywords] of Object.entries(categoryMap)) {
-    const matches = keywords.filter((kw) => lowerContent.includes(kw)).length;
-    if (matches > maxMatches) {
-      maxMatches = matches;
-      matchedCategory = category;
-    }
-  }
-
-  // Extract tags: key terms from content
-  const stopWords = new Set([
-    "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "by",
-    "is", "are", "be", "been", "being", "have", "has", "do", "does", "did", "will", "would",
-    "should", "could", "may", "might", "must", "can", "shall", "that", "this", "these", "those",
-    "if", "whether", "as", "while", "after", "before", "during", "about", "above", "below",
-    "from", "up", "down", "out", "off", "over", "under", "again", "further", "then", "once",
-    "here", "there", "where", "what", "which", "who", "whom", "whose", "when", "why", "how",
-    "employees", "employee", "staff", "company", "should", "shall", "must", "required", "requirement",
-    "such", "other", "more", "most", "also", "than", "been", "not", "just", "all", "any",
-    "our", "your", "their", "its", "it", "or", "so", "each", "every", "both"
-  ]);
-
-  const words = content
-    .toLowerCase()
-    .match(/\b[a-z]+(?:'[a-z]+)?\b/g) || [];
-  
-  const wordFreq: Record<string, number> = {};
-  words.forEach((word) => {
-    if (!stopWords.has(word) && word.length > 2) {  // Lowered from 3 to 2
-      wordFreq[word] = (wordFreq[word] || 0) + 1;
-    }
-  });
-
-  // Extract multi-word phrases (bigrams) for better tags
-  const phrases: Record<string, number> = {};
-  for (let i = 0; i < words.length - 1; i++) {
-    const w1 = words[i];
-    const w2 = words[i + 1];
-    if (!stopWords.has(w1) && !stopWords.has(w2) && w1.length > 2 && w2.length > 2) {
-      const phrase = `${w1} ${w2}`;
-      phrases[phrase] = (phrases[phrase] || 0) + 1;
-    }
-  }
-
-  // Get top single terms (appearing 1+ times)
-  const topTerms = Object.entries(wordFreq)
-    .filter(([_, count]) => count >= 1)
-    .sort((a, b) => b[1] - a[1])
-    .map(([word]) => word)
-    .slice(0, 12);
-
-  // Get top phrases (appearing 2+ times)
-  const topPhrases = Object.entries(phrases)
-    .filter(([_, count]) => count >= 2)
-    .sort((a, b) => b[1] - a[1])
-    .map(([phrase]) => phrase)
-    .slice(0, 8);
-
-  // Combine category keywords, top terms, and phrases
-  const categoryTags = categoryMap[matchedCategory] || [];
-  
-  // Build comprehensive tag list
-  const tagSet = new Set<string>();
-  
-  // Add all category keywords that appear in content
-  categoryTags.forEach(tag => {
-    if (lowerContent.includes(tag.toLowerCase())) {
-      tagSet.add(tag);
-    }
-  });
-  
-  // Add top phrases (these are usually more meaningful)
-  topPhrases.forEach(phrase => tagSet.add(phrase));
-  
-  // Add top individual terms
-  topTerms.forEach(term => tagSet.add(term));
-  
-  // Add category keywords even if not found (up to 4)
-  let categoryCount = 0;
-  for (const tag of categoryTags) {
-    if (categoryCount >= 4) break;
-    if (!tagSet.has(tag)) {
-      tagSet.add(tag);
-      categoryCount++;
-    }
-  }
-
-  // Convert to array and limit to 25 tags
-  const suggestedTags = Array.from(tagSet).slice(0, 25);
-
-  return {
-    category: matchedCategory,
-    tags: suggestedTags
-  };
-};
 
 export const Admin: React.FC = () => {
   const [adminToken, setAdminToken] = useState<string | null>(
@@ -178,7 +62,7 @@ export const Admin: React.FC = () => {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState<Omit<Document, "_id">>(emptyForm);
+  const [form, setForm] = useState<DocumentForm>(emptyForm);
   const [fileUpload, setFileUpload] = useState<FileUploadState>({
     file: null,
     isDragging: false
@@ -205,8 +89,8 @@ export const Admin: React.FC = () => {
     setLoading(true);
     setError(null);
     try {
-      const { data } = await adminAxios.get<Document[]>("/api/v1/admin/policies");
-      setDocuments(data);
+      const { data } = await adminAxios.get("/api/v1/admin/documents");
+      setDocuments(data.documents);
     } catch (e: any) {
       console.error("Failed to load documents:", e.message);
       setError("Failed to load documents.");
@@ -257,29 +141,19 @@ export const Admin: React.FC = () => {
   };
 
   const handleChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
+    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
   ) => {
     const { name, value } = e.target;
-    if (name === "title") {
-      // Auto-generate category based on title (without default fallback)
-      const { category } = intelligentContentAnalysis(value, false);
-      setForm((prev) => ({
-        ...prev,
-        [name]: value,
-        category: category // Auto-update category whenever title changes
-      }));
-    } else {
-      setForm((prev) => ({ ...prev, [name]: value }));
-    }
+    setForm((prev) => ({ ...prev, [name]: value }));
   };
 
   const handleEdit = (document: Document) => {
     setEditingId(document._id);
     setForm({
       title: document.title,
-      category: document.category,
-      content: document.content,
-      tags: document.tags
+      documentType: document.documentType,
+      sensitivityLevel: document.sensitivityLevel,
+      content: ""
     });
   };
 
@@ -350,45 +224,35 @@ export const Admin: React.FC = () => {
     setSaving(true);
     setError(null);
     try {
-      // Validate that we have title and category
-      if (!form.title || !form.category) {
-        setError("Title and category are required");
+      if (!form.title || !form.documentType) {
+        setError("Title and document type are required");
         setSaving(false);
         return;
       }
 
-      // Validate that we have either a file or content
       if (!fileUpload.file && !form.content) {
         setError("Please either upload a file or enter content");
         setSaving(false);
         return;
       }
 
+      const formData = new FormData();
+      formData.append("title", form.title);
+      formData.append("documentType", form.documentType);
+      formData.append("sensitivityLevel", form.sensitivityLevel);
+
       if (fileUpload.file) {
-        // Upload with file
-        const formData = new FormData();
-        formData.append("title", form.title);
-        formData.append("category", form.category);
         formData.append("file", fileUpload.file);
-        if (form.tags && form.tags.length > 0) {
-          formData.append("tags", form.tags.join(","));
-        }
-
-        if (editingId) {
-          await adminAxios.put(`/api/v1/admin/policies/${editingId}`, formData);
-        } else {
-          await adminAxios.post("/api/v1/admin/policies", formData);
-        }
       } else {
-        // Upload with text content
-        const submitForm = { ...form, tags: [] };
-
-        if (editingId) {
-          await adminAxios.put(`/api/v1/admin/policies/${editingId}`, submitForm);
-        } else {
-          await adminAxios.post("/api/v1/admin/policies", submitForm);
-        }
+        formData.append("content", form.content);
       }
+
+      if (editingId) {
+        formData.append("replacesDocumentId", editingId);
+      }
+
+      await adminAxios.post("/api/v1/admin/documents", formData);
+
       await loadDocuments();
       resetForm();
     } catch (err: any) {
@@ -402,7 +266,7 @@ export const Admin: React.FC = () => {
   const handleDelete = async (id: string) => {
     if (!window.confirm("Delete this document?")) return;
     try {
-      await adminAxios.delete(`/api/v1/admin/policies/${id}`);
+      await adminAxios.delete(`/api/v1/admin/documents/${id}`);
       await loadDocuments();
     } catch (err) {
       console.error(err);
@@ -519,7 +383,7 @@ export const Admin: React.FC = () => {
           <section className={styles.formSection}>
             <div className={styles.formCard}>
               <h2 className={styles.formTitle}>
-                {editingId ? "Edit Document" : "Upload File"}
+                {editingId ? "Re-upload Document" : "Upload File"}
               </h2>
 
               <form onSubmit={handleSubmit} className={styles.form}>
@@ -611,16 +475,37 @@ export const Admin: React.FC = () => {
                 </div>
 
                 <div className={styles.formGroup}>
-                  <label className={styles.label}>Category</label>
-                  <input
-                    type="text"
-                    name="category"
+                  <label className={styles.label}>Document Type</label>
+                  <select
+                    name="documentType"
                     className={styles.input}
-                    placeholder="Auto-generated from title"
-                    value={form.category}
+                    value={form.documentType}
                     onChange={handleChange}
                     required
-                  />
+                  >
+                    <option value="policy">Policy</option>
+                    <option value="procedure">Procedure</option>
+                    <option value="handbook">Handbook</option>
+                    <option value="contract">Contract</option>
+                    <option value="report">Report</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
+
+                <div className={styles.formGroup}>
+                  <label className={styles.label}>Sensitivity Level</label>
+                  <select
+                    name="sensitivityLevel"
+                    className={styles.input}
+                    value={form.sensitivityLevel}
+                    onChange={handleChange}
+                    required
+                  >
+                    <option value="public">Public</option>
+                    <option value="internal">Internal</option>
+                    <option value="confidential">Confidential</option>
+                    <option value="restricted">Restricted</option>
+                  </select>
                 </div>
 
                 {error && <div className={styles.errorMessage}>{error}</div>}
@@ -633,10 +518,10 @@ export const Admin: React.FC = () => {
                   >
                     {saving
                       ? editingId
-                        ? "Saving..."
+                        ? "Re-uploading..."
                         : "Uploading..."
                       : editingId
-                      ? "Save Changes"
+                      ? "Re-upload Document"
                       : "Upload Document"}
                   </button>
                   {editingId && (
@@ -678,25 +563,27 @@ export const Admin: React.FC = () => {
                       <h3 className={styles.documentTitle}>{document.title}</h3>
                       <div>
                         <span className={styles.documentCategory}>
-                          {document.category}
+                          {document.documentType}
                         </span>
-                        {document.sourceFile && (
-                          <span
-                            className={styles.sourceFileBadge}
-                            title={`Uploaded from: ${document.sourceFile.filename}`}
-                          >
-                            📄 {document.sourceFile.fileType === "docx" ? "Word Doc" : document.sourceFile.fileType === "pdf" ? "PDF" : "Text File"}
+                        {document.processingStatus && (
+                          <span className={styles.sourceFileBadge}>
+                            {document.processingStatus === "completed"
+                              ? "✓ Indexed"
+                              : document.processingStatus === "pending"
+                              ? "⏳ Processing"
+                              : document.processingStatus === "failed"
+                              ? "✕ Failed"
+                              : document.processingStatus}
                           </span>
                         )}
                       </div>
-                      {/* Audit Logs Section */}
-                      {(document.sourceFile?.uploadedAt || document.uploadedBy) && (
+                      {(document.createdAt || document.uploadedBy) && (
                         <div className={styles.auditLogSection}>
-                          {document.sourceFile?.uploadedAt && (
+                          {document.createdAt && (
                             <div className={styles.auditLogItem}>
                               <span className={styles.auditLogLabel}>📅 Uploaded:</span>
                               <span className={styles.auditLogValue}>
-                                {new Date(document.sourceFile.uploadedAt).toLocaleString()}
+                                {new Date(document.createdAt).toLocaleString()}
                               </span>
                             </div>
                           )}
@@ -787,4 +674,3 @@ export const Admin: React.FC = () => {
     </div>
   );
 };
-

@@ -271,8 +271,8 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
 
   return (
     <div className="min-h-screen w-full bg-white flex flex-col lg:flex-row overflow-hidden font-sans">
-      {/* Left Side: Visual/Content */}
-      <div className="lg:w-1/2 relative flex flex-col justify-center p-8 md:p-16 lg:p-24 overflow-hidden min-h-[500px] lg:min-h-screen">
+      {/* Left Side: Visual/Content — hidden on mobile */}
+      <div className="lg:w-1/2 relative hidden lg:flex flex-col justify-center p-8 md:p-16 lg:p-24 overflow-hidden min-h-[500px] lg:min-h-screen">
         {/* Background Image with Overlay */}
         <div className="absolute inset-0 z-0">
           <img 
@@ -416,7 +416,7 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
                         required={!isLogin}
                         className="w-full pl-14 pr-12 py-5 bg-[#F8F9FF] border border-border/60 rounded-2xl focus:outline-none focus:border-primary/40 focus:ring-4 focus:ring-primary/5 transition-all font-medium text-[#1A1A1A] appearance-none cursor-pointer"
                       >
-                        <option value="">Select your department</option>
+                        <option value="">Select your business unit</option>
                         {businessUnits.map((bu) => (
                           <option key={bu.value} value={bu.value}>
                             {bu.label}
