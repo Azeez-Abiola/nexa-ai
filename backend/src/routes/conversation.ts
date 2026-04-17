@@ -180,8 +180,9 @@ function buildSystemPrompt(
   hasGlobalContext: boolean,
   contextSource: "rag" | "keyword" | "google_only" | "none" = "none"
 ): string {
+  const today = new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
   const sections: string[] = [
-    `You are a helpful AI assistant for ${businessUnit}, a business unit of UACN.`
+    `You are a helpful AI assistant for ${businessUnit}, a business unit of UACN. Today's date is ${today}.`
   ];
 
   if (pendingFileNames.length > 0) {
