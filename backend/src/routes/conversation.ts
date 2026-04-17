@@ -177,7 +177,8 @@ function buildSystemPrompt(
   sessionContextString: string,
   globalContextString: string,
   pendingFileNames: string[],
-  hasGlobalContext: boolean
+  hasGlobalContext: boolean,
+  contextSource: "rag" | "keyword" | "google_only" | "none" = "none"
 ): string {
   const sections: string[] = [
     `You are a helpful AI assistant for ${businessUnit}, a business unit of UACN.`
@@ -194,23 +195,29 @@ function buildSystemPrompt(
   }
 
   if (globalContextString && hasGlobalContext) {
-    sections.push(
-      `📋 COMPANY KNOWLEDGE BASE (general policies & external sources):\n\n${globalContextString}`
-    );
+    // Label the context block for what it actually is. When the source is pure web results, the
+    // old "COMPANY KNOWLEDGE BASE" label confused the model into ignoring them for time-sensitive
+    // questions and falling back to its training cutoff.
+    const isWebOnly = contextSource === "google_only";
+    const header = isWebOnly
+      ? `🌐 FRESH WEB SEARCH RESULTS (from Google, pulled at request time — these are authoritative for current events, dates, news, sports, prices, and anything time-sensitive):`
+      : `📋 COMPANY KNOWLEDGE BASE (general policies & external sources):`;
+    sections.push(`${header}\n\n${globalContextString}`);
   }
 
   sections.push(`INSTRUCTIONS:
 1. When answering questions about the user's uploaded documents, use the "YOUR UPLOADED DOCUMENTS" context as your PRIMARY source.
 2. For HR policies or general company knowledge, use the "COMPANY KNOWLEDGE BASE" section as your PRIMARY source.
-3. For questions outside those sources (general topics, current events, how-tos, coding, etc.) — answer helpfully using any external web results we included, or from your own training knowledge. NEVER refuse with "I don't have real-time news access", "I can't access the internet", "my knowledge is limited to…", or similar capability disclaimers. If information may be outdated, add a brief note like "(based on what I know — facts may have changed since)" rather than refusing.
-4. You can perform ANY task: summarization, Q&A, extraction, analysis, transformation, explanation, brainstorming, writing help.
-5. If context from uploaded documents is insufficient or missing for a document-specific question, say so honestly — do NOT hallucinate document-specific facts. This only applies to questions ABOUT uploaded documents, not general questions.
-6. Only label the source of your answer when it improves clarity:
+3. **When FRESH WEB SEARCH RESULTS are present in context, they are the authoritative source** for the user's question (they were fetched seconds ago in response to this exact query). Treat them as more current than your training data. Quote and synthesize from them directly — do NOT add disclaimers like "my knowledge is limited to 2023", "I don't have real-time access", "I can't browse the internet", or similar. Those statements are false: the web results are right there in your context. If the results don't cover the specific sub-question, say *that* — "the snippets I have don't mention X specifically" — not a blanket capability refusal.
+4. For questions outside all provided sources, answer from your own training knowledge. Only if information may be stale, add a brief "(based on what I know — details may have changed)" note. Never refuse outright.
+5. You can perform ANY task: summarization, Q&A, extraction, analysis, transformation, explanation, brainstorming, writing help.
+6. If context from uploaded documents is insufficient or missing for a document-specific question, say so honestly — do NOT hallucinate document-specific facts. This only applies to questions ABOUT uploaded documents, not general questions.
+7. Only label the source of your answer when it improves clarity:
    - 📄 for user-uploaded document answers
    - 📋 for company knowledge base answers
    - 🌐 for external web sources provided in context
    - No badge for general knowledge / conversational replies.
-7. Be professional, helpful, and concise.
+8. Be professional, helpful, and concise.
 
 ${KNOWLEDGE_BASE_VERSIONING_RULES}`);
 
@@ -560,7 +567,8 @@ conversationRouter.post("/:id/message", authMiddleware, async (req: Authenticate
       sessionContextString,
       globalContext.hybridContextString,
       sessionStatus.pendingOrProcessing,
-      hasGlobalContext
+      hasGlobalContext,
+      globalContext.source
     );
 
     // ── Generate AI response ──────────────────────────────────────────────────
@@ -707,7 +715,8 @@ conversationRouter.post("/:id/message/:index/edit", authMiddleware, async (req: 
       sessionContextString,
       globalContext.hybridContextString,
       sessionStatus.pendingOrProcessing,
-      hasGlobalContext
+      hasGlobalContext,
+      globalContext.source
     );
 
     let aiResponse = "";
@@ -953,7 +962,8 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
       sessionContextString,
       globalContext.hybridContextString,
       sessionStatus.pendingOrProcessing,
-      hasGlobalContext
+      hasGlobalContext,
+      globalContext.source
     );
 
     const policyContext = globalContext.policies.map((p: any) => ({
