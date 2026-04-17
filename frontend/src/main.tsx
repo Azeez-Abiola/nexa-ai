@@ -50,4 +50,16 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   </React.StrictMode>
 );
 
+// Dismiss preloader after a minimum 2.5s display so the animation completes
+const preloader = document.getElementById("preloader");
+if (preloader) {
+  const MINIMUM_DISPLAY_MS = 1800;
+  const elapsed = performance.now();
+  const remaining = Math.max(0, MINIMUM_DISPLAY_MS - elapsed);
+  setTimeout(() => {
+    preloader.classList.add("fade-out");
+    setTimeout(() => preloader.remove(), 600);
+  }, remaining);
+}
+
 

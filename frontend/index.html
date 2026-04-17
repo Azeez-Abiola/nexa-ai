@@ -18,6 +18,131 @@
     </style>
   </head>
   <body>
+    <!-- Preloader — visible instantly, dismissed once React mounts -->
+    <div id="preloader">
+      <div class="preloader-beep preloader-beep--1"></div>
+      <div class="preloader-beep preloader-beep--2"></div>
+      <div class="preloader-beep preloader-beep--3"></div>
+      <div class="preloader-video-wrap">
+        <video autoplay muted loop playsinline>
+          <source src="/UAC AI AVATAR.mp4" type="video/mp4" />
+        </video>
+      </div>
+      <p class="preloader-text">nexa.ai</p>
+    </div>
+    <style>
+      #preloader {
+        position: fixed;
+        inset: 0;
+        z-index: 99999;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        background: #ffffff;
+        overflow: hidden;
+        transition: opacity 0.5s ease, visibility 0.5s ease;
+      }
+      #preloader.fade-out {
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+      }
+
+      /* Beep rings — three layers pulsing outward */
+      .preloader-beep {
+        position: absolute;
+        border-radius: 50%;
+        background: url('/beep.png') center/contain no-repeat;
+        animation: beep-pulse 1.8s ease-out infinite;
+      }
+      .preloader-beep--1 {
+        width: 220px; height: 220px;
+        opacity: 0.2;
+        animation-delay: 0s;
+      }
+      .preloader-beep--2 {
+        width: 220px; height: 220px;
+        opacity: 0.12;
+        animation-delay: 0.5s;
+      }
+      .preloader-beep--3 {
+        width: 220px; height: 220px;
+        opacity: 0.06;
+        animation-delay: 1s;
+      }
+
+      @keyframes beep-pulse {
+        0% {
+          transform: scale(0.8);
+          opacity: 0.3;
+        }
+        100% {
+          transform: scale(2.8);
+          opacity: 0;
+        }
+      }
+
+      /* Avatar video */
+      .preloader-video-wrap {
+        position: relative;
+        z-index: 2;
+        width: 200px;
+        height: 200px;
+        border-radius: 50%;
+        overflow: hidden;
+        border: 3px solid rgba(237, 0, 0, 0.5);
+        box-shadow: 0 0 40px rgba(237, 0, 0, 0.3), 0 0 80px rgba(237, 0, 0, 0.1);
+        animation: video-enter 0.8s ease-out;
+      }
+      .preloader-video-wrap video {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        object-position: top;
+      }
+
+      @keyframes video-enter {
+        from {
+          transform: scale(0.8);
+          opacity: 0;
+        }
+        to {
+          transform: scale(1);
+          opacity: 1;
+        }
+      }
+
+      .preloader-text {
+        position: relative;
+        z-index: 2;
+        margin-top: 24px;
+        font-family: Georgia, 'Times New Roman', serif;
+        font-size: 22px;
+        font-weight: 700;
+        color: #1a1a1a;
+        letter-spacing: 2px;
+        opacity: 0;
+        animation: text-fade 0.5s ease-out 0.3s forwards;
+      }
+
+      @keyframes text-fade {
+        to { opacity: 0.9; }
+      }
+
+      /* Mobile adjustments */
+      @media (max-width: 480px) {
+        .preloader-video-wrap {
+          width: 150px;
+          height: 150px;
+        }
+        .preloader-beep--1,
+        .preloader-beep--2,
+        .preloader-beep--3 { width: 160px; height: 160px; }
+        .preloader-text { font-size: 18px; }
+      }
+    </style>
+
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
