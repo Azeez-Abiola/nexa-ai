@@ -38,10 +38,19 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
+interface MessageSource {
+  documentId: string;
+  title: string;
+  documentType: string;
+  version?: number;
+  url?: string;
+}
+
 interface Message {
   role: "user" | "assistant";
   content: string;
   imageUrls?: string[];
+  sources?: MessageSource[];
   timestamp: Date;
 }
 
@@ -155,6 +164,14 @@ export const App: React.FC = () => {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [currentConversation, setCurrentConversation] = useState<Conversation | null>(null);
   const [input, setInput] = useState("");
+
+  // Textareas grow with their content (like ChatGPT/Claude) and reset cleanly after send.
+  const autoGrowTextarea = (el: HTMLTextAreaElement | null, maxPx = 200) => {
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = Math.min(el.scrollHeight, maxPx) + "px";
+    el.style.overflowY = el.scrollHeight > maxPx ? "auto" : "hidden";
+  };
   const [loading, setLoading] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [conversationToDelete, setConversationToDelete] = useState<string | null>(null);
@@ -1017,10 +1034,7 @@ export const App: React.FC = () => {
     );
   }
 
-  // If authenticated and still loading conversations on chat page, show loading screen
-  if (isAuthenticated && isConversationsLoading && isChatPage) {
-    return <LoginLoadingScreen userType="user" />;
-  }
+  // Skeleton loading inside the chat view handles this; no full-screen block needed.
 
   // /login — always shows login form; redirects to /user-chat if already authenticated
   if (location.pathname === "/login") {
@@ -1199,6 +1213,9 @@ export const App: React.FC = () => {
                               } ${pinnedConversations.has(conv._id) ? "pinned" : ""}`}
                             onClick={() => {
                               setCurrentConversation(conv);
+                              // Jump back to the chat surface if the user is somewhere else
+                              // (e.g. /user-chat/profile) — otherwise their click appears to do nothing.
+                              if (location.pathname !== "/user-chat") navigate("/user-chat");
                               if (window.innerWidth <= 768) setSidebarOpen(false);
                             }}
                           >
@@ -1558,7 +1575,13 @@ export const App: React.FC = () => {
                     className="main-textarea-v2"
                     placeholder="How can Nexa help you today?"
                     value={input}
-                    onChange={(e) => setInput(e.target.value)}
+                    onChange={(e) => {
+                      setInput(e.target.value);
+                      autoGrowTextarea(e.target, 240);
+                    }}
+                    ref={(el) => {
+                      if (el && !input) el.style.height = "";
+                    }}
                     onKeyDown={handleKeyDown}
                     rows={3}
                   />
@@ -1638,6 +1661,44 @@ export const App: React.FC = () => {
                                 <p key={lIdx}>{parseMarkdown(line)}</p>
                               ))
                             : null}
+                          {m.role === "assistant" && m.sources && m.sources.length > 0 ? (
+                            <div className="message-sources-v2">
+                              <span className="message-sources-label-v2">Sources</span>
+                              {m.sources.map((s) => {
+                                const content = (
+                                  <>
+                                    <span className="message-source-pill-icon-v2">
+                                      <BiLibrary size={12} />
+                                    </span>
+                                    <span className="message-source-pill-title-v2">{s.title}</span>
+                                    {typeof s.version === "number" && s.version > 0 ? (
+                                      <span className="message-source-pill-version-v2">v{s.version}</span>
+                                    ) : null}
+                                  </>
+                                );
+                                return s.url ? (
+                                  <a
+                                    key={s.documentId}
+                                    className="message-source-pill-v2"
+                                    href={s.url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    title={`${s.title} (${s.documentType})`}
+                                  >
+                                    {content}
+                                  </a>
+                                ) : (
+                                  <span
+                                    key={s.documentId}
+                                    className="message-source-pill-v2 message-source-pill-v2--static"
+                                    title={`${s.title} (${s.documentType})`}
+                                  >
+                                    {content}
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          ) : null}
                         </div>
                         <div className="message-copy-stack-v2">
                           <button
@@ -1708,7 +1769,13 @@ export const App: React.FC = () => {
                   className="footer-textarea-v2"
                   placeholder="Send a message..."
                   value={input}
-                  onChange={(e) => setInput(e.target.value)}
+                  onChange={(e) => {
+                    setInput(e.target.value);
+                    autoGrowTextarea(e.target, 200);
+                  }}
+                  ref={(el) => {
+                    if (el && !input) el.style.height = "";
+                  }}
                   onKeyDown={handleKeyDown}
                   rows={1}
                 />
@@ -2919,15 +2986,18 @@ export const App: React.FC = () => {
           bottom: calc(100% + 12px);
           left: 0;
           right: auto;
-          min-width: min(232px, calc(100vw - 24px));
+          min-width: min(224px, calc(100vw - 24px));
           max-width: calc(100vw - 24px);
-          padding: 8px;
+          padding: 4px;
           background: #ffffff;
-          border-radius: 22px;
+          border-radius: 18px;
           box-shadow: 0 12px 40px rgba(15, 23, 42, 0.12), 0 4px 12px rgba(15, 23, 42, 0.06);
           border: 1px solid rgba(226, 232, 240, 0.95);
           z-index: 200;
           transform-origin: bottom left;
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
         }
 
         .footer-input-container-v2 .attach-menu-wrap .attach-picker-popover {
@@ -2936,23 +3006,49 @@ export const App: React.FC = () => {
           transform-origin: bottom right;
         }
 
+        /* On phone-width screens, the popover should feel like a bottom sheet: full viewport width,
+           pinned above the input, with the picker options comfortably tappable. */
+        @media (max-width: 640px) {
+          .attach-picker-popover {
+            position: fixed;
+            left: 12px;
+            right: 12px;
+            bottom: calc(env(safe-area-inset-bottom, 0px) + 92px);
+            width: auto;
+            min-width: 0;
+            max-width: none;
+            padding: 6px;
+            border-radius: 18px;
+          }
+          .footer-input-container-v2 .attach-menu-wrap .attach-picker-popover {
+            left: 12px;
+            right: 12px;
+          }
+          .attach-picker-item {
+            padding: 10px 10px;
+            font-size: 15px;
+          }
+        }
+
+        /* Match the rest of the app's dark mode (chat area #242424, cards #2a2a2a / #3f3f3f borders)
+           so the popover doesn't read as a different palette. */
         .dark-theme .attach-picker-popover {
-          background: #1e293b;
-          border-color: rgba(51, 65, 85, 0.95);
-          box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+          background: #2a2a2a;
+          border-color: #3f3f3f;
+          box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
         }
 
         .attach-picker-item {
           display: flex;
           align-items: center;
-          gap: 14px;
+          gap: 10px;
           width: 100%;
           border: none;
           background: transparent;
-          padding: 12px 12px;
-          border-radius: 16px;
+          padding: 8px 10px;
+          border-radius: 12px;
           cursor: pointer;
-          font-size: 15px;
+          font-size: 14px;
           font-weight: 500;
           color: #111827;
           text-align: left;
@@ -2960,7 +3056,7 @@ export const App: React.FC = () => {
         }
 
         .dark-theme .attach-picker-item {
-          color: #f1f5f9;
+          color: #f9fafb;
         }
 
         .attach-picker-item:hover {
@@ -2968,12 +3064,12 @@ export const App: React.FC = () => {
         }
 
         .dark-theme .attach-picker-item:hover {
-          background: #334155;
+          background: #3a3a3a;
         }
 
         .attach-picker-icon-circle {
-          width: 42px;
-          height: 42px;
+          width: 32px;
+          height: 32px;
           border-radius: 50%;
           background: #f1f5f9;
           display: flex;
@@ -2983,9 +3079,14 @@ export const App: React.FC = () => {
           color: #0f172a;
         }
 
+        .attach-picker-icon-circle svg {
+          width: 18px;
+          height: 18px;
+        }
+
         .dark-theme .attach-picker-icon-circle {
-          background: #334155;
-          color: #f8fafc;
+          background: #3a3a3a;
+          color: #f9fafb;
         }
 
         .attach-picker-item-label {
@@ -3226,13 +3327,16 @@ export const App: React.FC = () => {
 
         .voice-mic-frame-v2 {
           display: inline-flex;
-          padding: 3px;
+          align-items: center;
+          justify-content: center;
+          padding: 0;
           border-radius: 9999px;
-          transition: border-color 0.25s ease, box-shadow 0.25s ease, background-color 0.25s ease;
+          transition: border-color 0.25s ease, box-shadow 0.25s ease, background-color 0.25s ease, padding 0.25s ease;
           border: 2px solid transparent;
         }
 
         .voice-mic-frame-v2--active {
+          padding: 2px;
           border-color: var(--brand-color, #ed0000);
           background-color: color-mix(in srgb, var(--brand-color, #ed0000) 14%, transparent);
           box-shadow:
@@ -3321,6 +3425,80 @@ export const App: React.FC = () => {
           border: 1px solid #e5e7eb;
           color: #111827;
           border-bottom-left-radius: 2px;
+        }
+
+        .message-sources-v2 {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 6px;
+          align-items: center;
+          margin-top: 12px;
+          padding-top: 10px;
+          border-top: 1px solid rgba(0, 0, 0, 0.06);
+        }
+        .dark-theme .message-sources-v2 {
+          border-top-color: rgba(255, 255, 255, 0.08);
+        }
+        .message-sources-label-v2 {
+          font-size: 10px;
+          font-weight: 700;
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+          color: #9ca3af;
+          margin-right: 4px;
+        }
+        .message-source-pill-v2 {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 4px 10px 4px 8px;
+          border-radius: 999px;
+          font-size: 12px;
+          font-weight: 600;
+          line-height: 1.2;
+          background: color-mix(in srgb, var(--brand-color, #ed0000) 10%, #fff);
+          color: var(--brand-color, #ed0000);
+          border: 1px solid color-mix(in srgb, var(--brand-color, #ed0000) 22%, transparent);
+          text-decoration: none;
+          cursor: pointer;
+          transition: background 0.15s ease, transform 0.1s ease;
+          max-width: 100%;
+        }
+        .message-source-pill-v2:hover {
+          background: color-mix(in srgb, var(--brand-color, #ed0000) 18%, #fff);
+          transform: translateY(-1px);
+        }
+        .message-source-pill-v2--static { cursor: default; }
+        .message-source-pill-v2--static:hover { transform: none; }
+        .dark-theme .message-source-pill-v2 {
+          background: color-mix(in srgb, var(--brand-color, #ed0000) 18%, #1f1f1f);
+          border-color: color-mix(in srgb, var(--brand-color, #ed0000) 35%, transparent);
+          color: #fff;
+        }
+        .dark-theme .message-source-pill-v2:hover {
+          background: color-mix(in srgb, var(--brand-color, #ed0000) 28%, #1f1f1f);
+        }
+        .message-source-pill-icon-v2 {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 18px;
+          height: 18px;
+          border-radius: 50%;
+          background: color-mix(in srgb, var(--brand-color, #ed0000) 25%, transparent);
+          color: inherit;
+        }
+        .message-source-pill-title-v2 {
+          max-width: 220px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .message-source-pill-version-v2 {
+          font-size: 10px;
+          font-weight: 700;
+          opacity: 0.75;
+          letter-spacing: 0.02em;
         }
 
         .message-image-grid-v2 {
@@ -3412,8 +3590,8 @@ export const App: React.FC = () => {
           border-radius: 20px;
           padding: 6px 10px;
           display: flex;
-          align-items: flex-end;
-          gap: 8px;
+          align-items: center;
+          gap: 2px;
           box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
           transition: all 0.2s;
         }
@@ -3422,8 +3600,7 @@ export const App: React.FC = () => {
           .footer-input-container-v2 {
             border-radius: 24px;
             padding: 8px 16px;
-            gap: 12px;
-            align-items: center;
+            gap: 4px;
           }
         }
 
@@ -3558,7 +3735,9 @@ export const App: React.FC = () => {
           display: flex;
           align-items: center;
           justify-content: center;
-          z-index: 1000;
+          /* Must sit above the mobile sidebar (z-index 1050) and its backdrop (1040) so confirmation
+             dialogs (e.g. Sign out) aren't hidden behind the drawer when it's open. */
+          z-index: 1100;
           padding: 20px;
           animation: modalFadeIn 0.2s ease-out;
         }

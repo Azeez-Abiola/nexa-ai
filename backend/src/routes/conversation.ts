@@ -1,7 +1,9 @@
 import express, { Response } from "express";
+import mongoose from "mongoose";
 import multer from "multer";
 import { Conversation } from "../models/Conversation";
 import { UserDocument } from "../models/UserDocument";
+import { RagDocument } from "../models/RagDocument";
 import { authMiddleware, AuthenticatedRequest } from "../middleware/auth";
 import {
   generateAIResponse,
@@ -198,15 +200,17 @@ function buildSystemPrompt(
   }
 
   sections.push(`INSTRUCTIONS:
-1. When answering questions about the user's uploaded documents, use the "YOUR UPLOADED DOCUMENTS" context above as your PRIMARY source.
-2. For HR policies or general company knowledge, use the "COMPANY KNOWLEDGE BASE" section.
-3. You can perform ANY task on the documents: summarization, Q&A, extraction, analysis, transformation, or explanation.
-4. If context from uploaded documents is insufficient or missing, say so honestly — do NOT hallucinate document-specific facts.
-5. Clearly indicate the source of your answer:
+1. When answering questions about the user's uploaded documents, use the "YOUR UPLOADED DOCUMENTS" context as your PRIMARY source.
+2. For HR policies or general company knowledge, use the "COMPANY KNOWLEDGE BASE" section as your PRIMARY source.
+3. For questions outside those sources (general topics, current events, how-tos, coding, etc.) — answer helpfully using any external web results we included, or from your own training knowledge. NEVER refuse with "I don't have real-time news access", "I can't access the internet", "my knowledge is limited to…", or similar capability disclaimers. If information may be outdated, add a brief note like "(based on what I know — facts may have changed since)" rather than refusing.
+4. You can perform ANY task: summarization, Q&A, extraction, analysis, transformation, explanation, brainstorming, writing help.
+5. If context from uploaded documents is insufficient or missing for a document-specific question, say so honestly — do NOT hallucinate document-specific facts. This only applies to questions ABOUT uploaded documents, not general questions.
+6. Only label the source of your answer when it improves clarity:
    - 📄 for user-uploaded document answers
    - 📋 for company knowledge base answers
-   - 💭 for general knowledge (when no document context is available)
-6. Be professional, helpful, and concise.
+   - 🌐 for external web sources provided in context
+   - No badge for general knowledge / conversational replies.
+7. Be professional, helpful, and concise.
 
 ${KNOWLEDGE_BASE_VERSIONING_RULES}`);
 
@@ -984,7 +988,43 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
         res.write(`data: ${JSON.stringify({ chunk, fullResponse })}\n\n`);
       }
 
-      const assistantMessage = { role: "assistant" as const, content: fullResponse, timestamp: new Date() };
+      // Resolve the cited RAG chunks back to parent documents so the UI can render clickable source pills.
+      // De-duplicates by documentId, picks the highest-scoring chunk's metadata, and fetches the file URL.
+      let sources: { documentId: string; title: string; documentType: string; version?: number; url?: string }[] = [];
+      const chunkByDocId = new Map<string, typeof globalContext.ragChunks[number]>();
+      for (const c of globalContext.ragChunks) {
+        if (!c.documentId) continue;
+        const prev = chunkByDocId.get(c.documentId);
+        if (!prev || (prev.score ?? 0) < (c.score ?? 0)) chunkByDocId.set(c.documentId, c);
+      }
+      if (chunkByDocId.size > 0) {
+        const ids = Array.from(chunkByDocId.keys()).filter((id) => mongoose.Types.ObjectId.isValid(id));
+        if (ids.length > 0) {
+          const docs = await RagDocument.find({ _id: { $in: ids } })
+            .select("_id title documentType version cloudinaryUrl")
+            .lean();
+          const docMap = new Map(docs.map((d: any) => [String(d._id), d]));
+          sources = Array.from(chunkByDocId.keys())
+            .map((id) => {
+              const c = chunkByDocId.get(id)!;
+              const d: any = docMap.get(id);
+              return {
+                documentId: id,
+                title: d?.title || c.documentTitle || "Untitled",
+                documentType: d?.documentType || c.documentType || "other",
+                version: d?.version ?? c.version,
+                url: d?.cloudinaryUrl
+              };
+            });
+        }
+      }
+
+      const assistantMessage = {
+        role: "assistant" as const,
+        content: fullResponse,
+        timestamp: new Date(),
+        ...(sources.length > 0 ? { sources } : {})
+      };
       group.messages.push(assistantMessage);
 
       if (group.messages.length === 2) {

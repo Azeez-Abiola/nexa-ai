@@ -223,21 +223,28 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
     setVerificationLoading(true);
     try {
       const base = isAdminView ? "/api/v1/admin/auth" : "/api/v1/auth";
-      await axios.post(`${base}/verify-email`, {
+      const { data } = await axios.post(`${base}/verify-email`, {
         email: verificationEmail,
         otp: verificationOTP
       });
       setVerificationSuccess(true);
       setVerificationOTP("");
-      setTimeout(() => {
-        setShowVerification(false);
-        setVerificationSuccess(false);
-        setIsLogin(true);
-        setEmail("");
-        setPassword("");
-        setFullName("");
-        setBusinessUnit("");
-      }, 3000);
+      // Prefer the auto-login path when the backend returns a fresh token — drops the user
+      // straight into their chat interface without having to log in again. Falls back to the
+      // old "go back to login" flow for older backends that only return a message.
+      if (data?.token && (data?.user || data?.admin)) {
+        setTimeout(() => onLoginSuccess(data.token, data.user || data.admin), 800);
+      } else {
+        setTimeout(() => {
+          setShowVerification(false);
+          setVerificationSuccess(false);
+          setIsLogin(true);
+          setEmail("");
+          setPassword("");
+          setFullName("");
+          setBusinessUnit("");
+        }, 3000);
+      }
     } catch (err: any) {
       setVerificationError(err.response?.data?.error || "Invalid or expired OTP");
     } finally {

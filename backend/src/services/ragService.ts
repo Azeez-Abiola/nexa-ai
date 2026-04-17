@@ -43,7 +43,11 @@ export interface RAGResult {
   totalLatencyMs: number;
 }
 
-const SCORE_THRESHOLD = parseFloat(process.env.RAG_SCORE_THRESHOLD || "0.75");
+// Lowered from 0.75 → 0.65. On small KBs (3–10 chunks total), 0.75 was too strict — genuinely
+// relevant content with partial semantic match kept falling under the cutoff and Google took over
+// with a generic answer. 0.65 still excludes clearly-off-topic chunks but gives marginal matches
+// a chance. Tunable via env var if a larger tenant needs tighter recall/precision.
+const SCORE_THRESHOLD = parseFloat(process.env.RAG_SCORE_THRESHOLD || "0.65");
 const DEFAULT_TOP_K = parseInt(process.env.RAG_TOP_K || "5");
 
 /**
@@ -75,15 +79,18 @@ export async function retrieveRelevantChunks(query: RAGQuery): Promise<RAGResult
   // Step 2: Atlas Vector Search with pre-filter
   const retrievalStart = Date.now();
 
+  // NOTE: Atlas $vectorSearch filter only supports $gt/$gte/$lt/$lte/$eq/$ne/$in/$nin/$exists/$not.
+  // $size is NOT allowed — using it here would fail the whole pipeline (PlanExecutor error).
+  // Uploads always stamp chunks with ["ALL"] when unrestricted, so $in: ["ALL"] covers that case.
   const gradeOr = [
-    { allowedGrades: { $size: 0 } },
     { allowedGrades: { $in: ["ALL"] } },
     { allowedGrades: { $in: [query.userGrade] } }
   ];
 
+  // Same restriction for groups. Chunks without any group restriction have the field absent;
+  // chunks restricted to specific groups are only allowed when the user is a member of one.
   const groupOr: Record<string, unknown>[] = [
-    { allowedGroupIds: { $exists: false } },
-    { allowedGroupIds: { $size: 0 } }
+    { allowedGroupIds: { $exists: false } }
   ];
   if (query.userId && Types.ObjectId.isValid(query.userId)) {
     const uid = new Types.ObjectId(query.userId);

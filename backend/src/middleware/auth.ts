@@ -35,11 +35,13 @@ export const authMiddleware = (
     const decoded = jwt.verify(token, JWT_SECRET) as any;
     req.userId = decoded.userId;
     req.email = decoded.email;
-    req.businessUnit = decoded.businessUnit;
+    // Trim BU values in case an old JWT carries legacy trailing-space drift — downstream queries
+    // exact-match on these and silently return empty if the JWT value doesn't match the cleaned DB.
+    req.businessUnit = typeof decoded.businessUnit === "string" ? decoded.businessUnit.trim() : decoded.businessUnit;
     req.grade = decoded.grade;
     req.tenantId = decoded.tenantId;
     req.tenantSlug = decoded.tenantSlug;
-    req.tenantName = decoded.tenantName;
+    req.tenantName = typeof decoded.tenantName === "string" ? decoded.tenantName.trim() : decoded.tenantName;
     req.isAdmin = !!decoded.isAdmin;
     next();
   } catch (error) {
@@ -74,12 +76,13 @@ export const adminAuthMiddleware = (
     req.adminId = (decoded.adminId || decoded.userId)?.toString();
     req.email = decoded.email;
     req.fullName = decoded.fullName;
-    req.businessUnit = decoded.businessUnit;
+    // Trim BU so legacy tokens (signed before the DB was cleaned) still match exact-eq queries.
+    req.businessUnit = typeof decoded.businessUnit === "string" ? decoded.businessUnit.trim() : decoded.businessUnit;
     req.tenantId = decoded.tenantId;
     req.tenantSlug = decoded.tenantSlug;
-    req.tenantName = decoded.tenantName;
+    req.tenantName = typeof decoded.tenantName === "string" ? decoded.tenantName.trim() : decoded.tenantName;
     req.isAdmin = decoded.isAdmin;
-    req.isSuperAdmin = decoded.businessUnit === "SUPERADMIN";
+    req.isSuperAdmin = (decoded.businessUnit || "").trim() === "SUPERADMIN";
     next();
   } catch (error: any) {
     console.error("Admin token verification failed:", error.message);

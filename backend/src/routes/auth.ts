@@ -250,8 +250,35 @@ authRouter.post("/verify-email", async (req: Request<{}, {}, { email: string; ot
       console.error("Failed to send welcome email:", emailError);
     }
 
+    // Auto-login: issue a JWT and return the user profile so the frontend can skip the login screen
+    // and drop the newly-verified user straight into their chat interface.
+    const tenant = await tenantProfileForBu(user.businessUnit);
+    const payload = {
+      userId: user._id,
+      email: user.email,
+      businessUnit: user.businessUnit,
+      grade: user.grade || "Analyst",
+      tenantId: tenant.tenantId,
+      tenantSlug: tenant.tenantSlug,
+      tenantLogo: tenant.tenantLogo,
+      tenantColor: tenant.tenantColor,
+      isAdmin: user.businessUnit === "SUPERADMIN"
+    };
+    const token = jwt.sign(payload, JWT_SECRET, { expiresIn: "7d" });
+
     res.json({
-      message: "Email verified successfully! You can now login."
+      message: "Email verified successfully!",
+      token,
+      user: {
+        id: user._id,
+        email: user.email,
+        fullName: user.fullName,
+        businessUnit: user.businessUnit,
+        grade: user.grade,
+        ...tenant,
+        emailVerified: true,
+        isAdmin: payload.isAdmin
+      }
     });
   } catch (error) {
     console.error("Verify email error:", error);

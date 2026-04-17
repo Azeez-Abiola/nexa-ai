@@ -1,10 +1,20 @@
 import mongoose, { Schema, Document } from "mongoose";
 
+export interface MessageSource {
+  documentId: string;
+  title: string;
+  documentType: string;
+  version?: number;
+  url?: string;
+}
+
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   /** Cloudinary URLs for images attached to this message — preserved so follow-up turns can reference them. */
   imageUrls?: string[];
+  /** RAG documents cited by this assistant reply — rendered as clickable pills under the message. */
+  sources?: MessageSource[];
   timestamp: Date;
 }
 
@@ -24,11 +34,23 @@ export interface UserConversationsDocument extends Document {
   updatedAt: Date;
 }
 
+const MessageSourceSchema = new Schema<MessageSource>(
+  {
+    documentId: { type: String, required: true },
+    title: { type: String, required: true },
+    documentType: { type: String, required: true },
+    version: { type: Number },
+    url: { type: String }
+  },
+  { _id: false }
+);
+
 const MessageSchema = new Schema<ChatMessage>(
   {
     role: { type: String, enum: ["user", "assistant"], required: true },
     content: { type: String, required: true },
     imageUrls: { type: [String], default: undefined },
+    sources: { type: [MessageSourceSchema], default: undefined },
     timestamp: { type: Date, default: Date.now }
   },
   { _id: false }

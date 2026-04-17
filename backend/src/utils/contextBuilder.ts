@@ -95,11 +95,16 @@ export async function buildContextForQuery(
     }
   }
 
-  // Keyword search on legacy Policy collection — only used when RAG had nothing.
+  // Legacy keyword search on the old Policy collection — only used when RAG had nothing AND the
+  // match is actually strong. MongoDB $text scores are loose: a tangential keyword hit (e.g. the
+  // query mentions "2026" and some old policy title contains "2026") can silently block the
+  // Google fallback, so we require a meaningful score to treat a row as the answer source.
+  const KEYWORD_MIN_SCORE = 1.5;
   if (ragChunks.length === 0) {
     try {
       const allPolicies = await keywordSearch(query, businessUnit);
-      const { accessible, restricted } = filterPoliciesByGrade(allPolicies, userGrade);
+      const strong = allPolicies.filter((p: any) => (p.score ?? 0) >= KEYWORD_MIN_SCORE);
+      const { accessible, restricted } = filterPoliciesByGrade(strong, userGrade);
 
       if (accessible.length > 0) {
         policies = accessible;
@@ -112,8 +117,8 @@ export async function buildContextForQuery(
     }
   }
 
-  // Google only runs when the KB (RAG + keyword) produced nothing. Skipped for access-denied too,
-  // since the user's answer should come from the company source and not a public fallback.
+  // Google only runs when the KB (RAG + strong keyword) produced nothing. Skipped for access-denied
+  // too, since the user's answer should come from the company source and not a public fallback.
   const kbEmpty = ragChunks.length === 0 && policies.length === 0;
   if (useGoogle && kbEmpty && !accessDenied) {
     try {
@@ -140,6 +145,16 @@ export async function buildContextForQuery(
   }
 
   const googleFooter = googleResults.length > 0 ? formatSearchResultsForChat(googleResults) : "";
+
+  logger.info("[ContextBuilder] Context built", {
+    query: query.slice(0, 80),
+    businessUnit,
+    source,
+    ragChunks: ragChunks.length,
+    policies: policies.length,
+    googleResults: googleResults.length,
+    accessDenied
+  });
 
   return { hybridContextString, ragChunks, policies, googleResults, accessDenied, source, googleFooter };
 }
