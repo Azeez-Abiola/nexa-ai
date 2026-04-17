@@ -1,5 +1,5 @@
 import { Policy } from "../models/Policy";
-import { searchGoogle, buildHybridContext, formatSearchResultsForChat } from "../services/googleSearchService";
+import { searchGoogle, buildHybridContext, formatSearchResultsForChat, enrichResultsWithPageContent } from "../services/googleSearchService";
 import { retrieveRelevantChunks, buildRAGContext, RetrievedChunk } from "../services/ragService";
 import logger from "./logger";
 
@@ -123,9 +123,12 @@ export async function buildContextForQuery(
   if (useGoogle && kbEmpty && !accessDenied) {
     try {
       const googleOutcome = await searchGoogle(query, 3);
-      if (googleOutcome?.success) {
-        googleResults = googleOutcome.results || [];
-        if (googleResults.length > 0) source = "google_only";
+      if (googleOutcome?.success && googleOutcome.results?.length) {
+        // Fetch the actual page content behind each URL so the model gets real text,
+        // not just the 2-line Google snippet. Each fetch has a 4s timeout so one slow
+        // page doesn't hold up the whole response; failures gracefully keep the snippet.
+        googleResults = await enrichResultsWithPageContent(googleOutcome.results);
+        source = "google_only";
       }
     } catch (err) {
       logger.error("[ContextBuilder] Google search failed", { error: (err as Error).message });

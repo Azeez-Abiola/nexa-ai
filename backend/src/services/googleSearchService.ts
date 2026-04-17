@@ -125,6 +125,53 @@ async function searchWithSerpAPI(
 }
 
 /**
+ * Fetch the actual text content from a URL. Strips HTML tags and trims to maxChars.
+ * Times out after 4s so one slow page doesn't block the whole response.
+ */
+async function fetchPageText(url: string, maxChars = 3000): Promise<string> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 4000);
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; NexaAI/1.0)" }
+    });
+    clearTimeout(timeout);
+    if (!res.ok) return "";
+    const html = await res.text();
+    // Strip scripts, styles, HTML tags, then collapse whitespace
+    const text = html
+      .replace(/<script[\s\S]*?<\/script>/gi, "")
+      .replace(/<style[\s\S]*?<\/style>/gi, "")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&[a-z]+;/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    return text.slice(0, maxChars);
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Enrich search results by fetching the actual page content behind each URL.
+ * Runs fetches in parallel with individual 4s timeouts. Results that fail or return
+ * empty are left with their original snippet — the model still gets something.
+ */
+export async function enrichResultsWithPageContent(results: SearchResult[]): Promise<SearchResult[]> {
+  const enriched = await Promise.all(
+    results.map(async (r) => {
+      const pageText = await fetchPageText(r.link, 3000);
+      if (pageText && pageText.length > r.snippet.length * 2) {
+        return { ...r, snippet: pageText };
+      }
+      return r;
+    })
+  );
+  return enriched;
+}
+
+/**
  * Format search results for display in chat response
  * Clearly labels results as external sources
  */
