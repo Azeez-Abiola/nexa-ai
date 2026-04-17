@@ -7,6 +7,7 @@ import bcryptjs from "bcryptjs";
 import { BusinessUnit } from "../models/BusinessUnit";
 import { AdminUser } from "../models/AdminUser";
 import { User } from "../models/User";
+import { RagDocument } from "../models/RagDocument";
 import { AdminInvite } from "../models/AdminInvite";
 import { superAdminMiddleware, AuthenticatedRequest } from "../middleware/auth";
 import { sendTenantCredentialsEmail } from "../services/emailService";
@@ -42,8 +43,6 @@ function hashToken(token: string): string {
 provisioningRouter.get("/tenants", superAdminMiddleware, async (_req: AuthenticatedRequest, res: Response) => {
   try {
     const tenants = await BusinessUnit.find().sort({ createdAt: -1 }).lean();
-    const { User } = await import("../models/User");
-    const { RagDocument } = await import("../models/RagDocument");
     const enriched = await Promise.all(
       tenants.map(async (t: any) => {
         const [userCount, ragCount] = await Promise.all([
