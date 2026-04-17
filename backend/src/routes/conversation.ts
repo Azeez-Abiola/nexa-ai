@@ -258,8 +258,12 @@ conversationRouter.get("/", authMiddleware, async (req: AuthenticatedRequest, re
     ]);
 
     if (!result) {
-      // First login — create the document
-      await Conversation.create({ userId: req.userId, businessUnit: req.businessUnit, conversationGroups: [] });
+      // First login — atomically create the document (upsert avoids race-condition duplicate key errors)
+      await Conversation.updateOne(
+        { userId: req.userId },
+        { $setOnInsert: { businessUnit: req.businessUnit, conversationGroups: [] } },
+        { upsert: true }
+      );
       return res.json({ conversations: [], total: 0, hasMore: false });
     }
 
@@ -293,13 +297,16 @@ conversationRouter.post("/", authMiddleware, async (req: AuthenticatedRequest, r
     }
 
     const newGroup = {
-      _id: new (require("mongoose").Types.ObjectId)(),
+      _id: new Types.ObjectId(),
       title: "New Chat",
       messages: []
     };
 
-    userConversations.conversationGroups.push(newGroup as any);
-    await userConversations.save();
+    await Conversation.updateOne(
+      { userId: req.userId },
+      { $push: { conversationGroups: newGroup } },
+      { upsert: true }
+    );
 
     const conversation = {
       _id: newGroup._id,
@@ -969,7 +976,10 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
       group.messages.push(deniedMessage);
 
       const isFirstDenied = group.messages.length === 2;
-      await userConversations.save();
+      await Conversation.updateOne(
+        { userId, "conversationGroups._id": new Types.ObjectId(chatSessionId) },
+        { $set: { "conversationGroups.$.messages": group.messages } }
+      );
 
       const conversation = {
         _id: group._id, userId, title: group.title, messages: group.messages,
@@ -1081,7 +1091,7 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
 
       const assistantMessage = {
         role: "assistant" as const,
-        content: fullResponse,
+        content: fullResponse || "I wasn't able to generate a response. Please try again.",
         timestamp: new Date(),
         ...(sources.length > 0 ? { sources } : {})
       };
@@ -1089,7 +1099,10 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
 
       const isFirstMessage = group.messages.length === 2;
 
-      await userConversations.save();
+      await Conversation.updateOne(
+        { userId, "conversationGroups._id": new Types.ObjectId(chatSessionId) },
+        { $set: { "conversationGroups.$.messages": group.messages } }
+      );
 
       const conversation = {
         _id: group._id,

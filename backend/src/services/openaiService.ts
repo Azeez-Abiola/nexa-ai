@@ -6,7 +6,7 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-const MODEL = "gpt-5";
+const MODEL = process.env.OPEN_AI_MODEL || "gpt-5";
 const tokenEncoder = encodingForModel("gpt-4o"); // gpt-5 uses the same o200k_base tokenizer
 
 const SOFT_CONTEXT_CEILING = 200_000;
@@ -171,14 +171,14 @@ export async function generateAIResponse(
       trimmedHistory.reduce((sum, m) => sum + (m.imageUrls?.length ?? 0), 0) * IMAGE_TOKEN_ESTIMATE;
 
     const controller = new AbortController();
-    const timeoutId  = setTimeout(() => controller.abort(), 30_000);
+    const timeoutId  = setTimeout(() => controller.abort(), 90_000);
 
     try {
       const response = await openai.responses.create({
         model: MODEL,
         instructions,
         input,
-        temperature: 0.4,
+
         max_output_tokens: computeMaxTokens(usedTokens),
       }, { signal: controller.signal });
 
@@ -223,23 +223,19 @@ export async function* streamAIResponse(
       imageCount * IMAGE_TOKEN_ESTIMATE;
 
     const controller = new AbortController();
-    const timeoutId  = setTimeout(() => controller.abort(), 30_000);
+    const timeoutId  = setTimeout(() => controller.abort(), 90_000);
 
     try {
       const stream = openai.responses.stream({
         model: MODEL,
         instructions,
         input,
-        temperature: 0.4,
         max_output_tokens: computeMaxTokens(usedTokens),
       }, { signal: controller.signal });
 
       for await (const event of stream) {
-        const e = event as { type: string; delta?: string };
-        if (e.type === "response.output_text.delta") {
-          yield e.delta ?? "";
-        } else if (e.type === "response.completed") {
-          break;
+        if (event.type === "response.output_text.delta") {
+          yield event.delta;
         }
       }
     } finally {
@@ -249,7 +245,8 @@ export async function* streamAIResponse(
     if (error instanceof Error && error.message.includes("aborted")) {
       throw new Error("Request timeout - please try again");
     }
-    throw new Error("Failed to generate AI response");
+    console.error("[streamAIResponse] OpenAI error:", error);
+    throw new Error(`Failed to generate AI response: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -270,7 +267,7 @@ export async function generateConversationTitle(userMessage: string): Promise<st
         model: MODEL,
         instructions: "Create a brief title (5-10 words, professional). Return ONLY the title text.",
         input: [{ role: "user", content: `Title for: "${userMessage.substring(0, 100)}"` }],
-        temperature: 0.4,
+
         max_output_tokens: 30,
       }, { signal: controller.signal });
 

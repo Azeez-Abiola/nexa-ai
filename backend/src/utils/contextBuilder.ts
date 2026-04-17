@@ -65,13 +65,23 @@ async function keywordSearch(query: string, businessUnit: string): Promise<any[]
   }
 }
 
+// Only fetch from Google when the query signals a need for current/recent information.
+// Everything else (math, general knowledge, greetings, company questions) is answered
+// by the model's training data or the internal KB — Google just adds 5-8s of latency.
+const NEEDS_WEB_RE = /\b(news|latest|current|today|yesterday|this week|this month|recent|now|live|update|price|stock|weather|score|result|winner|election|announce|release|launch|2024|2025|2026)\b|\b(who is|who are|who was|what happened|where is|when did|tell me about)\b/i;
+
+function needsWebSearch(query: string): boolean {
+  return NEEDS_WEB_RE.test(query);
+}
+
 export async function buildContextForQuery(
   query: string,
   businessUnit: string,
   userGrade: string,
   options: ContextBuildOptions = {}
 ): Promise<ContextBuildResult> {
-  const { useRAG = true, useGoogle = true, topK, userId } = options;
+  const { useRAG = true, topK, userId } = options;
+  const useGoogle = options.useGoogle !== false && needsWebSearch(query);
 
   let ragChunks: RetrievedChunk[] = [];
   let policies: any[] = [];
