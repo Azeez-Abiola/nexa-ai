@@ -236,8 +236,11 @@ conversationRouter.get("/", authMiddleware, async (req: AuthenticatedRequest, re
     const limit = Math.min(parseInt((req.query.limit as string) || "20"), 50);
     const offset = Math.max(parseInt((req.query.offset as string) || "0"), 0);
 
+    // aggregate() does not apply Mongoose schema type casting — pass an ObjectId explicitly,
+    // otherwise $match against a stored ObjectId field never matches the string from the JWT.
+    const userIdObj = new Types.ObjectId(req.userId);
     const [result] = await Conversation.aggregate([
-      { $match: { userId: req.userId } },
+      { $match: { userId: userIdObj } },
       {
         $project: {
           total: { $size: { $ifNull: ["$conversationGroups", []] } },

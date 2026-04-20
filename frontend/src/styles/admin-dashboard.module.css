@@ -4,7 +4,7 @@
   background: linear-gradient(135deg, #000000 0%, #1a1a1a 50%, #ffffff 100%);
   display: flex;
   flex-direction: column;
-  font-family: Georgia, serif;
+  font-family: 'Sen', 'Inter', system-ui, sans-serif;
   color: #333;
   overflow: hidden;
 }
@@ -52,7 +52,7 @@
   font-weight: 700;
   color: #ffffff;
   letter-spacing: -0.5px;
-  font-family: Georgia, serif;
+  font-family: 'Sen', 'Inter', system-ui, sans-serif;
 }
 
 .headerInfo p {
@@ -177,7 +177,7 @@
   font-weight: 700;
   color: #ffffff;
   text-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-  font-family: Georgia, serif;
+  font-family: 'Sen', 'Inter', system-ui, sans-serif;
 }
 
 .contentSubtitle {
@@ -220,7 +220,7 @@
   font-size: 1.25rem;
   font-weight: 700;
   color: #ffffff;
-  font-family: Georgia, serif;
+  font-family: 'Sen', 'Inter', system-ui, sans-serif;
 }
 
 .form {
@@ -474,7 +474,7 @@
   font-weight: 700;
   color: #ffffff;
   flex-shrink: 0;
-  font-family: Georgia, serif;
+  font-family: 'Sen', 'Inter', system-ui, sans-serif;
 }
 
 .policiesList {
@@ -529,7 +529,7 @@
   font-weight: 700;
   color: #ffffff;
   word-break: break-word;
-  font-family: Georgia, serif;
+  font-family: 'Sen', 'Inter', system-ui, sans-serif;
 }
 
 .policyCategory {

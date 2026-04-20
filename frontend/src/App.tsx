@@ -1378,16 +1378,15 @@ export const App: React.FC = () => {
               {chatHeaderTenantLogoUrl ? (
                 <img
                   src={chatHeaderTenantLogoUrl}
-                  alt=""
+                  alt={user?.tenantLabel || user?.businessUnit || "Nexa"}
                   className="header-tenant-logo-v2"
-                  width={32}
-                  height={32}
+                  width={36}
+                  height={36}
                   onError={(e) => {
                     (e.target as HTMLImageElement).style.display = "none";
                   }}
                 />
               ) : null}
-              <span className="brand-name-v2">{user?.tenantLabel || user?.businessUnit || "Nexa"}</span>
             </div>
             <div className="header-actions-v2">
               <DropdownMenu modal={false}>
@@ -2306,8 +2305,8 @@ export const App: React.FC = () => {
         }
 
         .header-tenant-logo-v2 {
-          height: 30px;
-          width: 30px;
+          height: 40px;
+          width: 40px;
           object-fit: contain;
           flex-shrink: 0;
           border-radius: 8px;

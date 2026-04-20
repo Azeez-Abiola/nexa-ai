@@ -154,7 +154,7 @@ const SuperAdminMain: React.FC<SuperAdminMainProps> = ({ theme, toggleTheme }) =
 
   return (
     <div className={cn(
-      "flex h-[100dvh] min-h-0 w-full max-w-full overflow-x-hidden font-['Inter', 'Sen', sans-serif] transition-colors duration-300",
+      "flex h-[100dvh] min-h-0 w-full max-w-full overflow-x-hidden font-['Sen', 'Inter', system-ui, sans-serif] transition-colors duration-300",
       theme === 'dark' ? 'admin-dark' : 'bg-white'
     )}>
       {/* Sidebar - Desktop */}
@@ -330,10 +330,22 @@ const SuperAdminMain: React.FC<SuperAdminMainProps> = ({ theme, toggleTheme }) =
             </div>
 
             <div className="pointer-events-none absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center gap-2.5">
-              <img src="/1879-22.png" alt="" className="h-8 w-8 object-contain" width={32} height={32} />
-              <span className={cn("whitespace-nowrap font-['Sen'] text-xl font-black tracking-tight", theme === 'dark' ? "text-white" : "text-slate-900")}>
-                Nexa.Ai
-              </span>
+              {isSuperAdminContext ? (
+                <>
+                  <img src="/1879-22.png" alt="" className="h-8 w-8 object-contain" width={32} height={32} />
+                  <span className={cn("whitespace-nowrap font-['Sen'] text-xl font-black tracking-tight", theme === 'dark' ? "text-white" : "text-slate-900")}>
+                    Nexa.Ai
+                  </span>
+                </>
+              ) : user?.tenantLogo ? (
+                <img
+                  src={user.tenantLogo.startsWith('http') ? user.tenantLogo : `${import.meta.env.VITE_API_URL || ''}/logos/${user.tenantLogo.replace(/^\/logos\//, '')}`}
+                  alt={user?.tenantLabel || user?.businessUnit || ''}
+                  className="h-10 w-10 object-contain"
+                  width={40}
+                  height={40}
+                />
+              ) : null}
             </div>
 
             <div className="flex min-w-0 flex-1 items-center justify-end gap-4">

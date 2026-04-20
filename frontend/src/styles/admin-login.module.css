@@ -86,7 +86,7 @@
   align-items: center;
   justify-content: center;
   padding: 2rem;
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: 'Sen', 'Inter', system-ui, sans-serif;
   position: relative;
   overflow: visible;
 }
@@ -335,7 +335,7 @@ select.input option:checked {
   box-shadow: 0 4px 15px rgba(237, 0, 0, 0.3);
   margin-top: 0.75rem;
   letter-spacing: 0.3px;
-  font-family: Georgia, inherit;
+  font-family: 'Sen', 'Inter', system-ui, sans-serif;
 }
 
 .button:hover:not(:disabled) {
@@ -362,7 +362,7 @@ select.input option:checked {
 .toggleText {
   font-size: 0.95rem;
   color: #a8b0c0;
-  font-family: Georgia, inherit;
+  font-family: 'Sen', 'Inter', system-ui, sans-serif;
 }
 
 .toggleButton {
@@ -375,7 +375,7 @@ select.input option:checked {
   transition: all 0.3s ease;
   margin-left: 0.5rem;
   font-size: 0.95rem;
-  font-family: Georgia, inherit;
+  font-family: 'Sen', 'Inter', system-ui, sans-serif;
 }
 
 .toggleButton:hover {
@@ -393,7 +393,7 @@ select.input option:checked {
   font-size: 0.95rem;
   animation: shake 0.3s ease-in-out;
   text-align: center;
-  font-family: Georgia, inherit;
+  font-family: 'Sen', 'Inter', system-ui, sans-serif;
 }
 
 .successMessage {
@@ -439,7 +439,7 @@ select.input option:checked {
   text-decoration: none;
   transition: all 0.3s ease;
   font-size: 0.95rem;
-  font-family: Georgia, inherit;
+  font-family: 'Sen', 'Inter', system-ui, sans-serif;
   padding: 0;
   margin: 0;
 }
