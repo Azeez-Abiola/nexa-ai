@@ -9,7 +9,6 @@ import logger from "../utils/logger";
 export interface RAGQuery {
   query: string;
   businessUnit: string;
-  userGrade: string;
   /** When set, knowledge-group restrictions on chunks are enforced */
   userId?: string;
   topK?: number;
@@ -63,7 +62,7 @@ function ragCacheKey(q: RAGQuery): string {
   return (
     REDIS_RAG_PREFIX +
     createHash("sha256")
-      .update(`${q.businessUnit}|${q.userGrade}|${q.userId ?? ""}|${q.topK ?? DEFAULT_TOP_K}|${q.query}`)
+      .update(`${q.businessUnit}|${q.userId ?? ""}|${q.topK ?? DEFAULT_TOP_K}|${q.query}`)
       .digest("hex")
   );
 }
@@ -164,16 +163,8 @@ export async function retrieveRelevantChunks(query: RAGQuery): Promise<RAGResult
   // Step 2b: Atlas Vector Search with pre-filter
   const retrievalStart = Date.now();
 
-  // NOTE: Atlas $vectorSearch filter only supports $gt/$gte/$lt/$lte/$eq/$ne/$in/$nin/$exists/$not.
-  // $size is NOT allowed — using it here would fail the whole pipeline (PlanExecutor error).
-  // Uploads always stamp chunks with ["ALL"] when unrestricted, so $in: ["ALL"] covers that case.
-  const gradeOr = [
-    { allowedGrades: { $in: ["ALL"] } },
-    { allowedGrades: { $in: [query.userGrade] } }
-  ];
-
-  // Same restriction for groups. Chunks without any group restriction have the field absent;
-  // chunks restricted to specific groups are only allowed when the user is a member of one.
+  // Group restriction: chunks without a group restriction are open to all BU users;
+  // chunks restricted to specific groups are only allowed when the user is a member.
   const groupOr: Record<string, unknown>[] = [
     { allowedGroupIds: { $exists: false } }
   ];
@@ -192,7 +183,7 @@ export async function retrieveRelevantChunks(query: RAGQuery): Promise<RAGResult
         limit: Math.min(Math.max(topK * 4, 15), 40), // over-fetch; then threshold + version filter
         filter: {
           businessUnit: { $eq: query.businessUnit },
-          $and: [{ $or: gradeOr }, { $or: groupOr }]
+          $or: groupOr
         }
       }
     },
@@ -235,7 +226,6 @@ export async function retrieveRelevantChunks(query: RAGQuery): Promise<RAGResult
   logger.info("[RAG] Retrieval complete", {
     query: query.query.substring(0, 80),
     businessUnit: query.businessUnit,
-    userGrade: query.userGrade,
     userId: query.userId || null,
     chunksReturned: chunks.length,
     topScore: chunks[0]?.score ?? 0,

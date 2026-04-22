@@ -77,7 +77,14 @@ async function searchWithSerpAPI(
     url.searchParams.append("api_key", apiKey);
     url.searchParams.append("num", limit.toString());
 
-    const response = await fetch(url.toString());
+    const serpController = new AbortController();
+    const serpTimeout = setTimeout(() => serpController.abort(), 5_000);
+    let response: Response;
+    try {
+      response = await fetch(url.toString(), { signal: serpController.signal });
+    } finally {
+      clearTimeout(serpTimeout);
+    }
 
     if (!response.ok) {
       return {
