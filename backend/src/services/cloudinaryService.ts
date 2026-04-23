@@ -14,14 +14,17 @@ const BASE_FOLDER = process.env.CLOUDINARY_FOLDER || "nexa-documents";
 
 export function buildPublicId(businessUnit: string, filename: string): string {
   const uuid = randomUUID();
+  const ext = path.extname(filename);
   const sanitized = path
-    .basename(filename, path.extname(filename))
+    .basename(filename, ext)
     .replace(/[^a-zA-Z0-9_-]/g, "_")
     .substring(0, 60);
   // Cloudinary rejects public_ids containing whitespace (leading, trailing, or embedded).
   // Sanitize BU the same way as filename so legacy "1879 Tech hub " → "1879_Tech_hub".
   const sanitizedBu = businessUnit.trim().replace(/[^a-zA-Z0-9_-]/g, "_") || "default";
-  return `${BASE_FOLDER}/${sanitizedBu}/${uuid}-${sanitized}`;
+  // Keep the extension in the public_id so Cloudinary serves the URL with the
+  // correct file extension — critical for raw files (docx, xlsx, pptx, pdf).
+  return `${BASE_FOLDER}/${sanitizedBu}/${uuid}-${sanitized}${ext}`;
 }
 
 export async function uploadDocument(
@@ -38,7 +41,8 @@ export async function uploadDocument(
         public_id: publicId,
         resource_type: "raw",
         folder: undefined, // folder is embedded in publicId
-        overwrite: false
+        overwrite: false,
+        timeout: 120000
       },
       (error, result) => {
         if (error || !result) {

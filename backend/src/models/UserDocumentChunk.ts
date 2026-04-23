@@ -50,7 +50,6 @@ const UserDocumentChunkSchema = new Schema<UserDocumentChunkDocument>(
 
 // Composite index for efficient session-scoped queries
 UserDocumentChunkSchema.index({ userId: 1, chatSessionId: 1 });
-UserDocumentChunkSchema.index({ documentId: 1 });
 
 export const UserDocumentChunk = mongoose.model<UserDocumentChunkDocument>(
   "UserDocumentChunk",

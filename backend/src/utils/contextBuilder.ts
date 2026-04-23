@@ -95,7 +95,7 @@ export async function buildContextForQuery(
   // and the countDocuments round-trip was adding 50–150ms on the critical path for zero correctness gain.
   if (useRAG) {
     try {
-      const ragOutcome = await retrieveRelevantChunks({ query, businessUnit, userGrade, userId, topK });
+      const ragOutcome = await retrieveRelevantChunks({ query, businessUnit, userId, topK });
       if (ragOutcome?.chunks?.length) {
         ragChunks = ragOutcome.chunks;
         source = "rag";
@@ -129,19 +129,30 @@ export async function buildContextForQuery(
 
   // Google only runs when the KB (RAG + strong keyword) produced nothing. Skipped for access-denied
   // too, since the user's answer should come from the company source and not a public fallback.
+  // Hard 3s ceiling: SerpAPI has no built-in timeout and enrichment fetches real pages — together
+  // they can take 6–8s. If they don't finish in 3s, skip Google and let the model answer from
+  // training data (acceptable for general-knowledge queries; RAG answers are already fast).
+  const GOOGLE_TOTAL_TIMEOUT_MS = 3_000;
   const kbEmpty = ragChunks.length === 0 && policies.length === 0;
   if (useGoogle && kbEmpty && !accessDenied) {
     try {
-      const googleOutcome = await searchGoogle(query, 3);
-      if (googleOutcome?.success && googleOutcome.results?.length) {
-        // Fetch the actual page content behind each URL so the model gets real text,
-        // not just the 2-line Google snippet. Each fetch has a 4s timeout so one slow
-        // page doesn't hold up the whole response; failures gracefully keep the snippet.
-        googleResults = await enrichResultsWithPageContent(googleOutcome.results);
-        source = "google_only";
-      }
+      const googlePromise = (async () => {
+        const googleOutcome = await searchGoogle(query, 3);
+        if (googleOutcome?.success && googleOutcome.results?.length) {
+          googleResults = await enrichResultsWithPageContent(googleOutcome.results);
+          source = "google_only";
+        }
+      })();
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("google_timeout")), GOOGLE_TOTAL_TIMEOUT_MS)
+      );
+      await Promise.race([googlePromise, timeoutPromise]);
     } catch (err) {
-      logger.error("[ContextBuilder] Google search failed", { error: (err as Error).message });
+      if ((err as Error).message === "google_timeout") {
+        logger.warn("[ContextBuilder] Google search timed out — skipping", { query: query.slice(0, 80) });
+      } else {
+        logger.error("[ContextBuilder] Google search failed", { error: (err as Error).message });
+      }
     }
   }
 

@@ -23,10 +23,137 @@ import {
   getSessionDocumentStatus
 } from "../services/sessionRagService";
 import logger from "../utils/logger";
+import { isSimpleQuery } from "../utils/queryClassifier";
 import { extractTextFromPdf } from "../utils/pdfParser";
 import { extractTextFromDocx } from "../utils/docxParser";
 import { extractTextFromXlsx } from "../utils/xlsxParser";
 import { extractTextFromPptx } from "../utils/pptxParser";
+import { generateDocumentContent, DocumentType } from "../services/documentAIService";
+import {
+  generateDocxBuffer,
+  generateXlsxBuffer,
+  generatePptxBuffer,
+  generatePdfBuffer,
+  DocxContent,
+  XlsxContent,
+  PptxContent,
+} from "../services/documentGeneratorService";
+import { randomUUID } from "crypto";
+
+// ─── Ephemeral document cache (avoids Cloudinary for AI-generated files) ──────
+
+const DOC_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+interface CachedDoc {
+  buffer: Buffer;
+  filename: string;
+  mimeType: string;
+  expiresAt: number;
+}
+
+const docCache = new Map<string, CachedDoc>();
+
+function cacheDocument(buffer: Buffer, filename: string, mimeType: string): string {
+  const id = randomUUID();
+  docCache.set(id, { buffer, filename, mimeType, expiresAt: Date.now() + DOC_TTL_MS });
+  // Lazy cleanup: remove expired entries whenever a new one is added
+  for (const [k, v] of docCache) {
+    if (v.expiresAt < Date.now()) docCache.delete(k);
+  }
+  return id;
+}
+
+// ─── Document generation helpers ─────────────────────────────────────────────
+
+const DOC_LABELS: Record<DocumentType, string> = {
+  docx: "Word document",
+  xlsx: "Excel spreadsheet",
+  pptx: "PowerPoint presentation",
+  pdf: "PDF document",
+};
+
+function detectDocumentRequest(message: string): { type: DocumentType; label: string } | null {
+  const m = message.toLowerCase();
+
+  if (
+    /(?:create|generate|make|give|build|write|produce|prepare|draft)\s+(?:a\s+|an\s+|me\s+(?:a\s+|an\s+)?)?(?:powerpoint|presentation|slideshow|slide\s*deck|ppt(?:x)?)\b/.test(m) ||
+    /(?:powerpoint|presentation|pptx)\s+(?:on|about|for|of)/.test(m) ||
+    /\bpptx\b/.test(m)
+  ) {
+    return { type: "pptx", label: DOC_LABELS.pptx };
+  }
+
+  if (
+    /(?:create|generate|make|give|build|write|produce|prepare)\s+(?:a\s+|an\s+|me\s+(?:a\s+|an\s+)?)?(?:excel|spreadsheet|xlsx?)/.test(m) ||
+    /(?:excel|spreadsheet)\s+(?:with|for|about|on|of)/.test(m) ||
+    /in\s+excel\s+(?:form|format|file)?/.test(m) ||
+    /(?:save|export)\s+(?:as|to)\s+(?:excel|xlsx)/.test(m) ||
+    /\bxlsx?\b/.test(m)
+  ) {
+    return { type: "xlsx", label: DOC_LABELS.xlsx };
+  }
+
+  if (
+    /(?:create|generate|make|give|build|write|produce|prepare|save\s+as?)\s+(?:a\s+|an\s+|me\s+(?:a\s+|an\s+)?)?pdf/.test(m) ||
+    /\bpdf\s+(?:document|report|file|format)\b/.test(m) ||
+    /(?:document|report|file)\s+(?:in|as)\s+pdf/.test(m) ||
+    /in\s+pdf\s+(?:form|format)/.test(m)
+  ) {
+    return { type: "pdf", label: DOC_LABELS.pdf };
+  }
+
+  if (
+    /(?:create|generate|make|give|build|write|produce|prepare|draft)\s+(?:a\s+|an\s+|me\s+(?:a\s+|an\s+)?)?(?:word\s+(?:document|doc|file)|docx?)/.test(m) ||
+    /(?:word\s+document|word\s+file|\.docx)/.test(m) ||
+    /(?:save|export)\s+(?:as|to)\s+(?:word|docx)/.test(m) ||
+    /\bdocx\b/.test(m)
+  ) {
+    return { type: "docx", label: DOC_LABELS.docx };
+  }
+
+  return null;
+}
+
+const MIME_TYPES: Record<DocumentType, string> = {
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  pdf: "application/pdf",
+};
+
+interface GeneratedDocResult {
+  url: string;
+  filename: string;
+  documentType: string;
+}
+
+async function generateAndCacheDocument(
+  prompt: string,
+  docType: DocumentType
+): Promise<GeneratedDocResult> {
+  const content = await generateDocumentContent(prompt, docType);
+
+  let buffer: Buffer;
+  if (docType === "docx") {
+    buffer = await generateDocxBuffer(content as DocxContent);
+  } else if (docType === "xlsx") {
+    buffer = generateXlsxBuffer(content as XlsxContent);
+  } else if (docType === "pptx") {
+    buffer = await generatePptxBuffer(content as PptxContent);
+  } else {
+    buffer = await generatePdfBuffer(content as DocxContent);
+  }
+
+  const timestamp = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+  const filename = `nexa-${docType}-${timestamp}.${docType}`;
+  const mimeType = MIME_TYPES[docType];
+
+  const id = cacheDocument(buffer, filename, mimeType);
+  const downloadUrl = `/api/v1/conversations/download-doc/${id}`;
+
+  logger.info("[DocumentGen] Document cached", { filename, id });
+  return { url: downloadUrl, filename, documentType: docType };
+}
 
 export const conversationRouter = express.Router();
 
@@ -827,6 +954,18 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
       return res.status(400).json({ error: "Message content or file is required" });
     }
 
+    // ── Detect document generation intent early so generation runs in parallel ──
+    const docRequest = content ? detectDocumentRequest(content) : null;
+    let documentGenPromise: Promise<GeneratedDocResult | null> | null = null;
+    if (docRequest) {
+      documentGenPromise = generateAndCacheDocument(content, docRequest.type)
+        .catch((err) => {
+          const msg = err instanceof Error ? err.message : JSON.stringify(err);
+          logger.error("[DocumentGen] Generation failed", { userId, documentType: docRequest.type, error: msg });
+          return null;
+        });
+    }
+
     // ── Separate images from documents ─────────────────────────────────────────
     const imageFiles = uploadedFiles.filter(f => IMAGE_MIME_TYPES.includes(f.mimetype));
     const documentFiles = uploadedFiles.filter(f => !IMAGE_MIME_TYPES.includes(f.mimetype));
@@ -960,16 +1099,41 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
     };
     group.messages.push(userMessage);
 
-    // ── Build context (all parallel) ──────────────────────────────────────────
-    // Session RAG runs speculatively alongside global context — embedding is cached
-    // so the wasted call on sessions with no docs costs ~2ms (Redis L1 hit).
+    // ── Build context ─────────────────────────────────────────────────────────
+    // For simple/conversational queries (greetings, acks) we skip the entire RAG
+    // pipeline — no embedding generation, no vector search, no keyword search.
+    // This cuts TTFT from ~6–7 s to under 1 s for those messages.
+    // Any message with file attachments or a doc-generation request always runs
+    // the full pipeline regardless of content length.
+    const ragBypassed =
+      !docRequest &&
+      uploadedFiles.length === 0 &&
+      isSimpleQuery(content);
+
+    type SessionStatusResult = { totalDocs: number; pendingOrProcessing: string[]; ready: number; failed: string[] };
+    let sessionStatus: SessionStatusResult = { totalDocs: 0, pendingOrProcessing: [], ready: 0, failed: [] };
+    let hasSessionChunks = false;
+    let globalContext: Awaited<ReturnType<typeof buildContextForQuery>> = {
+      hybridContextString: "", ragChunks: [], policies: [], googleResults: [],
+      accessDenied: false, source: "none", googleFooter: ""
+    };
+    let speculativeSessionRAG: { chunks: { content: string; score: number; fileName: string; chunkIndex: number; documentId: string }[] } = { chunks: [] };
+
     const contextStart = Date.now();
-    const [sessionStatus, hasSessionChunks, globalContext, speculativeSessionRAG] = await Promise.all([
-      getSessionDocumentStatus(userId, chatSessionId),
-      hasReadySessionChunks(userId, chatSessionId),
-      buildContextForQuery(content, businessUnit, req.grade || "", { userId: req.userId }),
-      retrieveSessionChunks({ query: content, userId, chatSessionId })
-    ]);
+    if (ragBypassed) {
+      logger.info("[Stream/Context] RAG bypassed (simple query)", {
+        userId,
+        chatSessionId,
+        query: content.substring(0, 40),
+      });
+    } else {
+      [sessionStatus, hasSessionChunks, globalContext, speculativeSessionRAG] = await Promise.all([
+        getSessionDocumentStatus(userId, chatSessionId),
+        hasReadySessionChunks(userId, chatSessionId),
+        buildContextForQuery(content, businessUnit, req.grade || "", { userId: req.userId }),
+        retrieveSessionChunks({ query: content, userId, chatSessionId })
+      ]);
+    }
     t.contextMs = Date.now() - contextStart;
 
     if (globalContext.accessDenied && !hasSessionChunks) {
@@ -1018,7 +1182,7 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
     }
 
     const hasGlobalContext = globalContext.source !== "none" && !globalContext.accessDenied;
-    const systemPrompt = buildSystemPrompt(
+    let systemPrompt = buildSystemPrompt(
       businessUnit,
       sessionContextString,
       globalContext.hybridContextString,
@@ -1026,6 +1190,9 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
       hasGlobalContext,
       globalContext.source
     );
+    if (docRequest) {
+      systemPrompt += `\n\n📎 DOCUMENT GENERATION: The user has requested a ${docRequest.label}. Confirm you are generating it and briefly describe (1–2 sentences) what the file will contain. Do NOT mention a download link — the system will attach it automatically below your message.`;
+    }
 
     const policyContext = globalContext.policies.map((p: any) => ({
       title: p.title,
@@ -1092,11 +1259,22 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
         }
       }
 
+      // Await generated document if one was requested — it ran in parallel with AI streaming
+      let generatedDocument: { url: string; filename: string; documentType: string } | undefined;
+      if (documentGenPromise) {
+        const docResult = await documentGenPromise;
+        if (docResult) generatedDocument = docResult;
+      }
+
+      // Only attach the generated document if the AI actually produced a response.
+      // Showing a download button alongside "I wasn't able to generate a response" is confusing.
+      const attachDocument = generatedDocument && !!fullResponse;
       const assistantMessage = {
         role: "assistant" as const,
         content: fullResponse || "I wasn't able to generate a response. Please try again.",
         timestamp: new Date(),
-        ...(sources.length > 0 ? { sources } : {})
+        ...(sources.length > 0 ? { sources } : {}),
+        ...(attachDocument ? { generatedDocument } : {})
       };
       group.messages.push(assistantMessage);
 
@@ -1121,6 +1299,7 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
           done: true,
           fullResponse,
           uploadedDocuments: uploadedDocs,
+          ...(attachDocument ? { generatedDocument } : {}),
           conversation
         })}\n\n`
       );
@@ -1133,6 +1312,7 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
         businessUnit,
         hasImages: imageFiles.length > 0,
         ragSource: globalContext.source,
+        ragBypassed,
         cloudinaryMs: t.cloudinaryMs,
         dbMs: t.dbMs,
         contextMs: t.contextMs,
@@ -1155,11 +1335,56 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
       }
     } catch (error) {
       console.error("Stream error:", error);
-      res.write(`data: ${JSON.stringify({ error: "Failed to generate response", done: true })}\n\n`);
+
+      // Even if the AI stream failed, a document may have been successfully cached — send it.
+      let generatedDocOnError: GeneratedDocResult | undefined;
+      if (documentGenPromise) {
+        const docResult = await documentGenPromise.catch(() => null);
+        if (docResult) generatedDocOnError = docResult;
+      }
+
+      if (generatedDocOnError) {
+        // Save a fallback assistant message so the doc link persists in the conversation.
+        const fallbackContent = `Your ${generatedDocOnError.documentType.toUpperCase()} has been generated and is ready to download.`;
+        const assistantMsg = {
+          role: "assistant" as const,
+          content: fallbackContent,
+          timestamp: new Date(),
+          generatedDocument: generatedDocOnError };
+        group.messages.push(assistantMsg);
+        await Conversation.updateOne(
+          { userId, "conversationGroups._id": new Types.ObjectId(chatSessionId) },
+          { $set: { "conversationGroups.$.messages": group.messages } }
+        ).catch(() => {});
+        const conversation = {
+          _id: group._id, userId, title: group.title, messages: group.messages,
+          createdAt: group.createdAt, updatedAt: group.updatedAt
+        };
+        res.write(`data: ${JSON.stringify({ done: true, fullResponse: fallbackContent, generatedDocument: generatedDocOnError, conversation })}\n\n`);
+      } else {
+        res.write(`data: ${JSON.stringify({ error: "Failed to generate response", done: true })}\n\n`);
+      }
       res.end();
     }
   } catch (error) {
     console.error("Message stream error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
+});
+
+// ─── Ephemeral document download ──────────────────────────────────────────────
+// No auth required — the UUID acts as an unguessable one-time token.
+conversationRouter.get("/download-doc/:id", (req, res) => {
+  const entry = docCache.get(req.params.id);
+  if (!entry) {
+    return res.status(404).json({ error: "Document not found or expired" });
+  }
+  if (entry.expiresAt < Date.now()) {
+    docCache.delete(req.params.id);
+    return res.status(410).json({ error: "Download link has expired" });
+  }
+  res.setHeader("Content-Type", entry.mimeType);
+  res.setHeader("Content-Disposition", `attachment; filename="${entry.filename}"`);
+  res.setHeader("Content-Length", entry.buffer.length);
+  res.send(entry.buffer);
 });

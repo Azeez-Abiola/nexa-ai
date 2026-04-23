@@ -31,6 +31,7 @@ import { sendContactFormInquiry } from "./services/emailService";
 import { startWorker } from "./queue/documentWorker";
 import { startUserDocumentWorker } from "./queue/userDocumentWorker";
 import { userDocumentsRouter } from "./routes/userDocuments";
+import { documentGenerationRouter } from "./routes/documentGeneration";
 
 const app = express();
 
@@ -112,6 +113,7 @@ app.use("/api/v1/admin/audit-logs", adminAuditLogsRouter);
 app.use("/api/v1/analytics", analyticsRouter);
 app.use("/api/v1/provisioning", provisioningRouter);
 app.use("/api/v1/employee-invite", employeeInviteRouter);
+app.use("/api/v1", documentGenerationRouter);
 
 // Public endpoint for fetching business units (no auth required)
 app.get("/api/v1/public/business-units", async (_req, res) => {

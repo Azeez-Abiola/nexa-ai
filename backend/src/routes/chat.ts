@@ -36,14 +36,6 @@ chatRouter.get("/suggestions", authMiddleware, async (req: AuthenticatedRequest,
     const bu = String(req.businessUnit || req.query.businessUnit || "").trim();
     if (!bu) return res.status(400).json({ error: "businessUnit is required" });
 
-    // Build the same access filter ragService uses, so suggestions mirror what the user can actually retrieve.
-    const userGrade = req.grade || "";
-    const gradeOr: Record<string, unknown>[] = [
-      { allowedGrades: { $size: 0 } },
-      { allowedGrades: { $in: ["ALL"] } }
-    ];
-    if (userGrade) gradeOr.push({ allowedGrades: { $in: [userGrade] } });
-
     const groupOr: Record<string, unknown>[] = [
       { allowedGroupIds: { $exists: false } },
       { allowedGroupIds: { $size: 0 } }
@@ -61,7 +53,7 @@ chatRouter.get("/suggestions", authMiddleware, async (req: AuthenticatedRequest,
       businessUnit: bu,
       isLatestVersion: true,
       processingStatus: "completed",
-      $and: [{ $or: gradeOr }, { $or: groupOr }]
+      $or: groupOr
     })
       .sort({ createdAt: -1 })
       .limit(4)
