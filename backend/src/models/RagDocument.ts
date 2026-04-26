@@ -16,7 +16,6 @@ export interface RagDocumentDocument extends Document {
   businessUnit: string;
   documentType: DocumentType;
   sensitivityLevel: SensitivityLevel;
-  allowedGrades: string[];
   /** Stable id for all versions of the same logical document */
   documentSeriesId: string;
   version: number;
@@ -55,11 +54,6 @@ const RagDocumentSchema = new Schema<RagDocumentDocument>(
       type: String,
       enum: ["public", "internal", "confidential", "restricted"],
       required: true
-    },
-    allowedGrades: {
-      type: [String],
-      enum: ["ALL", "Executive", "Senior VP", "VP", "Associate", "Senior Analyst", "Analyst"],
-      default: []
     },
     documentSeriesId: { type: String, index: true, default: "" },
     version: { type: Number, default: 1 },
@@ -104,9 +98,7 @@ RagDocumentSchema.pre("validate", function (next) {
   if (d.isLatestVersion == null) {
     d.isLatestVersion = true;
   }
-  if (!d.allowedGroupIds) {
-    d.allowedGroupIds = [];
-  }
+  if (!d.allowedGroupIds) d.allowedGroupIds = [];
   next();
 });
 

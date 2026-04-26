@@ -7,7 +7,6 @@ export interface DocumentJobData {
   cloudinaryUrl: string;
   mimeType: string;
   businessUnit: string;
-  allowedGrades: string[];
   /** Serialized Mongo ObjectIds for knowledge groups (may be empty) */
   allowedGroupIds: string[];
   sensitivityLevel: string;

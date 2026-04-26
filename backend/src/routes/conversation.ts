@@ -656,7 +656,7 @@ conversationRouter.post("/:id/message", authMiddleware, async (req: Authenticate
     const [sessionStatus, hasSessionChunks, globalContext] = await Promise.all([
       getSessionDocumentStatus(userId, chatSessionId),
       hasReadySessionChunks(userId, chatSessionId),
-      buildContextForQuery(content, businessUnit, req.grade || "", { userId: req.userId })
+      buildContextForQuery(content, businessUnit, { userId: req.userId })
     ]);
 
     // Access denied by global RAG grade restriction
@@ -835,7 +835,7 @@ conversationRouter.post("/:id/message/:index/edit", authMiddleware, async (req: 
     const [sessionStatus, hasSessionChunks, globalContext] = await Promise.all([
       getSessionDocumentStatus(userId, chatSessionId),
       hasReadySessionChunks(userId, chatSessionId),
-      buildContextForQuery(content, businessUnit, req.grade || "", { userId: req.userId })
+      buildContextForQuery(content, businessUnit, { userId: req.userId })
     ]);
 
     if (globalContext.accessDenied && !hasSessionChunks) {
@@ -1130,7 +1130,7 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
       [sessionStatus, hasSessionChunks, globalContext, speculativeSessionRAG] = await Promise.all([
         getSessionDocumentStatus(userId, chatSessionId),
         hasReadySessionChunks(userId, chatSessionId),
-        buildContextForQuery(content, businessUnit, req.grade || "", { userId: req.userId }),
+        buildContextForQuery(content, businessUnit, { userId: req.userId }),
         retrieveSessionChunks({ query: content, userId, chatSessionId })
       ]);
     }

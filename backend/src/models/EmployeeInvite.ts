@@ -7,6 +7,7 @@ export interface IEmployeeInvite extends Document {
   fullName: string;
   businessUnit: string;
   tenantId: string;
+  department?: string;
   token: string;
   status: EmployeeInviteStatus;
   invitedBy: string;
@@ -27,6 +28,7 @@ const EmployeeInviteSchema = new Schema<IEmployeeInvite>(
       enum: ["pending", "accepted", "expired"],
       default: "pending"
     },
+    department: { type: String, trim: true },
     invitedBy: { type: String, required: true },
     expiresAt: { type: Date, required: true }
   },

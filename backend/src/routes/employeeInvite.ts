@@ -2,6 +2,7 @@ import express, { Request, Response } from "express";
 import bcryptjs from "bcryptjs";
 import { EmployeeInvite } from "../models/EmployeeInvite";
 import { User } from "../models/User";
+import { Department } from "../models/Department";
 import { BusinessUnit as BusinessUnitModel } from "../models/BusinessUnit";
 import { BusinessUnitEmailMapping } from "../models/BusinessUnitEmailMapping";
 import { sendWelcomeEmail } from "../services/emailService";
@@ -98,12 +99,20 @@ employeeInviteRouter.post("/accept", async (req: Request, res: Response) => {
       email: invite.email,
       fullName: invite.fullName,
       businessUnit: invite.businessUnit,
-      grade: "Analyst",
+      department: invite.department,
       password: hashedPassword,
       emailVerified: true
     });
 
     await user.save();
+
+    if (invite.department) {
+      await Department.findOneAndUpdate(
+        { name: invite.department, businessUnit: invite.businessUnit },
+        { $setOnInsert: { name: invite.department, businessUnit: invite.businessUnit, tenantId: invite.tenantId || "" } },
+        { upsert: true, new: false }
+      );
+    }
 
     invite.status = "accepted";
     await invite.save();

@@ -2,28 +2,11 @@ import mongoose, { Schema, Document } from "mongoose";
 
 export type BusinessUnit = string;
 
-export type EmployeeGrade =
-  | "Executive"
-  | "Senior VP"
-  | "VP"
-  | "Associate"
-  | "Senior Analyst"
-  | "Analyst";
-
-export const EMPLOYEE_GRADES: EmployeeGrade[] = [
-  "Executive",
-  "Senior VP",
-  "VP",
-  "Associate",
-  "Senior Analyst",
-  "Analyst"
-];
-
 export interface UserDocument extends Document {
   email: string;
   fullName: string;
   businessUnit: BusinessUnit;
-  grade: EmployeeGrade;
+  department?: string;
   password: string;
   emailVerified: boolean;
   emailVerificationOTP?: string;
@@ -38,17 +21,8 @@ const UserSchema = new Schema<UserDocument>(
   {
     email: { type: String, required: true, unique: true, lowercase: true },
     fullName: { type: String, required: true },
-    businessUnit: {
-      type: String,
-      required: true,
-      index: true,
-      trim: true
-    },
-    grade: {
-      type: String,
-      enum: ["Executive", "Senior VP", "VP", "Associate", "Senior Analyst", "Analyst"],
-      required: true
-    },
+    businessUnit: { type: String, required: true, index: true, trim: true },
+    department: { type: String, trim: true },
     password: { type: String, required: true },
     emailVerified: { type: Boolean, default: false },
     emailVerificationOTP: { type: String, default: null },
