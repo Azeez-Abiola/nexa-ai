@@ -5,7 +5,7 @@ export interface AuthenticatedRequest extends Request {
   userId?: string;
   email?: string;
   businessUnit?: string;
-  grade?: string;
+  department?: string;
   tenantId?: string;
   tenantSlug?: string;
   /** Canonical BusinessUnit.name from JWT (BU admins). */
@@ -38,7 +38,7 @@ export const authMiddleware = (
     // Trim BU values in case an old JWT carries legacy trailing-space drift — downstream queries
     // exact-match on these and silently return empty if the JWT value doesn't match the cleaned DB.
     req.businessUnit = typeof decoded.businessUnit === "string" ? decoded.businessUnit.trim() : decoded.businessUnit;
-    req.grade = decoded.grade;
+    req.department = decoded.department;
     req.tenantId = decoded.tenantId;
     req.tenantSlug = decoded.tenantSlug;
     req.tenantName = typeof decoded.tenantName === "string" ? decoded.tenantName.trim() : decoded.tenantName;

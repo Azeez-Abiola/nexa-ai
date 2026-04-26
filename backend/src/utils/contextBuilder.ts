@@ -21,22 +21,6 @@ export interface ContextBuildOptions {
   userId?: string;
 }
 
-// Filter policies by grade — keeps existing semantics
-function filterPoliciesByGrade(policies: any[], userGrade?: string): { accessible: any[]; restricted: any[] } {
-  const accessible: any[] = [];
-  const restricted: any[] = [];
-  for (const policy of policies) {
-    const grades: string[] = policy.allowedGrades ?? [];
-    if (grades.length === 0 || grades.includes("ALL") || !userGrade) {
-      accessible.push(policy);
-    } else if (grades.includes(userGrade)) {
-      accessible.push(policy);
-    } else {
-      restricted.push(policy);
-    }
-  }
-  return { accessible, restricted };
-}
 
 async function keywordSearch(query: string, businessUnit: string): Promise<any[]> {
   try {
@@ -77,7 +61,6 @@ function needsWebSearch(query: string): boolean {
 export async function buildContextForQuery(
   query: string,
   businessUnit: string,
-  userGrade: string,
   options: ContextBuildOptions = {}
 ): Promise<ContextBuildResult> {
   const { useRAG = true, topK, userId } = options;
@@ -114,13 +97,10 @@ export async function buildContextForQuery(
     try {
       const allPolicies = await keywordSearch(query, businessUnit);
       const strong = allPolicies.filter((p: any) => (p.score ?? 0) >= KEYWORD_MIN_SCORE);
-      const { accessible, restricted } = filterPoliciesByGrade(strong, userGrade);
 
-      if (accessible.length > 0) {
-        policies = accessible;
+      if (strong.length > 0) {
+        policies = strong;
         source = "keyword";
-      } else if (restricted.length > 0) {
-        accessDenied = true;
       }
     } catch (err) {
       logger.error("[ContextBuilder] Keyword search failed", { error: (err as Error).message });

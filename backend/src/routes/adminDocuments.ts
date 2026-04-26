@@ -4,14 +4,12 @@ import crypto from "crypto";
 import { Types } from "mongoose";
 import { RagDocument } from "../models/RagDocument";
 import { DocumentChunk } from "../models/DocumentChunk";
-import { User } from "../models/User";
 import { KnowledgeGroup } from "../models/KnowledgeGroup";
 import { adminAuthMiddleware, AuthenticatedRequest } from "../middleware/auth";
 import { uploadDocument, deleteDocument } from "../services/cloudinaryService";
 import { cleanupDocumentChunks } from "../services/documentProcessingService";
 import { documentQueue } from "../queue/documentQueue";
 import { logDocumentUpload } from "../services/auditService";
-import { sendDocumentAddedNotification } from "../services/emailService";
 import logger from "../utils/logger";
 
 export const adminDocumentsRouter = express.Router();
@@ -130,7 +128,7 @@ adminDocumentsRouter.get("/:id", async (req: AuthenticatedRequest, res) => {
 // ─── Upload new document ───────────────────────────────────────────────────────
 adminDocumentsRouter.post("/", upload.single("file"), async (req: AuthenticatedRequest, res) => {
   try {
-    const { title, documentType, sensitivityLevel, allowedGrades, content } = req.body;
+    const { title, documentType, sensitivityLevel, content } = req.body;
     const file = req.file;
     const { businessUnit: tokenBU, adminId, email: adminEmail, fullName: adminName, isSuperAdmin } = req;
 
@@ -151,18 +149,6 @@ adminDocumentsRouter.post("/", upload.single("file"), async (req: AuthenticatedR
     if (isSuperAdmin && !req.body.businessUnit) {
       return res.status(400).json({ error: "SUPERADMIN must specify a businessUnit" });
     }
-
-    const ALL_GRADES = ["Executive", "Senior VP", "VP", "Associate", "Senior Analyst", "Analyst"];
-    const rawGrades: string[] = Array.isArray(allowedGrades)
-      ? allowedGrades
-      : typeof allowedGrades === "string" && allowedGrades.trim()
-      ? allowedGrades.split(",").map((g: string) => g.trim()).filter(Boolean)
-      : [];
-
-    // "ALL" is stored as-is; anything else is validated against known grades
-    const parsedGrades = rawGrades.includes("ALL")
-      ? ["ALL"]
-      : rawGrades.filter((g) => ALL_GRADES.includes(g));
 
     let replaceIdRaw =
       typeof req.body.replacesDocumentId === "string" ? req.body.replacesDocumentId.trim() : "";
@@ -295,7 +281,6 @@ adminDocumentsRouter.post("/", upload.single("file"), async (req: AuthenticatedR
       businessUnit: targetBU,
       documentType: docType,
       sensitivityLevel,
-      allowedGrades: parsedGrades,
       documentSeriesId,
       version: nextVersion,
       isLatestVersion: true,
@@ -323,7 +308,6 @@ adminDocumentsRouter.post("/", upload.single("file"), async (req: AuthenticatedR
         cloudinaryUrl: secureUrl,
         mimeType,
         businessUnit: targetBU!,
-        allowedGrades: parsedGrades,
         allowedGroupIds: parsedGroupObjectIds.map((g) => g.toString()),
         sensitivityLevel,
         uploadedBy: {
@@ -344,49 +328,6 @@ adminDocumentsRouter.post("/", upload.single("file"), async (req: AuthenticatedR
       cloudinaryPublicId: publicId
     });
 
-    // Fire-and-forget: notify eligible employees that a new document is in their knowledge base.
-    // Only fires when specific grades are selected — "ALL" is an access-control flag, not a broadcast trigger.
-    // Runs after the response is sent so it never delays the upload flow.
-    setImmediate(async () => {
-      try {
-        // No specific audience selected → nothing to notify
-        if (parsedGrades.length === 0 || parsedGrades.includes("ALL")) return;
-
-        const userFilter: Record<string, any> = {
-          businessUnit: targetBU,
-          emailVerified: true,
-          grade: { $in: parsedGrades }
-        };
-
-        const recipients = await User.find(userFilter).select("email fullName").lean();
-
-        await Promise.allSettled(
-          recipients.map((user) =>
-            sendDocumentAddedNotification(
-              user.email,
-              user.fullName,
-              targetBU!,
-              title,
-              docType,
-              sensitivityLevel,
-              adminName || "Your administrator"
-            )
-          )
-        );
-
-        logger.info("[AdminDocuments] Document-added notifications dispatched", {
-          documentId: doc._id,
-          recipientCount: recipients.length,
-          businessUnit: targetBU
-        });
-      } catch (err) {
-        logger.error("[AdminDocuments] Failed to dispatch document-added notifications", {
-          error: (err as Error).message,
-          documentId: doc._id
-        });
-      }
-    });
-
     logger.info("[AdminDocuments] Document uploaded and queued", {
       documentId: doc._id,
       jobId: job.id,
@@ -400,7 +341,6 @@ adminDocumentsRouter.post("/", upload.single("file"), async (req: AuthenticatedR
         businessUnit: doc.businessUnit,
         documentType: docType,
         sensitivityLevel: doc.sensitivityLevel,
-        allowedGrades: doc.allowedGrades,
         allowedGroupIds: doc.allowedGroupIds,
         documentSeriesId: doc.documentSeriesId,
         version: doc.version,
@@ -420,7 +360,7 @@ adminDocumentsRouter.post("/", upload.single("file"), async (req: AuthenticatedR
   }
 });
 
-// ─── Edit access (grades + user groups) — no reprocess needed, chunks are cascaded ─
+// ─── Edit access (user groups) — no reprocess needed, chunks are cascaded ─────
 adminDocumentsRouter.patch("/:id/access", async (req: AuthenticatedRequest, res) => {
   try {
     const { id } = req.params;
@@ -432,17 +372,6 @@ adminDocumentsRouter.patch("/:id/access", async (req: AuthenticatedRequest, res)
     if (!isSuperAdmin && doc.businessUnit !== tokenBU) {
       return res.status(403).json({ error: "Access denied" });
     }
-
-    const ALL_GRADES = ["Executive", "Senior VP", "VP", "Associate", "Senior Analyst", "Analyst"];
-    const rawGrades = req.body.allowedGrades;
-    const gradeList: string[] = Array.isArray(rawGrades)
-      ? rawGrades.map(String)
-      : typeof rawGrades === "string"
-      ? rawGrades.split(",").map((g: string) => g.trim()).filter(Boolean)
-      : [];
-    const parsedGrades = gradeList.includes("ALL")
-      ? ["ALL"]
-      : gradeList.filter((g) => ALL_GRADES.includes(g));
 
     const rawGroupIds = req.body.allowedGroupIds;
     const groupIdStrings: string[] = Array.isArray(rawGroupIds)
@@ -467,20 +396,18 @@ adminDocumentsRouter.patch("/:id/access", async (req: AuthenticatedRequest, res)
       }
     }
 
-    doc.allowedGrades = parsedGrades as any;
     doc.allowedGroupIds = groupObjectIds as any;
     await doc.save();
 
     // Cascade access rules to the chunks — vector search pre-filter reads from chunks, not docs.
     await DocumentChunk.updateMany(
       { documentId: doc._id },
-      { $set: { allowedGrades: parsedGrades, allowedGroupIds: groupObjectIds } }
+      { $set: { allowedGroupIds: groupObjectIds } }
     );
 
     res.json({
       document: {
         _id: doc._id,
-        allowedGrades: doc.allowedGrades,
         allowedGroupIds: doc.allowedGroupIds
       }
     });
@@ -526,7 +453,6 @@ adminDocumentsRouter.post("/:id/reprocess", async (req: AuthenticatedRequest, re
         cloudinaryUrl: doc.cloudinaryUrl,
         mimeType: doc.mimeType,
         businessUnit: doc.businessUnit,
-        allowedGrades: doc.allowedGrades,
         allowedGroupIds: groupStrings,
         sensitivityLevel: doc.sensitivityLevel,
         uploadedBy: doc.uploadedBy

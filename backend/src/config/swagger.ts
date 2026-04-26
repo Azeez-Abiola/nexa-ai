@@ -40,7 +40,7 @@ const options: swaggerJsdoc.Options = {
             id: { type: "string" },
             email: { type: "string" },
             fullName: { type: "string" },
-            businessUnit: { type: "string", enum: ["GCL","LSF","CAP","UFL","CHI","UAC-Restaurants","UPDC"] },
+            businessUnit: { type: "string", description: "Business unit identifier (slug or name)" },
             grade: { type: "string", enum: ["Executive","Senior VP","VP","Associate","Senior Analyst","Analyst"] },
             emailVerified: { type: "boolean" }
           }
@@ -192,7 +192,7 @@ const options: swaggerJsdoc.Options = {
                     email: { type: "string", format: "email" },
                     password: { type: "string", minLength: 6 },
                     fullName: { type: "string" },
-                    businessUnit: { type: "string", enum: ["GCL","LSF","CAP","UFL","CHI","UAC-Restaurants","UPDC"] },
+                    businessUnit: { type: "string", description: "Business unit identifier (slug or name)" },
                     grade: { type: "string", enum: ["Executive","Senior VP","VP","Associate","Senior Analyst","Analyst"] }
                   }
                 }

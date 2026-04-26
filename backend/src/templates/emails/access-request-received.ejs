@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>We've Received Your Request — Nexa AI</title>
+</head>
+<body style="margin:0;padding:0;background:#f0f0f0;font-family:Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f0f0;padding:32px 0;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;border-radius:8px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.08);">
+
+          <!-- Header -->
+          <tr>
+            <td style="background:linear-gradient(135deg,#ed0000 0%,#a00000 100%);padding:40px 32px;text-align:left;">
+              <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td width="60" style="vertical-align:middle;">
+                    <img src="http://localhost:4000/1879-22.png" alt="1879" width="45" style="display:block;border-radius:8px;filter:brightness(0) invert(1);" />
+                  </td>
+                  <td style="vertical-align:middle;padding-left:12px;">
+                    <h1 style="color:#ffffff;margin:0;font-size:22px;font-weight:700;">Request Received</h1>
+                    <p style="color:rgba(255,255,255,0.85);margin:4px 0 0;font-size:13px;">Nexa AI — Powered by 1879 Tech Hub</p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="background:#ffffff;padding:40px 32px;">
+              <p style="color:#333;font-size:16px;margin:0 0 16px;">Hi <strong><%= companyName %></strong>,</p>
+              <p style="color:#555;font-size:15px;line-height:1.7;margin:0 0 20px;">
+                Thank you for your interest in Nexa AI. We've received your access request and our team will review it shortly.
+              </p>
+              <p style="color:#555;font-size:15px;line-height:1.7;margin:0 0 28px;">
+                You'll hear from us at <strong><%= workEmail %></strong> once your account has been provisioned or if we need any additional information.
+              </p>
+
+              <!-- Info Box -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 28px;">
+                <tr>
+                  <td style="background:#fff5f5;border-left:4px solid #ed0000;border-radius:0 6px 6px 0;padding:16px 20px;">
+                    <p style="color:#374151;font-size:14px;margin:0;line-height:1.6;">
+                      <strong>What happens next?</strong><br/>
+                      Our admin team will review your request and provision a dedicated workspace for your organisation. This typically takes 1–2 business days.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="color:#999;font-size:13px;margin:0;">
+                If you have any urgent questions, please reach out to us directly.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background:#f8f9fa;padding:24px 20px;text-align:center;border-top:1px solid #eee;">
+              <p style="color:#94a3b8;font-size:11px;margin:0;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;">&copy; <%= new Date().getFullYear() %> Nexa AI. All rights reserved.</p>
+              <p style="color:#cbd5e1;font-size:10px;margin:8px 0 0;font-weight:700;">POWERED BY 1879 TECHHUB</p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

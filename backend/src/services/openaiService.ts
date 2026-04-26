@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import { encodingForModel } from "js-tiktoken";
-import { getBusinessUnitConfig, formatBusinessUnit } from "../config/businessUnits";
+import { getBusinessUnitLabel } from "../config/businessUnits";
 import { isSimpleQuery } from "../utils/queryClassifier";
 import logger from "../utils/logger";
 
@@ -189,7 +189,7 @@ function buildRequestParams(
   userMessage:       string,
   policies:          PolicyContext[],
   conversationHistory: Message[],
-  businessUnit:      string,
+  buLabel:           string,
   customSystemPrompt?: string,
   imageAttachments?: ImageAttachment[]
 ): RequestParams {
@@ -212,8 +212,7 @@ function buildRequestParams(
   }
 
   // Full mode: build the complete instruction payload
-  const buConfig      = getBusinessUnitConfig(businessUnit);
-  const correctBUName = buConfig ? formatBusinessUnit(businessUnit) : businessUnit;
+  const correctBUName = buLabel || "your organization";
   const { policyContext, hasPolicies } = buildPolicyContext(policies);
   const instructions  = customSystemPrompt ?? buildSystemPrompt(correctBUName, policyContext, hasPolicies);
 
@@ -280,12 +279,13 @@ export async function generateAIResponse(
   userMessage: string,
   policies: PolicyContext[],
   conversationHistory: Message[],
-  businessUnit: string = "UFL",
+  businessUnit: string = "",
   customSystemPrompt?: string
 ): Promise<string> {
   try {
+    const buLabel = await getBusinessUnitLabel(businessUnit);
     const { instructions, input, maxOutputTokens, lightMode, estimatedTokens } = buildRequestParams(
-      userMessage, policies, conversationHistory, businessUnit, customSystemPrompt
+      userMessage, policies, conversationHistory, buLabel, customSystemPrompt
     );
 
     logger.info("[OpenAI/NonStream] Request", {
@@ -320,14 +320,15 @@ export async function* streamAIResponse(
   userMessage: string,
   policies: PolicyContext[],
   conversationHistory: Message[],
-  businessUnit: string = "UFL",
+  businessUnit: string = "",
   customSystemPrompt?: string,
   imageAttachments?: ImageAttachment[]
 ): AsyncGenerator<string, void, unknown> {
+  const buLabel = await getBusinessUnitLabel(businessUnit);
   const {
     instructions, input, maxOutputTokens, lightMode, estimatedTokens, imageCount,
   } = buildRequestParams(
-    userMessage, policies, conversationHistory, businessUnit, customSystemPrompt, imageAttachments
+    userMessage, policies, conversationHistory, buLabel, customSystemPrompt, imageAttachments
   );
 
   // Log request payload summary before sending (no PII — sizes only).

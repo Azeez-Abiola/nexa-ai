@@ -1,11 +1,6 @@
 import express from "express";
 import { authMiddleware, AuthenticatedRequest } from "../middleware/auth";
-import {
-  BUSINESS_UNITS,
-  getBusinessUnitConfig,
-  formatBusinessUnit,
-  getUACNInfo
-} from "../config/businessUnits";
+import { getBusinessUnitLabel, getAllBusinessUnits } from "../config/businessUnits";
 import {
   searchGoogle,
   formatSearchResultsForChat
@@ -125,10 +120,8 @@ const isGreeting = (message: string): boolean => {
 
 
 // Greeting responses
-const getGreetingResponse = (businessUnit: string): string => {
-  const buConfig = getBusinessUnitConfig(businessUnit);
-  const buName = buConfig ? formatBusinessUnit(businessUnit) : businessUnit;
-  
+const getGreetingResponse = async (businessUnit: string): Promise<string> => {
+  const buName = await getBusinessUnitLabel(businessUnit);
   const greetings = [
     `👋 Hello! Welcome to Nexa AI. I'm here to help with ${buName} policies and information. What can I assist you with today?`,
     `Hey there! 👋 I'm Nexa AI, your ${buName} policy assistant. Feel free to ask me about any company policies or guidelines.`,
@@ -184,16 +177,15 @@ chatRouter.post("/", authMiddleware, buRateLimiter, async (req: AuthenticatedReq
     // Check if it's a greeting
     if (isGreeting(userMessage)) {
       return res.json({
-        reply: getGreetingResponse(businessUnit)
+        reply: await getGreetingResponse(businessUnit)
       });
     }
 
-    const buConfig = getBusinessUnitConfig(businessUnit);
-    const buName = buConfig ? formatBusinessUnit(businessUnit) : businessUnit;
-    const buAbbr = buConfig?.abbr || businessUnit;
+    const buName = await getBusinessUnitLabel(businessUnit);
+    const buAbbr = businessUnit;
 
     // Build context: RAG first, keyword fallback, Google in parallel
-    const context = await buildContextForQuery(userMessage, businessUnit, req.grade || "", {
+    const context = await buildContextForQuery(userMessage, businessUnit, {
       userId: req.userId
     });
 
@@ -288,10 +280,8 @@ chatRouter.post("/public", async (req, res) => {
     
     console.log(`[Chat/Public] Google search complete:`, googleResults.success ? `✓ ${googleResults.results?.length || 0} results` : `✗ Error: ${googleResults.error}`);
 
-    // Build business units list dynamically from config
-    const businessUnitsList = Object.values(BUSINESS_UNITS)
-      .map(bu => `- ${bu.label} - ${bu.description}`)
-      .join("\n");
+    const allBUs = await getAllBusinessUnits();
+    const businessUnitsList = allBUs.map(bu => `- ${bu.label}`).join("\n");
 
     // System prompt for public chatbot with Google context
     let systemPrompt = `You are a friendly and helpful assistant for UACN (United African Capital Limited).
@@ -388,11 +378,11 @@ chatRouter.post("/public/stream", async (req, res) => {
 
     // Stream response from OpenAI
     try {
-      const stream = await streamAIResponse(
+      const stream = streamAIResponse(
         userMessage,
         [], // no internal policies for unauthenticated public stream
         messages.filter(m => m.role !== "system"),
-        "UACN",
+        "",
         systemPrompt
       );
 

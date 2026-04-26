@@ -7,7 +7,7 @@ import multer from "multer";
 import path from "path";
 import fs from "fs";
 import { AdminUser, type BusinessUnit } from "../models/AdminUser";
-import { User, EMPLOYEE_GRADES, type EmployeeGrade } from "../models/User";
+import { User } from "../models/User";
 import { BusinessUnit as BusinessUnitModel } from "../models/BusinessUnit";
 import { BusinessUnitEmailMapping } from "../models/BusinessUnitEmailMapping";
 import {
@@ -19,8 +19,8 @@ import {
 } from "../services/emailService";
 import { AdminInvite } from "../models/AdminInvite";
 import { EmployeeInvite } from "../models/EmployeeInvite";
+import { Department } from "../models/Department";
 import { hashInviteToken } from "../utils/inviteToken";
-import { getBusinessUnitConfig } from "../config/businessUnits";
 import {
   adminAuthMiddleware,
   superAdminMiddleware,
@@ -152,8 +152,6 @@ const csvUserUpload = multer({
   }
 });
 
-const GRADE_SET = new Set<string>(EMPLOYEE_GRADES);
-
 export const adminAuthRouter = express.Router();
 
 interface AdminAuthRequest {
@@ -172,132 +170,6 @@ function generateOTP(): string {
 function generateToken(token: string): string {
   return crypto.createHash("sha256").update(token).digest("hex");
 }
-
-// Admin Register
-// Accepts multipart/form-data to support optional logo upload
-// New BU payload: { email, password, fullName, businessUnit, slug, label, contactEmail, logo? }
-adminAuthRouter.post("/register", logoUpload.single("logo"), async (req: Request, res: Response) => {
-  try {
-    const { email, password, fullName, businessUnit, slug, label, contactEmail } = req.body;
-
-    if (!email || !password) {
-      return res.status(400).json({ error: "Email and password are required" });
-    }
-
-    if (password.length < 6) {
-      return res.status(400).json({ error: "Password must be at least 6 characters long" });
-    }
-
-    const existingAdmin = await AdminUser.findOne({ email: email.toLowerCase() });
-    if (existingAdmin) {
-      return res.status(409).json({ error: "Admin already exists" });
-    }
-
-    const hashedPassword = await bcryptjs.hash(password, 10);
-    const adminFullName = fullName || "Superadmin";
-
-    // Determine admin BU
-    let adminBU: BusinessUnit;
-    if (businessUnit && businessUnit !== "SUPERADMIN") {
-      const buConfig = getBusinessUnitConfig(businessUnit);
-      if (!buConfig) {
-        return res.status(400).json({ error: `Invalid business unit: ${businessUnit}` });
-      }
-      adminBU = buConfig.abbr as BusinessUnit;
-    } else {
-      adminBU = "SUPERADMIN" as BusinessUnit;
-    }
-
-    // If BU admin — resolve or create the BusinessUnit document
-    if (adminBU !== "SUPERADMIN") {
-      let buDoc = await BusinessUnitModel.findOne({ name: adminBU });
-
-      if (!buDoc) {
-        // New tenant — slug required
-        if (!slug) {
-          return res.status(400).json({ error: "slug is required when registering a new business unit" });
-        }
-        if (!/^[a-z0-9-]+$/.test(slug)) {
-          return res.status(400).json({ error: "Slug must be lowercase letters, numbers and hyphens only" });
-        }
-        const slugTaken = await BusinessUnitModel.findOne({ slug: slug.toLowerCase() });
-        if (slugTaken) {
-          return res.status(409).json({ error: `Slug "${slug}" is already taken` });
-        }
-
-        const logoPath = req.file ? `/logos/${req.file.filename}` : undefined;
-
-        buDoc = await BusinessUnitModel.create({
-          name: adminBU,
-          label: label || adminBU,
-          slug: slug.toLowerCase(),
-          logo: logoPath,
-          contactEmail: contactEmail || undefined,
-          isActive: true
-        });
-      } else {
-        // BU exists — update slug/logo/label if provided
-        if (slug) {
-          if (!/^[a-z0-9-]+$/.test(slug)) {
-            return res.status(400).json({ error: "Slug must be lowercase letters, numbers and hyphens only" });
-          }
-          const slugTaken = await BusinessUnitModel.findOne({ slug: slug.toLowerCase(), _id: { $ne: buDoc._id } });
-          if (slugTaken) {
-            return res.status(409).json({ error: `Slug "${slug}" is already taken` });
-          }
-          buDoc.slug = slug.toLowerCase();
-        }
-        if (req.file) buDoc.logo = `/logos/${req.file.filename}`;
-        if (label) buDoc.label = label;
-        if (contactEmail) buDoc.contactEmail = contactEmail;
-        await buDoc.save();
-      }
-
-      // Email domain validation
-      const emailDomainMapping = await BusinessUnitEmailMapping.findOne({ businessUnit: adminBU });
-      if (emailDomainMapping) {
-        const emailDomain = email.toLowerCase().split("@")[1];
-        if (!emailDomain || emailDomain !== emailDomainMapping.emailDomain.toLowerCase()) {
-          return res.status(400).json({
-            error: `Invalid email domain for ${adminBU}. Your email must end with @${emailDomainMapping.emailDomain}`
-          });
-        }
-      }
-    }
-
-    const otp = generateOTP();
-
-    const admin = new AdminUser({
-      email: email.toLowerCase(),
-      password: hashedPassword,
-      fullName: adminFullName,
-      businessUnit: adminBU,
-      emailVerified: false,
-      emailVerificationOTP: otp,
-      emailVerificationOTPExpiry: new Date(Date.now() + 10 * 60 * 1000)
-    });
-
-    await admin.save();
-
-    try {
-      await sendVerificationEmail(email.toLowerCase(), otp, adminFullName, adminBU);
-    } catch (emailError) {
-      console.error("Failed to send verification email:", emailError);
-      return res.status(201).json({
-        message: "Admin account created, but verification email could not be sent.",
-        user: { id: admin._id, email: admin.email, fullName: admin.fullName, businessUnit: admin.businessUnit, emailVerified: admin.emailVerified }
-      });
-    }
-
-    res.status(201).json({
-      message: "Admin account created successfully. Please check your email for the verification code.",
-      user: { id: admin._id, email: admin.email, fullName: admin.fullName, businessUnit: admin.businessUnit, emailVerified: admin.emailVerified }
-    });
-  } catch (error) {
-    console.error("Admin register error:", error);
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
 
 // Admin Login — embeds tenantId + slug in JWT
 adminAuthRouter.post("/login", async (req: Request<{}, {}, AdminAuthRequest>, res: Response) => {
@@ -568,14 +440,12 @@ adminAuthRouter.get("/users", adminAuthMiddleware, async (req: AuthenticatedRequ
 // Create User — BU admins can create users for their BU
 adminAuthRouter.post("/users", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { email, password, fullName, grade: rawGrade } = req.body;
+    const { email, password, fullName, department } = req.body;
     const { businessUnit } = req;
 
     if (!email || !password || !fullName || !businessUnit) {
       return res.status(400).json({ error: "Email, password, and fullName are required" });
     }
-
-    const grade = (typeof rawGrade === "string" && GRADE_SET.has(rawGrade) ? rawGrade : "Analyst") as EmployeeGrade;
 
     const existingUser = await User.findOne({ email: email.toLowerCase() });
     if (existingUser) {
@@ -588,7 +458,7 @@ adminAuthRouter.post("/users", adminAuthMiddleware, async (req: AuthenticatedReq
       password: hashedPassword,
       fullName,
       businessUnit,
-      grade,
+      department: department ? String(department).trim() : undefined,
       emailVerified: true
     });
 
@@ -628,10 +498,11 @@ adminAuthRouter.post("/invite-employee", adminAuthMiddleware, async (req: Authen
       });
     }
 
-    const { email, fullName } = req.body;
-    if (!email || !fullName) {
-      return res.status(400).json({ error: "email and fullName are required" });
+    const { email, firstName, lastName, department } = req.body;
+    if (!email || !firstName || !lastName) {
+      return res.status(400).json({ error: "email, firstName and lastName are required" });
     }
+    const fullName = `${String(firstName).trim()} ${String(lastName).trim()}`;
 
     const tenant = await BusinessUnitModel.findOne({ name: businessUnit });
     if (!tenant) {
@@ -676,11 +547,14 @@ adminAuthRouter.post("/invite-employee", adminAuthMiddleware, async (req: Authen
     const rawToken = crypto.randomBytes(32).toString("hex");
     const tokenHash = hashInviteToken(rawToken);
 
+    const normalizedDept = department ? String(department).trim() : undefined;
+
     await EmployeeInvite.create({
       email: normalizedEmail,
       fullName: fullName.trim(),
       businessUnit,
       tenantId: tenant.tenantId,
+      department: normalizedDept,
       token: tokenHash,
       status: "pending",
       invitedBy: inviterEmail || "unknown",
@@ -756,24 +630,23 @@ adminAuthRouter.post(
         return -1;
       };
 
+      const iFirstName = col("firstname", "first_name");
+      const iLastName = col("lastname", "last_name");
       const iName = col("fullname", "full_name", "name");
       const iEmail = col("email");
       const iPass = col("password");
-      const iGrade = col("grade");
-      if (iName < 0 || iEmail < 0) {
+      const iDept = col("department", "dept");
+
+      const hasNameCols = (iFirstName >= 0 && iLastName >= 0) || iName >= 0;
+      if (!hasNameCols || iEmail < 0) {
         return res.status(400).json({
-          error: "CSV header must include fullName (or name) and email columns"
+          error: "CSV header must include firstName + lastName (or fullName) and email columns"
         });
       }
 
       const buDoc = await BusinessUnitModel.findOne({ name: businessUnit });
       const tenantInfo = buDoc
-        ? {
-            label: buDoc.label,
-            logo: buDoc.logo,
-            colorCode: buDoc.colorCode,
-            slug: buDoc.slug
-          }
+        ? { label: buDoc.label, logo: buDoc.logo, colorCode: buDoc.colorCode, slug: buDoc.slug }
         : undefined;
 
       const created: { email: string; fullName: string }[] = [];
@@ -781,20 +654,20 @@ adminAuthRouter.post(
 
       for (let r = 1; r < lines.length; r++) {
         const row = lines[r].split(",").map((c) => c.trim().replace(/^"|"$/g, ""));
-        const fullName = row[iName]?.trim();
+        const fullName = iFirstName >= 0 && iLastName >= 0
+          ? `${row[iFirstName]?.trim() || ""} ${row[iLastName]?.trim() || ""}`.trim()
+          : row[iName]?.trim();
         const email = row[iEmail]?.trim().toLowerCase();
         const passwordCell = iPass >= 0 ? row[iPass]?.trim() : "";
-        const gradeCell = iGrade >= 0 ? row[iGrade]?.trim() : "";
+        const department = iDept >= 0 ? row[iDept]?.trim() : undefined;
         const lineNo = r + 1;
 
         if (!fullName || !email) {
-          failed.push({ line: lineNo, email, error: "Missing fullName or email" });
+          failed.push({ line: lineNo, email, error: "Missing name or email" });
           continue;
         }
 
-        const grade = (gradeCell && GRADE_SET.has(gradeCell) ? gradeCell : "Analyst") as EmployeeGrade;
-        const generated =
-          !passwordCell || passwordCell.length < 6;
+        const generated = !passwordCell || passwordCell.length < 6;
         const password = generated
           ? crypto.randomBytes(8).toString("base64url").slice(0, 12)
           : passwordCell;
@@ -811,7 +684,7 @@ adminAuthRouter.post(
             password: hashedPassword,
             fullName,
             businessUnit,
-            grade,
+            department: department || undefined,
             emailVerified: true
           });
           await user.save();
@@ -1061,10 +934,11 @@ adminAuthRouter.post("/invite-peer-admin", adminAuthMiddleware, async (req: Auth
       });
     }
 
-    const { email, fullName } = req.body;
-    if (!email || !fullName) {
-      return res.status(400).json({ error: "email and fullName are required" });
+    const { email, firstName, lastName } = req.body;
+    if (!email || !firstName || !lastName) {
+      return res.status(400).json({ error: "email, firstName and lastName are required" });
     }
+    const fullName = `${String(firstName).trim()} ${String(lastName).trim()}`;
 
     const tenant = await BusinessUnitModel.findOne({ name: bu });
     if (!tenant) {
@@ -1256,5 +1130,85 @@ adminAuthRouter.delete("/email-domains/:id", superAdminMiddleware, async (req: A
     res.json({ message: "Domain mapping deleted" });
   } catch (error) {
     res.status(500).json({ error: "Failed to delete domain mapping" });
+  }
+});
+
+// ─── Department management (BU admins only) ───────────────────────────────────
+
+adminAuthRouter.get("/departments", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { businessUnit, isSuperAdmin } = req;
+    const filter = isSuperAdmin ? {} : { businessUnit };
+    const departments = await Department.find(filter).sort({ name: 1 }).lean();
+    res.json({ departments });
+  } catch (error) {
+    console.error("List departments error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+adminAuthRouter.post("/departments", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { businessUnit, tenantId, isSuperAdmin } = req;
+    if (isSuperAdmin) {
+      return res.status(403).json({ error: "Super admins must specify a business unit — use tenant provisioning." });
+    }
+    if (!businessUnit) {
+      return res.status(400).json({ error: "Business unit not found in token" });
+    }
+
+    const rawName = typeof req.body.name === "string" ? req.body.name.trim() : "";
+    if (!rawName || rawName.length < 1 || rawName.length > 100) {
+      return res.status(400).json({ error: "name is required and must be between 1 and 100 characters" });
+    }
+
+    const tenant = await BusinessUnitModel.findOne({ name: businessUnit });
+    const resolvedTenantId = tenantId || tenant?.tenantId || "";
+
+    const dept = await Department.create({
+      name: rawName,
+      businessUnit,
+      tenantId: resolvedTenantId
+    });
+
+    res.status(201).json({ department: dept });
+  } catch (error: any) {
+    if (error.code === 11000) {
+      return res.status(409).json({ error: "A department with this name already exists in your organization" });
+    }
+    console.error("Create department error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+adminAuthRouter.delete("/departments/:id", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { businessUnit, isSuperAdmin } = req;
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ error: "Invalid department id" });
+    }
+
+    const dept = await Department.findById(id);
+    if (!dept) {
+      return res.status(404).json({ error: "Department not found" });
+    }
+    if (!isSuperAdmin && dept.businessUnit !== businessUnit) {
+      return res.status(403).json({ error: "Access denied" });
+    }
+
+    const assignedCount = await User.countDocuments({ department: dept.name, businessUnit: dept.businessUnit });
+    if (assignedCount > 0) {
+      return res.status(409).json({
+        error: `Cannot delete — ${assignedCount} employee${assignedCount === 1 ? " is" : "s are"} assigned to this department`
+      });
+    }
+
+    await dept.deleteOne();
+    res.json({ message: "Department deleted" });
+  } catch (error) {
+    console.error("Delete department error:", error);
+    res.status(500).json({ error: "Internal server error" });
   }
 });

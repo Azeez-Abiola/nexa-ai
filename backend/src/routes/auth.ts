@@ -2,10 +2,9 @@ import express, { Request, Response } from "express";
 import bcryptjs from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
-import { User, BusinessUnit, EMPLOYEE_GRADES } from "../models/User";
+import { User, BusinessUnit } from "../models/User";
 import { AdminUser } from "../models/AdminUser";
 import { BusinessUnit as BusinessUnitModel } from "../models/BusinessUnit";
-import { BusinessUnitEmailMapping } from "../models/BusinessUnitEmailMapping";
 import { sendVerificationEmail, sendPasswordResetEmail, sendWelcomeEmail } from "../services/emailService";
 import { authMiddleware, AuthenticatedRequest } from "../middleware/auth";
 
@@ -16,7 +15,6 @@ interface AuthRequest {
   password: string;
   fullName?: string;
   businessUnit?: BusinessUnit;
-  grade?: string;
 }
 
 const JWT_SECRET = process.env.NEXA_AI_JWT_SECRET || "your-secret-key-change-in-production";
@@ -91,116 +89,6 @@ function generateToken(token: string): string {
   return crypto.createHash("sha256").update(token).digest("hex");
 }
 
-// Register endpoint (with email verification OTP)
-authRouter.post("/register", async (req: Request<{}, {}, AuthRequest>, res: Response) => {
-  try {
-    const { email, password, fullName, businessUnit, grade } = req.body;
-
-    if (!email || !password || !fullName || !businessUnit) {
-      return res.status(400).json({ error: "Email, password, fullName, and businessUnit are required" });
-    }
-
-    let resolvedGrade: (typeof EMPLOYEE_GRADES)[number] = "Analyst";
-    if (grade != null && String(grade).trim() !== "") {
-      if (!EMPLOYEE_GRADES.includes(grade as any)) {
-        return res.status(400).json({
-          error: `Invalid grade. Must be one of: ${EMPLOYEE_GRADES.join(", ")}`
-        });
-      }
-      resolvedGrade = grade as (typeof EMPLOYEE_GRADES)[number];
-    }
-
-    // Validate password strength
-    if (password.length < 6) {
-      return res.status(400).json({ error: "Password must be at least 6 characters long" });
-    }
-
-    // Validate business unit exists in database
-    const validBU = await BusinessUnitModel.findOne({ name: businessUnit });
-    if (!validBU) {
-      return res.status(400).json({ error: "Invalid business unit" });
-    }
-    if (validBU.isActive === false) {
-      return res.status(403).json({
-        error: "This organization is not active yet and is not accepting new registrations."
-      });
-    }
-
-    // Validate email domain matches business unit (if mapping exists for this specific BU)
-    const emailDomainMapping = await BusinessUnitEmailMapping.findOne({ businessUnit });
-    if (emailDomainMapping) {
-      const emailDomain = email.toLowerCase().split('@')[1];
-      const expectedDomain = emailDomainMapping.emailDomain.toLowerCase();
-
-      if (!emailDomain || emailDomain !== expectedDomain) {
-        return res.status(400).json({
-          error: `Invalid email domain for ${businessUnit}. Your email must end with @${expectedDomain}`
-        });
-      }
-    }
-
-    // Check if user exists
-    const existingUser = await User.findOne({ email: email.toLowerCase() });
-    if (existingUser) {
-      return res.status(409).json({ error: "User already exists" });
-    }
-
-    // Hash password
-    const hashedPassword = await bcryptjs.hash(password, 10);
-
-    // Generate 6-digit OTP
-    const otp = generateOTP();
-
-    // Create user (not verified yet)
-    const user = new User({
-      email: email.toLowerCase(),
-      password: hashedPassword,
-      fullName,
-      businessUnit,
-      grade: resolvedGrade,
-      emailVerified: false,
-      emailVerificationOTP: otp,
-      emailVerificationOTPExpiry: new Date(Date.now() + 10 * 60 * 1000) // 10 minutes
-    });
-
-    await user.save();
-
-    // Send verification email with OTP (include BU brand color if available)
-    try {
-      await sendVerificationEmail(email.toLowerCase(), otp, fullName, businessUnit, validBU?.colorCode);
-    } catch (emailError) {
-      console.error("Failed to send verification email:", emailError);
-      // Still allow user to proceed but notify them
-      return res.status(201).json({
-        message: "Account created, but verification email could not be sent. Please try again or contact support.",
-        user: {
-          id: user._id,
-          email: user.email,
-          fullName: user.fullName,
-          businessUnit: user.businessUnit,
-          grade: user.grade,
-          emailVerified: user.emailVerified
-        }
-      });
-    }
-
-    res.status(201).json({
-      message: "Account created successfully. Please check your email for the verification code.",
-      user: {
-        id: user._id,
-        email: user.email,
-        fullName: user.fullName,
-        businessUnit: user.businessUnit,
-        grade: user.grade,
-        emailVerified: user.emailVerified
-      }
-    });
-  } catch (error) {
-    console.error("Register error:", error);
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
 // Verify Email endpoint
 authRouter.post("/verify-email", async (req: Request<{}, {}, { email: string; otp: string }>, res: Response) => {
   try {
@@ -257,7 +145,7 @@ authRouter.post("/verify-email", async (req: Request<{}, {}, { email: string; ot
       userId: user._id,
       email: user.email,
       businessUnit: user.businessUnit,
-      grade: user.grade || "Analyst",
+      department: user.department,
       tenantId: tenant.tenantId,
       tenantSlug: tenant.tenantSlug,
       tenantLogo: tenant.tenantLogo,
@@ -274,7 +162,7 @@ authRouter.post("/verify-email", async (req: Request<{}, {}, { email: string; ot
         email: user.email,
         fullName: user.fullName,
         businessUnit: user.businessUnit,
-        grade: user.grade,
+        department: user.department,
         ...tenant,
         emailVerified: true,
         isAdmin: payload.isAdmin
@@ -392,8 +280,8 @@ authRouter.post("/login", async (req: Request<{}, {}, AuthRequest>, res: Respons
     const payload: any = { 
       userId: user._id, 
       email: user.email, 
-      businessUnit: user.businessUnit, 
-      grade: user.grade || "ADMIN", 
+      businessUnit: user.businessUnit,
+      department: (user as any).department,
       tenantId: tenant.tenantId, 
       tenantSlug: tenant.tenantSlug,
       tenantLogo: tenant.tenantLogo,
@@ -410,7 +298,7 @@ authRouter.post("/login", async (req: Request<{}, {}, AuthRequest>, res: Respons
         email: user.email,
         fullName: user.fullName,
         businessUnit: user.businessUnit,
-        grade: user.grade,
+        department: user.department,
         ...tenant,
         emailVerified: user.emailVerified,
         isAdmin: payload.isAdmin
@@ -529,7 +417,7 @@ authRouter.get("/me", authMiddleware, async (req: AuthenticatedRequest, res: Res
         email: user.email,
         fullName: user.fullName,
         businessUnit: user.businessUnit,
-        grade: user.grade,
+        department: user.department,
         ...tenant,
         emailVerified: user.emailVerified,
         isAdmin: false
@@ -568,7 +456,7 @@ authRouter.patch("/me", authMiddleware, async (req: AuthenticatedRequest, res: R
         email: user.email,
         fullName: user.fullName,
         businessUnit: user.businessUnit,
-        grade: user.grade,
+        department: user.department,
         ...tenant,
         emailVerified: user.emailVerified,
         isAdmin: false
