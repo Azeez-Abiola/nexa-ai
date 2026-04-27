@@ -39,9 +39,14 @@ export async function createNotification(input: CreateInput): Promise<void> {
 }
 
 /**
- * Notify all employees in a BU about a new document.
- * If userIds is provided, fan out only to those users (group-scoped doc).
- * Otherwise, fan out to every active user in the BU.
+ * Notify employees in a BU about a new document. The audience is computed by stacking
+ * any access constraints the doc has — group restrictions and/or a department tag —
+ * so a Finance-tagged doc visible to "Marketing Team" only notifies users who are in
+ * Marketing AND have department "Finance" (in practice usually nobody, which is fine).
+ *
+ * - userIds present → start from that set (group members)
+ * - department present → further filter the set down to users in that department
+ * - neither → fall back to every active user in the BU
  */
 export async function notifyDocumentAdded(input: {
   businessUnit: string;
@@ -49,11 +54,22 @@ export async function notifyDocumentAdded(input: {
   documentId: string;
   uploadedBy: string;
   userIds?: string[];
+  department?: string;
 }): Promise<void> {
   try {
-    const recipients = input.userIds && input.userIds.length > 0
-      ? await User.find({ _id: { $in: input.userIds }, isActive: { $ne: false } }).select("_id").lean()
-      : await User.find({ businessUnit: input.businessUnit, isActive: { $ne: false } }).select("_id").lean();
+    const dept = input.department?.trim();
+    const baseFilter: Record<string, unknown> = { isActive: { $ne: false } };
+
+    if (input.userIds && input.userIds.length > 0) {
+      baseFilter._id = { $in: input.userIds };
+    } else {
+      baseFilter.businessUnit = input.businessUnit;
+    }
+    if (dept) {
+      baseFilter.department = dept;
+    }
+
+    const recipients = await User.find(baseFilter).select("_id").lean();
 
     const docs = recipients.map((u) => ({
       recipientId: u._id,

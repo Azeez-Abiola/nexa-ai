@@ -356,7 +356,8 @@ adminDocumentsRouter.post("/", upload.single("file"), async (req: AuthenticatedR
         title: doc.title,
         documentId: String(doc._id),
         uploadedBy: adminName || adminEmail || "your admin",
-        userIds
+        userIds,
+        department: doc.department || undefined
       });
     })().catch((err) => logger.error("[AdminDocuments] notification fanout failed", { err: (err as Error).message }));
 
