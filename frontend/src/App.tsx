@@ -3299,12 +3299,23 @@ export const App: React.FC = () => {
           align-items: flex-end;
         }
 
+        /* Assistant: copy button sits to the right of the response bubble. */
+        .message-row-v2.assistant .message-bubble-wrap-v2 {
+          flex-direction: row;
+          align-items: flex-start;
+          gap: 8px;
+        }
+
         .message-copy-stack-v2 {
           display: flex;
           flex-direction: column;
           align-items: center;
           gap: 2px;
           min-height: 22px;
+        }
+
+        .message-row-v2.assistant .message-copy-stack-v2 {
+          padding-top: 4px;
         }
 
         .message-row-v2.user .message-copy-stack-v2 {
