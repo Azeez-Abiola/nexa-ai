@@ -342,7 +342,20 @@ const AccessRequests: React.FC = () => {
               <Input
                 type="file"
                 accept="image/*"
-                onChange={(e) => setProvisionLogo(e.target.files?.[0] ?? null)}
+                onChange={(e) => {
+                  const file = e.target.files?.[0] ?? null;
+                  if (file && file.size > 10 * 1024 * 1024) {
+                    toast({
+                      title: "Logo too large",
+                      description: "Logos must be 10 MB or smaller.",
+                      variant: "destructive"
+                    });
+                    e.target.value = "";
+                    setProvisionLogo(null);
+                    return;
+                  }
+                  setProvisionLogo(file);
+                }}
                 className={inputBu}
               />
               {provisionLogo ? (

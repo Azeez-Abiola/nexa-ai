@@ -46,7 +46,7 @@ const logoUpload = multer({
       cb(null, `${Date.now()}${ext}`);
     }
   }),
-  limits: { fileSize: 2 * 1024 * 1024 }, // 2MB
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
   fileFilter: (_req, file, cb) => {
     if (file.mimetype.startsWith("image/")) cb(null, true);
     else cb(new Error("Only image files are allowed for logo"));
