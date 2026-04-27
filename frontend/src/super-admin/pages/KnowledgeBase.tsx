@@ -83,13 +83,6 @@ const DOCUMENT_TYPE_OPTIONS: { value: string; label: string }[] = [
   { value: "other", label: "Other" }
 ];
 
-const SENSITIVITY_LEVELS: { value: string; label: string }[] = [
-  { value: "public", label: "Public" },
-  { value: "internal", label: "Internal" },
-  { value: "confidential", label: "Confidential" },
-  { value: "restricted", label: "Restricted" }
-];
-
 export type RagDocumentRow = {
   _id: string;
   title: string;
@@ -799,22 +792,6 @@ const KnowledgeBase: React.FC = () => {
                     </p>
                   </div>
 
-                  <div className="space-y-2">
-                    <Label className="text-sm font-bold text-slate-700">Sensitivity</Label>
-                    <Select value={sensitivityLevel} onValueChange={setSensitivityLevel}>
-                      <SelectTrigger className="h-12 rounded-xl border-slate-200">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {SENSITIVITY_LEVELS.map((s) => (
-                          <SelectItem key={s.value} value={s.value}>
-                            {s.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
                   {!isSuper ? (
                     <div className="space-y-2">
                       <Label className="text-sm font-bold text-slate-700">Department <span className="font-normal text-slate-400">(optional)</span></Label>
@@ -1072,9 +1049,6 @@ const KnowledgeBase: React.FC = () => {
                 <TableHead className="font-bold text-slate-400 uppercase text-[10px] tracking-widest">Department</TableHead>
                 <TableHead className="font-bold text-slate-400 uppercase text-[10px] tracking-widest">Source</TableHead>
                 <TableHead className="font-bold text-slate-400 uppercase text-[10px] tracking-widest">User groups</TableHead>
-                <TableHead className="font-bold text-slate-400 uppercase text-[10px] tracking-widest">
-                  Sensitivity
-                </TableHead>
                 <TableHead className="font-bold text-slate-400 uppercase text-[10px] tracking-widest">Status</TableHead>
                 <TableHead className="font-bold text-slate-400 uppercase text-[10px] tracking-widest">File</TableHead>
                 <TableHead className="font-bold text-slate-400 uppercase text-[10px] tracking-widest">Created</TableHead>
@@ -1160,9 +1134,6 @@ const KnowledgeBase: React.FC = () => {
                         ))}
                       </div>
                     )}
-                  </TableCell>
-                  <TableCell>
-                    <span className="text-xs font-semibold text-slate-600 capitalize">{doc.sensitivityLevel}</span>
                   </TableCell>
                   <TableCell>
                     <Badge className={cn("text-[10px] font-bold border-0 capitalize", statusBadgeClass(doc.processingStatus))}>
@@ -1253,10 +1224,6 @@ const KnowledgeBase: React.FC = () => {
                 <p>
                   <span className="text-slate-400">Type:</span>{" "}
                   {detailDoc && (TYPE_LABELS[detailDoc.documentType] || detailDoc.documentType)}
-                </p>
-                <p>
-                  <span className="text-slate-400">Sensitivity:</span>{" "}
-                  <span className="capitalize">{detailDoc?.sensitivityLevel}</span>
                 </p>
                 <p>
                   <span className="text-slate-400">Version:</span> v{detailDoc?.version ?? 1}
