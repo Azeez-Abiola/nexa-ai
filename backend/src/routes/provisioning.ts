@@ -230,6 +230,14 @@ provisioningRouter.post("/invite", superAdminMiddleware, async (req: Authenticat
       return res.status(409).json({ error: "An admin account already exists with this email" });
     }
 
+    // One-admin-per-organization rule. Reactivate a deactivated admin instead of stacking.
+    const activeAdminForBU = await AdminUser.findOne({ businessUnit, isActive: { $ne: false } });
+    if (activeAdminForBU) {
+      return res.status(409).json({
+        error: `${businessUnit} already has an active administrator (${activeAdminForBU.email}). Deactivate that account before assigning a new admin.`
+      });
+    }
+
     // Auto-generate a secure random password
     const autoPassword = crypto.randomBytes(6).toString("hex"); // e.g. "a1b2c3d4e5f6"
     const hashedPassword = await bcryptjs.hash(autoPassword, 10);

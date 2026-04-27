@@ -79,15 +79,11 @@ const UsersManagement: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState<string | null>(null);
-  const [inviteAdminOpen, setInviteAdminOpen] = useState(false);
   const [inviteEmployeeOpen, setInviteEmployeeOpen] = useState(false);
   const [csvUploading, setCsvUploading] = useState(false);
   const csvInputRef = useRef<HTMLInputElement>(null);
-  const [inviteForm, setInviteForm] = useState({ firstName: '', lastName: '', email: '' });
   const [employeeInviteForm, setEmployeeInviteForm] = useState({ firstName: '', lastName: '', email: '', department: '' });
-  const [inviteSubmitting, setInviteSubmitting] = useState(false);
   const [employeeInviteSubmitting, setEmployeeInviteSubmitting] = useState(false);
-  const [inviteError, setInviteError] = useState('');
   const [employeeInviteError, setEmployeeInviteError] = useState('');
   const { toast } = useToast();
 
@@ -247,25 +243,6 @@ const UsersManagement: React.FC = () => {
     }
   };
 
-  const handleInvitePeerAdmin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setInviteSubmitting(true);
-    setInviteError('');
-    try {
-      await axios.post('/api/v1/admin/auth/invite-peer-admin', inviteForm, { headers });
-      toast({
-        title: 'Administrator added',
-        description: `Login credentials were emailed to ${inviteForm.email}.`,
-      });
-      setInviteForm({ firstName: '', lastName: '', email: '' });
-      setInviteAdminOpen(false);
-    } catch (err: any) {
-      setInviteError(err.response?.data?.error || err.response?.data?.message || 'Could not complete invite.');
-    } finally {
-      setInviteSubmitting(false);
-    }
-  };
-
   const handleInviteEmployee = async (e: React.FormEvent) => {
     e.preventDefault();
     setEmployeeInviteSubmitting(true);
@@ -413,18 +390,6 @@ const UsersManagement: React.FC = () => {
               >
                 <Mail size={18} className="text-[var(--brand-color)]" />
                 Invite employee
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                className="rounded-xl h-11 px-5 font-bold border-slate-200 gap-2"
-                onClick={() => {
-                  setInviteError('');
-                  setInviteAdminOpen(true);
-                }}
-              >
-                <Send size={18} className="text-[var(--brand-color)]" />
-                Invite admin
               </Button>
               <Button
                 type="button"
@@ -737,69 +702,6 @@ const UsersManagement: React.FC = () => {
                 style={{ backgroundColor: 'var(--brand-color)' }}
               >
                 {employeeInviteSubmitting ? <Loader2 className="animate-spin" size={18} /> : 'Send invite'}
-              </Button>
-            </SheetFooter>
-          </form>
-        </SheetContent>
-      </Sheet>
-
-      <Sheet open={inviteAdminOpen} onOpenChange={setInviteAdminOpen}>
-        <SheetContent side="right" className="sm:max-w-md flex flex-col">
-          <SheetHeader className="text-left space-y-2">
-            <SheetTitle className="text-2xl font-black font-['Sen']">Invite administrator</SheetTitle>
-            <SheetDescription className="text-slate-500 font-medium text-sm leading-relaxed">
-              Adds another business administrator for <span className="font-bold text-slate-800">{directoryBuLabel}</span>.
-              They receive an email with a generated password (same flow as platform provisioning).
-            </SheetDescription>
-          </SheetHeader>
-          <form onSubmit={handleInvitePeerAdmin} className="mt-6 flex flex-col gap-5 flex-1">
-            {inviteError ? (
-              <div className="p-4 bg-red-50 border border-red-100 text-red-600 rounded-xl text-xs font-bold">{inviteError}</div>
-            ) : null}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <Label className="text-sm font-bold text-slate-700">First name</Label>
-                <Input
-                  value={inviteForm.firstName}
-                  onChange={(e) => setInviteForm({ ...inviteForm, firstName: e.target.value })}
-                  className={inputBu}
-                  required
-                  placeholder="Jane"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label className="text-sm font-bold text-slate-700">Last name</Label>
-                <Input
-                  value={inviteForm.lastName}
-                  onChange={(e) => setInviteForm({ ...inviteForm, lastName: e.target.value })}
-                  className={inputBu}
-                  required
-                  placeholder="Doe"
-                />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label className="text-sm font-bold text-slate-700">Work email</Label>
-              <Input
-                type="email"
-                value={inviteForm.email}
-                onChange={(e) => setInviteForm({ ...inviteForm, email: e.target.value })}
-                className={inputBu}
-                required
-                placeholder="admin@company.com"
-              />
-            </div>
-            <SheetFooter className="mt-auto px-0 flex-row gap-3 sm:gap-3">
-              <Button type="button" variant="ghost" className="flex-1 rounded-xl font-bold" onClick={() => setInviteAdminOpen(false)}>
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                disabled={inviteSubmitting}
-                className="flex-[2] rounded-xl font-bold text-white h-11"
-                style={{ backgroundColor: 'var(--brand-color)' }}
-              >
-                {inviteSubmitting ? <Loader2 className="animate-spin" size={18} /> : 'Send invite'}
               </Button>
             </SheetFooter>
           </form>

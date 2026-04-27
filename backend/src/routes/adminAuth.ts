@@ -990,82 +990,14 @@ adminAuthRouter.put("/change-password", adminAuthMiddleware, async (req: Authent
   }
 });
 
-// Invite / provision another administrator for the same business unit (BU admins only)
+// /invite-peer-admin — disabled by the one-admin-per-organization policy.
+// Kept registered (instead of removed) so legacy callers get a clear 409 instead of a 404.
+// Adding more admins now goes through the super-admin team.
 adminAuthRouter.post("/invite-peer-admin", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const bu = req.businessUnit;
-    if (!bu || bu === "SUPERADMIN") {
-      return res.status(403).json({
-        error: "Only business unit administrators can invite peer admins for their unit."
-      });
-    }
-
-    const { email, firstName, lastName } = req.body;
-    if (!email || !firstName || !lastName) {
-      return res.status(400).json({ error: "email, firstName and lastName are required" });
-    }
-    const fullName = `${String(firstName).trim()} ${String(lastName).trim()}`;
-
-    const tenant = await BusinessUnitModel.findOne({ name: bu });
-    if (!tenant) {
-      return res.status(404).json({
-        error: "Your business unit is not registered as a tenant. Contact support."
-      });
-    }
-
-    const existing = await AdminUser.findOne({ email: email.toLowerCase() });
-    if (existing) {
-      return res.status(409).json({ error: "An admin account already exists with this email" });
-    }
-
-    const autoPassword = crypto.randomBytes(6).toString("hex");
-    const hashedPassword = await bcryptjs.hash(autoPassword, 10);
-
-    const admin = await AdminUser.create({
-      email: email.toLowerCase(),
-      fullName,
-      businessUnit: bu,
-      password: hashedPassword,
-      emailVerified: true,
-      mustChangePassword: true
-    });
-
-    await AdminInvite.create({
-      email: email.toLowerCase(),
-      fullName,
-      businessUnit: bu,
-      tenantId: tenant.tenantId,
-      status: "accepted",
-      invitedBy: req.email!,
-      expiresAt: new Date(),
-      token: "BU-ADMIN-INVITE"
-    });
-
-    try {
-      await sendTenantCredentialsEmail(
-        email.toLowerCase(),
-        fullName,
-        bu,
-        tenant.slug,
-        autoPassword
-      );
-    } catch (emailError) {
-      console.error("Failed to send credentials email:", emailError);
-      return res.status(500).json({
-        message: `Admin account created for ${email}, but credentials email failed.`,
-        error: "Failed to send email. You may need to manually reset the password."
-      });
-    }
-
-    res.status(201).json({
-      message: `Admin account created and credentials sent to ${email}`,
-      admin: {
-        id: admin._id,
-        email: admin.email,
-        fullName: admin.fullName,
-        businessUnit: admin.businessUnit,
-        status: "active"
-      }
+    return res.status(409).json({
+      error: `${bu || "Your organization"} already has an active administrator. Only one admin is allowed per organization — contact the super-admin team to change who is in that role.`
     });
   } catch (error) {
     console.error("BU peer admin invite error:", error);
@@ -1105,6 +1037,16 @@ adminAuthRouter.post("/create-direct", superAdminMiddleware, async (req: Authent
 
     const existingAdmin = await AdminUser.findOne({ email: email.toLowerCase() });
     if (existingAdmin) return res.status(409).json({ error: "Admin already exists" });
+
+    // One-admin-per-organization rule — block creating a second active admin for the same BU.
+    if (businessUnit !== "SUPERADMIN") {
+      const activeAdminForBU = await AdminUser.findOne({ businessUnit, isActive: { $ne: false } });
+      if (activeAdminForBU) {
+        return res.status(409).json({
+          error: `${businessUnit} already has an active administrator (${activeAdminForBU.email}). Deactivate that account before assigning a new one.`
+        });
+      }
+    }
 
     const hashedPassword = await bcryptjs.hash(password, 10);
     const admin = new AdminUser({
