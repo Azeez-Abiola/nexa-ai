@@ -6,6 +6,7 @@ import {
   Users,
   ShieldCheck,
   Globe,
+  Inbox,
   LayoutDashboard,
   LogOut,
   UserCircle,
@@ -36,6 +37,7 @@ import Dashboard from './pages/Dashboard';
 import Tenants from './pages/Tenants';
 import KnowledgeBase from './pages/KnowledgeBase';
 import Administration from './pages/Administration';
+import AccessRequests from './pages/AccessRequests';
 import EmailDomains from './pages/EmailDomains';
 import AuditLogs from './pages/AuditLogs';
 import HelpSupport from './pages/HelpSupport';
@@ -130,6 +132,7 @@ const SuperAdminMain: React.FC<SuperAdminMainProps> = ({ theme, toggleTheme }) =
   const menuItems = isSuperAdminContext ? [
     { name: 'Dashboard', path: '/super-admin/dashboard', icon: LayoutDashboard },
     { name: 'Tenants', path: '/super-admin/tenants', icon: Building2 },
+    { name: 'Access requests', path: '/super-admin/access-requests', icon: Inbox },
     { name: 'Analytics', path: '/super-admin/analytics', icon: BarChart3 },
     { name: 'Administration', path: '/super-admin/management', icon: ShieldCheck },
     { name: 'Email domains', path: '/super-admin/domains', icon: Globe },
@@ -382,6 +385,7 @@ const SuperAdminMain: React.FC<SuperAdminMainProps> = ({ theme, toggleTheme }) =
               {!isSuperAdminContext ? (
                 <>
                   <Route path="/admin/dashboard" element={<Dashboard />} />
+                  <Route path="/admin/access-requests" element={<Navigate to="/super-admin/access-requests" replace />} />
                   <Route path="/admin/analytics" element={<Analytics />} />
                   <Route path="/admin/knowledge" element={<KnowledgeBase />} />
                   <Route path="/admin/user-groups" element={<AdminUserGroupsPage />} />
@@ -397,6 +401,7 @@ const SuperAdminMain: React.FC<SuperAdminMainProps> = ({ theme, toggleTheme }) =
                   <Route path="/super-admin/dashboard" element={<Dashboard />} />
                   <Route path="/super-admin/analytics" element={<Analytics />} />
                   <Route path="/super-admin/tenants" element={<Tenants />} />
+                  <Route path="/super-admin/access-requests" element={<AccessRequests />} />
                   <Route path="/super-admin/knowledge" element={<Navigate to="/super-admin/dashboard" replace />} />
                   <Route path="/super-admin/user-groups" element={<Navigate to="/super-admin/tenants" replace />} />
                   <Route path="/super-admin/knowledge-groups" element={<Navigate to="/super-admin/tenants" replace />} />
