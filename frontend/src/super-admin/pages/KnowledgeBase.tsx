@@ -155,6 +155,8 @@ const KnowledgeBase: React.FC = () => {
   >(null);
   /** Escape hatch: admin intentionally uploading a same-titled file as an unrelated document. */
   const [forceNewSeries, setForceNewSeries] = useState(false);
+  /** Explicit choice on the upload form. "new" = stand-alone document, "replace" = update an existing series. */
+  const [uploadMode, setUploadMode] = useState<"new" | "replace">("new");
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([]);
   const [userGroups, setUserGroups] = useState<UserGroupRow[]>([]);
   const [userGroupsMenuOpen, setUserGroupsMenuOpen] = useState(false);
@@ -315,6 +317,14 @@ const KnowledgeBase: React.FC = () => {
       });
       return;
     }
+    if (uploadMode === "replace" && !replacesDocumentId) {
+      toast({
+        variant: "destructive",
+        title: "Pick the existing document",
+        description: "Choose which document this upload replaces, or switch back to 'New document'."
+      });
+      return;
+    }
     if (ambiguousCandidates && !replacesDocumentId && !forceNewSeries) {
       toast({
         variant: "destructive",
@@ -340,10 +350,13 @@ const KnowledgeBase: React.FC = () => {
       if (isSuper) {
         formData.append("businessUnit", targetBusinessUnit);
       }
-      if (replacesDocumentId) {
+      if (uploadMode === "replace" && replacesDocumentId) {
         formData.append("replacesDocumentId", replacesDocumentId);
-      }
-      if (forceNewSeries) {
+      } else if (uploadMode === "new") {
+        // Explicit "this is a new document" — skip auto-replacement detection on the server
+        // even if titles collide; the admin already said it's its own series.
+        formData.append("forceNewSeries", "true");
+      } else if (forceNewSeries) {
         formData.append("forceNewSeries", "true");
       }
       if (selectedGroupIds.length > 0) {
@@ -448,6 +461,7 @@ const KnowledgeBase: React.FC = () => {
   const handleStartVersionUpload = () => {
     if (!detailDoc) return;
     setVersionUploadParent(detailDoc);
+    setUploadMode("replace");
     setTitle(detailDoc.title);
     setDocumentType(detailDoc.documentType);
     setSensitivityLevel(detailDoc.sensitivityLevel);
@@ -491,6 +505,7 @@ const KnowledgeBase: React.FC = () => {
     setForceNewSeries(false);
     setSelectedGroupIds([]);
     setVersionUploadParent(null);
+    setUploadMode("new");
     if (!isSuper) setTargetBusinessUnit("");
   };
 
@@ -608,13 +623,93 @@ const KnowledgeBase: React.FC = () => {
                     </div>
                   )}
 
+                  {!versionUploadParent ? (
+                    <div className="space-y-2">
+                      <Label className="text-sm font-bold text-slate-700">Type of upload</Label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setUploadMode("new");
+                            setReplacesDocumentId("");
+                          }}
+                          className={cn(
+                            "rounded-xl px-4 py-3 text-left transition-colors border",
+                            uploadMode === "new"
+                              ? "border-[var(--brand-color)] bg-[var(--brand-color)]/5 text-[var(--brand-color)]"
+                              : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
+                          )}
+                        >
+                          <p className="text-xs font-black uppercase tracking-wide">New document</p>
+                          <p className="text-[11px] font-medium mt-1 leading-snug opacity-80">
+                            Stand-alone — won't supersede anything.
+                          </p>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setUploadMode("replace")}
+                          className={cn(
+                            "rounded-xl px-4 py-3 text-left transition-colors border",
+                            uploadMode === "replace"
+                              ? "border-[var(--brand-color)] bg-[var(--brand-color)]/5 text-[var(--brand-color)]"
+                              : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
+                          )}
+                        >
+                          <p className="text-xs font-black uppercase tracking-wide">Replace existing</p>
+                          <p className="text-[11px] font-medium mt-1 leading-snug opacity-80">
+                            New version of a document already in the KB.
+                          </p>
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {uploadMode === "replace" && !versionUploadParent ? (
+                    <div className="space-y-2">
+                      <Label className="text-sm font-bold text-slate-700">Document being replaced</Label>
+                      <Select
+                        value={replacesDocumentId || "__none__"}
+                        onValueChange={(v) => {
+                          if (v === "__none__") {
+                            setReplacesDocumentId("");
+                            return;
+                          }
+                          setReplacesDocumentId(v);
+                          const doc = documents.find((d) => d._id === v);
+                          if (doc) {
+                            setTitle(doc.title);
+                            setDocumentType(doc.documentType);
+                            setSensitivityLevel(doc.sensitivityLevel);
+                          }
+                        }}
+                      >
+                        <SelectTrigger className="h-12 rounded-xl border-slate-200">
+                          <SelectValue placeholder="Choose the document this replaces" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">Pick a document…</SelectItem>
+                          {documents
+                            .filter((d) => d.processingStatus !== "superseded")
+                            .map((d) => (
+                              <SelectItem key={d._id} value={d._id}>
+                                {d.title} — v{d.version ?? 1}
+                              </SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-slate-400 leading-relaxed">
+                        The previous version stays archived so older citations still work; the new file becomes the latest.
+                      </p>
+                    </div>
+                  ) : null}
+
                   <div className="space-y-2">
                     <Label className="text-sm font-bold text-slate-700">Title</Label>
                     <Input
                       placeholder="e.g. FY24 Sales playbook"
                       value={title}
                       onChange={(e) => setTitle(e.target.value)}
-                      disabled={!!versionUploadParent}
+                      disabled={!!versionUploadParent || (uploadMode === "replace" && !!replacesDocumentId)}
                       className="h-12 rounded-xl border-slate-200 focus-visible:ring-0 focus-visible:ring-offset-0 focus:border-[var(--brand-color)] disabled:opacity-70 disabled:cursor-not-allowed"
                     />
                   </div>
