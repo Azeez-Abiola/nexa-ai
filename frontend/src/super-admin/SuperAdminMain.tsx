@@ -7,6 +7,7 @@ import {
   ShieldCheck,
   Globe,
   Inbox,
+  Layers,
   LayoutDashboard,
   LogOut,
   UserCircle,
@@ -38,6 +39,7 @@ import Tenants from './pages/Tenants';
 import KnowledgeBase from './pages/KnowledgeBase';
 import Administration from './pages/Administration';
 import AccessRequests from './pages/AccessRequests';
+import Departments from './pages/Departments';
 import EmailDomains from './pages/EmailDomains';
 import AuditLogs from './pages/AuditLogs';
 import HelpSupport from './pages/HelpSupport';
@@ -140,6 +142,7 @@ const SuperAdminMain: React.FC<SuperAdminMainProps> = ({ theme, toggleTheme }) =
     { name: 'Dashboard', path: '/admin/dashboard', icon: LayoutDashboard },
     { name: 'Knowledge Base', path: '/admin/knowledge', icon: BookOpen },
     { name: 'Users', path: '/admin/users', icon: Users },
+    { name: 'Departments', path: '/admin/departments', icon: Layers },
     { name: 'User groups', path: '/admin/user-groups', icon: Network },
     { name: 'Analytics', path: '/admin/analytics', icon: BarChart3 },
     { name: 'Audit Logs', path: '/admin/audit', icon: Shield },
@@ -391,6 +394,7 @@ const SuperAdminMain: React.FC<SuperAdminMainProps> = ({ theme, toggleTheme }) =
                   <Route path="/admin/user-groups" element={<AdminUserGroupsPage />} />
                   <Route path="/admin/knowledge-groups" element={<Navigate to="/admin/user-groups" replace />} />
                   <Route path="/admin/users" element={<UsersManagement />} />
+                  <Route path="/admin/departments" element={<Departments />} />
                   <Route path="/admin/audit" element={<AuditLogs />} />
                   <Route path="/admin/help" element={<HelpSupport />} />
                   <Route path="/admin/profile" element={<BusinessProfile />} />
