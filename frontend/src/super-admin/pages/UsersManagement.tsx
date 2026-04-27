@@ -46,14 +46,12 @@ import {
   writeSuperAdminDirectoryBu
 } from '../lib/superAdminDirectoryBu';
 
-const GRADES = ['Executive', 'Senior VP', 'VP', 'Associate', 'Senior Analyst', 'Analyst'] as const;
-
 const inputBu =
   'rounded-xl h-11 border-slate-200 focus-visible:ring-2 focus-visible:ring-[var(--brand-color)] focus-visible:border-[var(--brand-color)]/55 focus-visible:ring-offset-0';
 
-const CSV_TEMPLATE = `fullName,email,password,grade
-Jane Doe,jane@company.com,YourTempPass123,Analyst
-John Smith,john@company.com,,Senior Analyst`;
+const CSV_TEMPLATE = `fullName,email,password,department
+Jane Doe,jane@company.com,YourTempPass123,Finance
+John Smith,john@company.com,,Operations`;
 
 function readStoredAdminUser(): { businessUnit?: string; tenantName?: string } | null {
   for (const key of ['nexa-user', 'cpanelUser'] as const) {
@@ -83,8 +81,8 @@ const UsersManagement: React.FC = () => {
   const [inviteEmployeeOpen, setInviteEmployeeOpen] = useState(false);
   const [csvUploading, setCsvUploading] = useState(false);
   const csvInputRef = useRef<HTMLInputElement>(null);
-  const [inviteForm, setInviteForm] = useState({ fullName: '', email: '' });
-  const [employeeInviteForm, setEmployeeInviteForm] = useState({ fullName: '', email: '' });
+  const [inviteForm, setInviteForm] = useState({ firstName: '', lastName: '', email: '' });
+  const [employeeInviteForm, setEmployeeInviteForm] = useState({ firstName: '', lastName: '', email: '', department: '' });
   const [inviteSubmitting, setInviteSubmitting] = useState(false);
   const [employeeInviteSubmitting, setEmployeeInviteSubmitting] = useState(false);
   const [inviteError, setInviteError] = useState('');
@@ -95,8 +93,9 @@ const UsersManagement: React.FC = () => {
     fullName: '',
     email: '',
     password: '',
-    grade: 'Analyst' as (typeof GRADES)[number]
+    department: ''
   });
+  const [departments, setDepartments] = useState<{ _id: string; name: string }[]>([]);
 
   const isSuperPath = location.pathname.startsWith('/super-admin');
   const token = useMemo(
@@ -188,6 +187,20 @@ const UsersManagement: React.FC = () => {
     fetchUsers();
   }, [fetchUsers]);
 
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await axios.get('/api/v1/admin/auth/departments', { headers });
+        if (!cancelled) setDepartments(data.departments || []);
+      } catch (err) {
+        if (!cancelled) setDepartments([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [token, headers]);
+
   const downloadCsvTemplate = () => {
     const blob = new Blob([CSV_TEMPLATE], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
@@ -242,7 +255,7 @@ const UsersManagement: React.FC = () => {
         title: 'Administrator added',
         description: `Login credentials were emailed to ${inviteForm.email}.`,
       });
-      setInviteForm({ fullName: '', email: '' });
+      setInviteForm({ firstName: '', lastName: '', email: '' });
       setInviteAdminOpen(false);
     } catch (err: any) {
       setInviteError(err.response?.data?.error || err.response?.data?.message || 'Could not complete invite.');
@@ -261,7 +274,7 @@ const UsersManagement: React.FC = () => {
         title: 'Invitation sent',
         description: `A secure sign-up link was emailed to ${employeeInviteForm.email} (valid 7 days).`,
       });
-      setEmployeeInviteForm({ fullName: '', email: '' });
+      setEmployeeInviteForm({ firstName: '', lastName: '', email: '', department: '' });
       setInviteEmployeeOpen(false);
     } catch (err: any) {
       setEmployeeInviteError(
@@ -281,7 +294,7 @@ const UsersManagement: React.FC = () => {
         description: `${newUser.fullName} has been added to your business unit.`,
       });
       setIsAddModalOpen(false);
-      setNewUser({ fullName: '', email: '', password: '', grade: 'Analyst' });
+      setNewUser({ fullName: '', email: '', password: '', department: '' });
       fetchUsers();
     } catch (error: any) {
       toast({
@@ -555,22 +568,28 @@ const UsersManagement: React.FC = () => {
               />
             </div>
             <div className="space-y-2">
-              <Label className="text-sm font-bold text-slate-700">Employee grade</Label>
+              <Label className="text-sm font-bold text-slate-700">Department <span className="font-normal text-slate-400">(optional)</span></Label>
               <Select
-                value={newUser.grade}
-                onValueChange={(v) => setNewUser({ ...newUser, grade: v as (typeof GRADES)[number] })}
+                value={newUser.department || "__none__"}
+                onValueChange={(v) => setNewUser({ ...newUser, department: v === "__none__" ? "" : v })}
               >
                 <SelectTrigger className={inputBu}>
-                  <SelectValue placeholder="Grade" />
+                  <SelectValue placeholder="Select a department" />
                 </SelectTrigger>
                 <SelectContent>
-                  {GRADES.map((g) => (
-                    <SelectItem key={g} value={g}>
-                      {g}
+                  <SelectItem value="__none__">No department</SelectItem>
+                  {departments.map((d) => (
+                    <SelectItem key={d._id} value={d.name}>
+                      {d.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              {departments.length === 0 ? (
+                <p className="text-xs text-slate-400">
+                  No departments yet for this business unit. You can leave this blank.
+                </p>
+              ) : null}
             </div>
             <Button type="submit" className="w-full h-12 rounded-xl font-bold text-white" style={{ backgroundColor: 'var(--brand-color)' }}>
               Create user
@@ -583,9 +602,9 @@ const UsersManagement: React.FC = () => {
               Bulk import (CSV)
             </div>
             <p className="text-xs text-slate-500 font-medium leading-relaxed">
-              Columns: <span className="font-bold text-slate-700">fullName</span>, <span className="font-bold text-slate-700">email</span>, optional{" "}
+              Columns: <span className="font-bold text-slate-700">fullName</span> (or <span className="font-bold text-slate-700">firstName</span> + <span className="font-bold text-slate-700">lastName</span>), <span className="font-bold text-slate-700">email</span>, optional{" "}
               <span className="font-bold text-slate-700">password</span> (min 6 chars — if blank, a temporary password is generated and emailed), optional{" "}
-              <span className="font-bold text-slate-700">grade</span> (defaults to Analyst).
+              <span className="font-bold text-slate-700">department</span>.
             </p>
             <div className="flex flex-wrap gap-2">
               <Button type="button" variant="outline" size="sm" className="rounded-lg font-bold" onClick={downloadCsvTemplate}>
@@ -625,15 +644,27 @@ const UsersManagement: React.FC = () => {
             {employeeInviteError ? (
               <div className="p-4 bg-red-50 border border-red-100 text-red-600 rounded-xl text-xs font-bold">{employeeInviteError}</div>
             ) : null}
-            <div className="space-y-2">
-              <Label className="text-sm font-bold text-slate-700">Full name</Label>
-              <Input
-                value={employeeInviteForm.fullName}
-                onChange={(e) => setEmployeeInviteForm({ ...employeeInviteForm, fullName: e.target.value })}
-                className={inputBu}
-                required
-                placeholder="e.g. Jane Doe"
-              />
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label className="text-sm font-bold text-slate-700">First name</Label>
+                <Input
+                  value={employeeInviteForm.firstName}
+                  onChange={(e) => setEmployeeInviteForm({ ...employeeInviteForm, firstName: e.target.value })}
+                  className={inputBu}
+                  required
+                  placeholder="Jane"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-sm font-bold text-slate-700">Last name</Label>
+                <Input
+                  value={employeeInviteForm.lastName}
+                  onChange={(e) => setEmployeeInviteForm({ ...employeeInviteForm, lastName: e.target.value })}
+                  className={inputBu}
+                  required
+                  placeholder="Doe"
+                />
+              </div>
             </div>
             <div className="space-y-2">
               <Label className="text-sm font-bold text-slate-700">Work email</Label>
@@ -645,6 +676,25 @@ const UsersManagement: React.FC = () => {
                 required
                 placeholder="colleague@company.com"
               />
+            </div>
+            <div className="space-y-2">
+              <Label className="text-sm font-bold text-slate-700">Department <span className="font-normal text-slate-400">(optional)</span></Label>
+              <Select
+                value={employeeInviteForm.department || "__none__"}
+                onValueChange={(v) => setEmployeeInviteForm({ ...employeeInviteForm, department: v === "__none__" ? "" : v })}
+              >
+                <SelectTrigger className={inputBu}>
+                  <SelectValue placeholder="Select a department" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">No department</SelectItem>
+                  {departments.map((d) => (
+                    <SelectItem key={d._id} value={d.name}>
+                      {d.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <SheetFooter className="mt-auto px-0 flex-row gap-3 sm:gap-3">
               <Button type="button" variant="ghost" className="flex-1 rounded-xl font-bold" onClick={() => setInviteEmployeeOpen(false)}>
@@ -676,15 +726,27 @@ const UsersManagement: React.FC = () => {
             {inviteError ? (
               <div className="p-4 bg-red-50 border border-red-100 text-red-600 rounded-xl text-xs font-bold">{inviteError}</div>
             ) : null}
-            <div className="space-y-2">
-              <Label className="text-sm font-bold text-slate-700">Full name</Label>
-              <Input
-                value={inviteForm.fullName}
-                onChange={(e) => setInviteForm({ ...inviteForm, fullName: e.target.value })}
-                className={inputBu}
-                required
-                placeholder="e.g. Jane Doe"
-              />
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label className="text-sm font-bold text-slate-700">First name</Label>
+                <Input
+                  value={inviteForm.firstName}
+                  onChange={(e) => setInviteForm({ ...inviteForm, firstName: e.target.value })}
+                  className={inputBu}
+                  required
+                  placeholder="Jane"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-sm font-bold text-slate-700">Last name</Label>
+                <Input
+                  value={inviteForm.lastName}
+                  onChange={(e) => setInviteForm({ ...inviteForm, lastName: e.target.value })}
+                  className={inputBu}
+                  required
+                  placeholder="Doe"
+                />
+              </div>
             </div>
             <div className="space-y-2">
               <Label className="text-sm font-bold text-slate-700">Work email</Label>

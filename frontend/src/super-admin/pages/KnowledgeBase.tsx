@@ -63,17 +63,6 @@ import { cn } from "@/lib/utils";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import type { UserGroupRow } from "../components/UserGroupsPanel";
 
-const ALL_GRADES_TOKEN = "ALL";
-
-const EMPLOYEE_GRADE_KEYS = new Set([
-  "Executive",
-  "Senior VP",
-  "VP",
-  "Associate",
-  "Senior Analyst",
-  "Analyst"
-]);
-
 const TYPE_LABELS: Record<string, string> = {
   policy: "Policy",
   procedure: "S&OP / procedure",
@@ -101,17 +90,12 @@ const SENSITIVITY_LEVELS: { value: string; label: string }[] = [
   { value: "restricted", label: "Restricted" }
 ];
 
-function docUsesSpecificGrades(allowed?: string[]): boolean {
-  return (allowed ?? []).some((g) => EMPLOYEE_GRADE_KEYS.has(g));
-}
-
 export type RagDocumentRow = {
   _id: string;
   title: string;
   businessUnit: string;
   documentType: string;
   sensitivityLevel: string;
-  allowedGrades?: string[];
   allowedGroupIds?: string[];
   documentSeriesId?: string;
   version?: number;
@@ -337,7 +321,6 @@ const KnowledgeBase: React.FC = () => {
       if (trimmedContent && !file) {
         formData.append("content", trimmedContent);
       }
-      formData.append("allowedGrades", ALL_GRADES_TOKEN);
       if (isSuper) {
         formData.append("businessUnit", targetBusinessUnit);
       }
@@ -417,7 +400,7 @@ const KnowledgeBase: React.FC = () => {
       setIsSavingAccess(true);
       const { data } = await axios.patch(
         `/api/v1/admin/documents/${detailDoc._id}/access`,
-        { allowedGroupIds: editGroupIds, allowedGrades: detailDoc.allowedGrades ?? ["ALL"] },
+        { allowedGroupIds: editGroupIds },
         { headers }
       );
       toast({
@@ -1044,7 +1027,6 @@ const KnowledgeBase: React.FC = () => {
                   Sensitivity
                 </TableHead>
                 <TableHead className="font-bold text-slate-400 uppercase text-[10px] tracking-widest">Status</TableHead>
-                <TableHead className="font-bold text-slate-400 uppercase text-[10px] tracking-widest">Grades</TableHead>
                 <TableHead className="font-bold text-slate-400 uppercase text-[10px] tracking-widest">File</TableHead>
                 <TableHead className="font-bold text-slate-400 uppercase text-[10px] tracking-widest">Created</TableHead>
                 <TableHead className="w-[120px]" />
@@ -1125,25 +1107,6 @@ const KnowledgeBase: React.FC = () => {
                     <Badge className={cn("text-[10px] font-bold border-0 capitalize", statusBadgeClass(doc.processingStatus))}>
                       {doc.processingStatus}
                     </Badge>
-                  </TableCell>
-                  <TableCell>
-                    {!docUsesSpecificGrades(doc.allowedGrades) ? (
-                      <span className="text-xs font-bold text-[var(--brand-color)]">All users</span>
-                    ) : (
-                      <div className="flex flex-wrap gap-1 max-w-[180px]">
-                        {(doc.allowedGrades ?? [])
-                          .filter((g) => EMPLOYEE_GRADE_KEYS.has(g))
-                          .map((g) => (
-                            <Badge
-                              key={g}
-                              variant="secondary"
-                              className="text-[10px] font-bold rounded-md px-2 py-0.5 bg-[var(--brand-color)]/10 text-[var(--brand-color)] border-0"
-                            >
-                              {g}
-                            </Badge>
-                          ))}
-                      </div>
-                    )}
                   </TableCell>
                   <TableCell>
                     <span className="text-xs font-bold text-slate-600 truncate max-w-[140px] block" title={doc.originalFilename}>
