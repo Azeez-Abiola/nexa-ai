@@ -38,6 +38,34 @@ function hashToken(token: string): string {
   return crypto.createHash("sha256").update(token).digest("hex");
 }
 
+/** Hash the bytes of a file on disk so we can dedupe identical logo uploads. */
+function hashFile(absolutePath: string): string {
+  const buf = fs.readFileSync(absolutePath);
+  return crypto.createHash("sha256").update(buf).digest("hex");
+}
+
+/**
+ * If the just-uploaded logo file matches an existing tenant's logoHash, delete the
+ * orphan from disk and return the offending tenant so the caller can 409. Otherwise
+ * returns the new logo's hash so the caller can persist it on the BusinessUnit.
+ */
+async function detectDuplicateLogo(uploadedFile: Express.Multer.File): Promise<
+  { duplicate: { name: string; label: string }; freedHash: null } | { duplicate: null; freedHash: string }
+> {
+  const filePath = path.join(logosDir, uploadedFile.filename);
+  const logoHash = hashFile(filePath);
+  const collision = await BusinessUnit.findOne({ logoHash });
+  if (collision) {
+    try {
+      fs.unlinkSync(filePath);
+    } catch {
+      /* best-effort cleanup */
+    }
+    return { duplicate: { name: collision.name, label: collision.label }, freedHash: null };
+  }
+  return { duplicate: null, freedHash: logoHash };
+}
+
 // ─── TENANT MANAGEMENT ────────────────────────────────────────────────────────
 
 // GET /provisioning/tenants — list all tenants
@@ -86,13 +114,25 @@ provisioningRouter.post(
       if (nameTaken) return res.status(409).json({ error: `Tenant name "${name}" already exists` });
       if (slugTaken) return res.status(409).json({ error: `Slug "${slug}" is already taken` });
 
-      const logoPath = req.file ? `/logos/${req.file.filename}` : undefined;
+      let logoPath: string | undefined;
+      let logoHash: string | undefined;
+      if (req.file) {
+        const dedupe = await detectDuplicateLogo(req.file);
+        if (dedupe.duplicate) {
+          return res.status(409).json({
+            error: `That logo is already used by tenant "${dedupe.duplicate.label}". Upload a different image.`
+          });
+        }
+        logoPath = `/logos/${req.file.filename}`;
+        logoHash = dedupe.freedHash;
+      }
 
       const tenant = await BusinessUnit.create({
         name,
         label,
         slug: slug.toLowerCase(),
         logo: logoPath,
+        logoHash,
         contactEmail: contactEmail || undefined,
         colorCode: colorCode || "#ed0000",
         /** Inactive until a super-admin activates the tenant (employees cannot register until then). */
@@ -495,7 +535,18 @@ provisioningRouter.post("/access-requests/:id/provision", superAdminMiddleware, 
       });
     }
 
-    const logoPath = req.file ? `/logos/${req.file.filename}` : undefined;
+    let logoPath: string | undefined;
+    let logoHash: string | undefined;
+    if (req.file) {
+      const dedupe = await detectDuplicateLogo(req.file);
+      if (dedupe.duplicate) {
+        return res.status(409).json({
+          error: `That logo is already used by tenant "${dedupe.duplicate.label}". Provision again with a different image.`
+        });
+      }
+      logoPath = `/logos/${req.file.filename}`;
+      logoHash = dedupe.freedHash;
+    }
 
     // Create the tenant — activate immediately since the request has already been vetted
     const tenant = await BusinessUnit.create({
@@ -503,6 +554,7 @@ provisioningRouter.post("/access-requests/:id/provision", superAdminMiddleware, 
       label,
       slug,
       logo: logoPath,
+      logoHash,
       contactEmail: request.workEmail,
       colorCode,
       isActive: true
