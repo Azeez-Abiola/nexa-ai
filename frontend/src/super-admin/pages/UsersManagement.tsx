@@ -88,7 +88,8 @@ const UsersManagement: React.FC = () => {
   const { toast } = useToast();
 
   const [newUser, setNewUser] = useState({
-    fullName: '',
+    firstName: '',
+    lastName: '',
     email: '',
     password: '',
     department: ''
@@ -270,10 +271,10 @@ const UsersManagement: React.FC = () => {
       await axios.post('/api/v1/admin/auth/users', newUser, { headers });
       toast({
         title: "Success",
-        description: `${newUser.fullName} has been added to your business unit.`,
+        description: `${newUser.firstName} ${newUser.lastName} has been added to your business unit.`,
       });
       setIsAddModalOpen(false);
-      setNewUser({ fullName: '', email: '', password: '', department: '' });
+      setNewUser({ firstName: '', lastName: '', email: '', password: '', department: '' });
       fetchUsers();
     } catch (error: any) {
       toast({
@@ -533,14 +534,27 @@ const UsersManagement: React.FC = () => {
             </SheetDescription>
           </SheetHeader>
           <form onSubmit={handleAddUser} className="mt-8 space-y-5 px-1">
-            <div className="space-y-2">
-              <label className="text-sm font-bold text-slate-700">Full name</label>
-              <Input
-                value={newUser.fullName}
-                onChange={(e) => setNewUser({ ...newUser, fullName: e.target.value })}
-                className={inputBu}
-                required
-              />
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <label className="text-sm font-bold text-slate-700">First name</label>
+                <Input
+                  value={newUser.firstName}
+                  onChange={(e) => setNewUser({ ...newUser, firstName: e.target.value })}
+                  className={inputBu}
+                  required
+                  placeholder="Jane"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-bold text-slate-700">Last name</label>
+                <Input
+                  value={newUser.lastName}
+                  onChange={(e) => setNewUser({ ...newUser, lastName: e.target.value })}
+                  className={inputBu}
+                  required
+                  placeholder="Doe"
+                />
+              </div>
             </div>
             <div className="space-y-2">
               <label className="text-sm font-bold text-slate-700">Email</label>

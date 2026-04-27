@@ -468,11 +468,23 @@ adminAuthRouter.get("/users", adminAuthMiddleware, async (req: AuthenticatedRequ
 // Create User — BU admins can create users for their BU
 adminAuthRouter.post("/users", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { email, password, fullName, department } = req.body;
+    const { email, password, firstName, lastName, fullName: fullNameLegacy, department } = req.body;
     const { businessUnit } = req;
 
-    if (!email || !password || !fullName || !businessUnit) {
-      return res.status(400).json({ error: "Email, password, and fullName are required" });
+    // Prefer firstName + lastName (matches the rest of the platform); fall back to a
+    // legacy single fullName only if neither was provided.
+    const resolvedFullName = (() => {
+      const f = typeof firstName === "string" ? firstName.trim() : "";
+      const l = typeof lastName === "string" ? lastName.trim() : "";
+      if (f && l) return `${f} ${l}`;
+      if (typeof fullNameLegacy === "string" && fullNameLegacy.trim()) return fullNameLegacy.trim();
+      return "";
+    })();
+
+    if (!email || !password || !resolvedFullName || !businessUnit) {
+      return res.status(400).json({
+        error: "email, password, firstName and lastName are required"
+      });
     }
 
     const existingUser = await User.findOne({ email: email.toLowerCase() });
@@ -484,7 +496,7 @@ adminAuthRouter.post("/users", adminAuthMiddleware, async (req: AuthenticatedReq
     const user = new User({
       email: email.toLowerCase(),
       password: hashedPassword,
-      fullName,
+      fullName: resolvedFullName,
       businessUnit,
       department: department ? String(department).trim() : undefined,
       emailVerified: true
