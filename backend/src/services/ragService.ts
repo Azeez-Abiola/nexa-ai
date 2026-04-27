@@ -25,6 +25,8 @@ export interface RetrievedChunk {
   version?: number;
   /** When false, chunk belongs to a superseded upload (kept for non-policy types) */
   isLatestVersion?: boolean;
+  /** ISO date — when this chunk was created (≈ when the document was uploaded). */
+  uploadedAt?: string;
 }
 
 /** Policy-like types: retrieval keeps only the latest version chunk set */
@@ -192,6 +194,7 @@ export async function retrieveRelevantChunks(query: RAGQuery): Promise<RAGResult
         content: 1,
         chunkIndex: 1,
         documentId: 1,
+        createdAt: 1,
         "metadata.documentTitle": 1,
         "metadata.documentType": 1,
         "metadata.documentSeriesId": 1,
@@ -217,7 +220,8 @@ export async function retrieveRelevantChunks(query: RAGQuery): Promise<RAGResult
       documentId: r.documentId?.toString() || "",
       documentSeriesId: r.metadata?.documentSeriesId || "",
       version: typeof r.metadata?.version === "number" ? r.metadata.version : 1,
-      isLatestVersion: r.metadata?.isLatestVersion !== false
+      isLatestVersion: r.metadata?.isLatestVersion !== false,
+      uploadedAt: r.createdAt ? new Date(r.createdAt).toISOString() : undefined
     }));
 
   const versionFiltered = applyLatestVersionFilter(mapped);
@@ -248,8 +252,11 @@ export function buildRAGContext(chunks: RetrievedChunk[]): string {
     const v =
       chunk.version != null && chunk.version > 1 ? ` — file version v${chunk.version}` : "";
     const superseded = chunk.isLatestVersion === false ? " (superseded upload)" : "";
+    // Surface the upload date so the model can answer "when was the code of conduct
+    // last updated?" without guessing.
+    const uploaded = chunk.uploadedAt ? ` — uploaded ${chunk.uploadedAt.slice(0, 10)}` : "";
     return [
-      `[Chunk ${i + 1}] Source: ${chunk.documentTitle} (${chunk.documentType})${v}${superseded} — relevance: ${score}%`,
+      `[Chunk ${i + 1}] Source: ${chunk.documentTitle} (${chunk.documentType})${v}${superseded}${uploaded} — relevance: ${score}%`,
       chunk.content,
       "---"
     ].join("\n");
