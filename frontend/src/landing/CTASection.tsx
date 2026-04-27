@@ -16,8 +16,8 @@ const CTASection = () => {
         >
           <p className="mono-text text-xs text-primary mb-3 uppercase tracking-widest">Get Started</p>
           <h2 className="text-2xl sm:text-3xl md:text-5xl font-black tracking-tight text-balance mb-4 px-1">
-            Ready to <span className="gradient-text">Supercharge</span> <br className="hidden sm:block" />
-            Your Team?
+            Ready to Unlock Your <br className="hidden sm:block" />
+            Organization's <span className="gradient-text">Intelligence</span>?
           </h2>
           <p className="text-muted-foreground max-w-xl mx-auto text-base sm:text-lg mb-6 sm:mb-8 px-1">
             Join forward-thinking enterprises that trust Nexa AI to turn internal knowledge into a competitive advantage.

@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { DollarSign, Scale, HardHat, Settings, LineChart, TrendingUp, Megaphone } from "lucide-react";
+import { DollarSign, Scale, HardHat, Settings, TrendingUp, Megaphone } from "lucide-react";
 
 const cases = [
   { icon: DollarSign, dept: "Finance & Reporting", prompt: '"Walk me through the P&L and flag material changes vs last year"', desc: "Analyze quarterly reports, build management packs, and prep leadership reviews in seconds. Compare periods, explain variances, and surface key metrics — with answers tied to your uploaded filings and internal commentary." },
@@ -8,7 +8,6 @@ const cases = [
   { icon: Scale, dept: "Compliance", prompt: '"Show me the latest anti-bribery policy and when it was last updated"', desc: "Instant access to policies, regulatory documents, and full audit trails for every interaction." },
   { icon: HardHat, dept: "HSE", prompt: '"What is the emergency evacuation procedure for Building 7?"', desc: "Quickly retrieve safety procedures, incident protocols, and training materials when every second counts." },
   { icon: Settings, dept: "Operations", prompt: '"What is the SOP for onboarding a new vendor?"', desc: "Reduce dependency on tribal knowledge. Standard procedures available to everyone, instantly." },
-  { icon: LineChart, dept: "Executives", prompt: '"What were our top 3 risk factors last quarter?"', desc: "Ask strategic questions, get instant insights backed by your organization's actual data." },
 ];
 
 const UseCasesSection = () => (
