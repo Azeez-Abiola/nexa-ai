@@ -106,7 +106,7 @@ const SuperAdminLogin: React.FC = () => {
             >
               <p className="text-base font-black uppercase tracking-[0.2em] mb-4 opacity-80">Admin Insight</p>
               <p className="text-xl font-bold leading-relaxed">
-                "System-wide performance is optimized. All 24 tenant business units are currently operating within peak efficiency parameters."
+                "System-wide performance is optimized. Tenants across the platform are operating within peak efficiency parameters."
               </p>
             </motion.div>
           </div>

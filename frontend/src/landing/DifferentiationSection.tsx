@@ -2,7 +2,7 @@ import { motion } from "framer-motion";
 import { Database, Lock, Brain, Layers } from "lucide-react";
 
 const diffs = [
-  { icon: Database, title: "Built for Internal Data", desc: "Unlike generic AI tools, Nexa AI works exclusively with your approved internal documents — no hallucinated external data." },
+  { icon: Database, title: "Built for Internal Data", desc: "Unlike generic AI tools, Nexa AI works with your approved internal documents — no hallucinated external data." },
   { icon: Lock, title: "Secure & Controlled", desc: "Enterprise-grade access controls, approval workflows, and audit logging. Your data never leaves your environment." },
   { icon: Brain, title: "Context-Aware Responses", desc: "Nexa AI understands organizational context — departments, roles, document relationships — for truly relevant answers." },
   { icon: Layers, title: "Knowledge + Analytics", desc: "Not just retrieval. Nexa AI combines knowledge base search with analytical intelligence for deeper insights." },
@@ -14,7 +14,7 @@ const DifferentiationSection = () => (
       <motion.div initial={{ opacity: 0 }} whileInView={{ opacity: 1 }} viewport={{ once: true }} className="text-center mb-16">
         <p className="mono-text text-xs text-primary mb-3 uppercase tracking-widest">Why Nexa AI</p>
         <h2 className="text-2xl sm:text-3xl md:text-5xl font-black tracking-tight text-balance mb-4 px-1">
-          Not Another <span className="gradient-text">Chatbot</span>
+          Beyond a <span className="gradient-text">Generic Assistant</span>
         </h2>
         <p className="text-muted-foreground max-w-2xl mx-auto text-lg">
           Nexa AI is purpose-built for enterprise knowledge — not a generic AI with your data bolted on.

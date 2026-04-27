@@ -1,33 +1,24 @@
-import { Mail, Linkedin, Youtube, Instagram, Twitter, ArrowRight, ArrowUp } from "lucide-react";
+import { Mail, Linkedin, Youtube, Instagram, Twitter, ArrowRight } from "lucide-react";
 import { Link } from "react-router-dom";
-import { scrollToPageTop } from "@/lib/scrollToPageTop";
 
-const platformLinks = [
-  { label: "Secure enterprise chat", href: "#features" },
-  { label: "Document search & RAG", href: "#features" },
-  { label: "Knowledge groups & access control", href: "#use-cases" },
-  { label: "Compliance & audit-ready answers", href: "#security" },
-  { label: "Analytics for adoption & usage", href: "#features" },
+const industryLinks = [
+  { label: "Financial services", href: "#use-cases" },
+  { label: "Investments & asset management", href: "#use-cases" },
+  { label: "Energy & manufacturing", href: "#use-cases" },
+  { label: "Sales & marketing", href: "#use-cases" },
+  { label: "Compliance & legal", href: "#use-cases" },
 ];
 
 const Footer = () => (
   <footer className="relative flex w-full max-w-full flex-col overflow-x-hidden border-t border-border/40 bg-white pt-12 sm:pt-16 md:pt-20">
     <div className="container relative z-10 mx-auto w-full max-w-6xl min-w-0 px-4 sm:px-6">
       <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-        <div className="flex min-w-0 flex-1 items-center gap-3">
+        <Link to="/" className="flex min-w-0 flex-1 items-center gap-3">
           <div className="flex shrink-0 items-center justify-center">
-            <img src="/1879-22.png" alt="Nexa AI Logo" className="h-9 w-9 object-contain sm:h-10 sm:w-10" />
+            <img src="/1879-22.png" alt="1879 Tech Hub" className="h-9 w-9 object-contain sm:h-10 sm:w-10" />
           </div>
           <span className="min-w-0 truncate font-bold tracking-tight text-[#1A1A1A] text-xl sm:text-2xl">nexa.ai</span>
-        </div>
-        <button
-          type="button"
-          aria-label="Back to top"
-          onClick={() => scrollToPageTop()}
-          className="inline-flex h-11 w-11 shrink-0 items-center justify-center self-start rounded-full bg-primary text-white shadow-lg shadow-primary/25 transition-opacity hover:opacity-90 sm:self-auto"
-        >
-          <ArrowUp className="h-5 w-5" strokeWidth={2.5} />
-        </button>
+        </Link>
       </div>
 
       <div className="mb-12 grid grid-cols-1 gap-10 sm:mb-16 sm:gap-12 md:grid-cols-2 lg:grid-cols-4">
@@ -39,11 +30,11 @@ const Footer = () => (
           </p>
           <div className="flex flex-wrap items-center gap-3">
             <a
-              href="mailto:hi@nexa.com"
+              href="mailto:hi@1879techub.com"
               className="inline-flex max-w-full items-center gap-2 rounded-full border border-border/40 bg-[#F8F9FF] px-4 py-2 text-sm font-bold text-[#1A1A1A] transition-all hover:border-primary/20"
             >
               <Mail size={16} className="shrink-0 text-primary" />
-              <span className="truncate">hi@nexa.com</span>
+              <span className="truncate">hi@1879techub.com</span>
               <ArrowRight size={14} className="ml-1 shrink-0 opacity-40" />
             </a>
           </div>
@@ -62,9 +53,9 @@ const Footer = () => (
         </div>
 
         <div className="min-w-0">
-          <h4 className="mb-4 font-sans font-bold text-[#1A1A1A] sm:mb-6">Platform</h4>
+          <h4 className="mb-4 font-sans font-bold text-[#1A1A1A] sm:mb-6">Industries</h4>
           <ul className="space-y-3 sm:space-y-4">
-            {platformLinks.map((link) => (
+            {industryLinks.map((link) => (
               <li key={link.label}>
                 <a href={link.href} className="text-sm font-medium text-muted-foreground transition-colors hover:text-primary">
                   {link.label}

@@ -211,7 +211,7 @@ const HeroSection = () => {
             className="mt-16 sm:mt-24 pt-8 sm:pt-12 border-t border-border/40"
           >
             <p className="text-[13px] font-bold text-muted-foreground/60 uppercase tracking-[0.2em] mb-10">
-              Connect Nexa to the apps you love
+              Businesses we serve
             </p>
             <div className="flex flex-wrap justify-center items-center gap-x-6 sm:gap-x-10 md:gap-x-12 gap-y-5 sm:gap-y-8 opacity-40 grayscale hover:grayscale-0 transition-all duration-500">
               {["Phoenix", "Foxen", "Boycott", "Arts Mafia", "Natural"].map((partner) => (

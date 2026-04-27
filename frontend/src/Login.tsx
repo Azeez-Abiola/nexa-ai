@@ -3,6 +3,7 @@ import axios from "axios";
 import { motion, AnimatePresence } from "framer-motion";
 import { FiX, FiCheckCircle, FiEye, FiEyeOff, FiArrowRight, FiMail, FiLock, FiUser, FiBriefcase, FiChevronLeft } from "react-icons/fi";
 import { Sparkles } from "lucide-react";
+import { Link } from "react-router-dom";
 import { PrivacyPolicy } from "./components/PrivacyPolicy";
 import { Button } from "@/components/ui/button";
 
@@ -288,12 +289,12 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
         <div className="absolute bottom-0 left-0 w-[600px] h-[600px] bg-primary/5 rounded-full blur-[120px] -ml-64 -mb-64 pointer-events-none" />
         
         <div className="relative z-10 max-w-2xl mx-auto lg:mx-0 w-full">
-          <div className="flex items-center gap-4 mb-16">
+          <Link to="/" className="flex items-center gap-4 mb-16 w-fit">
             <div className="flex items-center justify-center">
-              <img src="/1879-22.png" alt="Nexa AI Logo" className="w-12 h-12 object-contain" />
+              <img src="/1879-22.png" alt="1879 Tech Hub" className="w-12 h-12 object-contain" />
             </div>
             <span className="font-bold text-3xl text-[#1A1A1A] tracking-tight">nexa.ai</span>
-          </div>
+          </Link>
 
           <div className="space-y-10">
             <h1 className="text-5xl md:text-6xl lg:text-7xl font-semibold tracking-tight text-[#1A1A1A] leading-[1.05] font-sans">

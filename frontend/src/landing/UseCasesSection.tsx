@@ -1,9 +1,10 @@
 import { motion } from "framer-motion";
-import { DollarSign, Scale, HardHat, Settings, LineChart, FileSpreadsheet } from "lucide-react";
+import { DollarSign, Scale, HardHat, Settings, LineChart, TrendingUp, Megaphone } from "lucide-react";
 
 const cases = [
-  { icon: DollarSign, dept: "Finance", prompt: '"Summarize Q3 revenue vs Q2 and highlight anomalies"', desc: "Analyze quarterly reports in seconds. Compare periods, spot trends, surface key metrics — no spreadsheets required." },
-  { icon: FileSpreadsheet, dept: "Financial reporting", prompt: '"Walk me through the P&L and flag material changes vs last year"', desc: "Financial modules for management packs and statutory-style reports. Compare business lines, explain variances, and prep leadership reviews with answers tied to your uploaded filings and internal commentary." },
+  { icon: DollarSign, dept: "Finance & Reporting", prompt: '"Walk me through the P&L and flag material changes vs last year"', desc: "Analyze quarterly reports, build management packs, and prep leadership reviews in seconds. Compare periods, explain variances, and surface key metrics — with answers tied to your uploaded filings and internal commentary." },
+  { icon: TrendingUp, dept: "Investments", prompt: '"Compare returns across our portfolio holdings and flag underperformers"', desc: "Surface portfolio performance, benchmark against targets, and pull underlying memos and deal documents into a single conversation grounded in your approved data." },
+  { icon: Megaphone, dept: "Sales & Marketing", prompt: '"Pull the latest pricing approval and the campaign brief for Q2"', desc: "Reach approved pitch decks, pricing matrices, campaign briefs, and customer references on demand — so reps and marketers spend less time hunting and more time closing." },
   { icon: Scale, dept: "Compliance", prompt: '"Show me the latest anti-bribery policy and when it was last updated"', desc: "Instant access to policies, regulatory documents, and full audit trails for every interaction." },
   { icon: HardHat, dept: "HSE", prompt: '"What is the emergency evacuation procedure for Building 7?"', desc: "Quickly retrieve safety procedures, incident protocols, and training materials when every second counts." },
   { icon: Settings, dept: "Operations", prompt: '"What is the SOP for onboarding a new vendor?"', desc: "Reduce dependency on tribal knowledge. Standard procedures available to everyone, instantly." },

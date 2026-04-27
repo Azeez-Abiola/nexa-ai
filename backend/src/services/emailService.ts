@@ -99,7 +99,7 @@ function escapeHtml(s: string): string {
     .replace(/"/g, "&quot;");
 }
 
-/** Public marketing / contact form — delivered to CONTACT_INBOX_EMAIL or hi@nexa.com */
+/** Public marketing / contact form — delivered to CONTACT_INBOX_EMAIL or info@1879techub.com */
 export async function sendContactFormInquiry(payload: {
   name: string;
   email: string;
@@ -107,7 +107,7 @@ export async function sendContactFormInquiry(payload: {
   message: string;
   intent?: string;
 }): Promise<void> {
-  const inbox = process.env.CONTACT_INBOX_EMAIL || "hi@nexa.com";
+  const inbox = process.env.CONTACT_INBOX_EMAIL || "info@1879techub.com";
   const prefix = payload.intent === "demo" ? "[Demo request] " : "[Contact] ";
   const html = `
     <p><strong>Name:</strong> ${escapeHtml(payload.name)}</p>

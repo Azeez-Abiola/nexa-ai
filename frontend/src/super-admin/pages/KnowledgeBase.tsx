@@ -78,17 +78,19 @@ const TYPE_LABELS: Record<string, string> = {
   policy: "Policy",
   procedure: "S&OP / procedure",
   handbook: "Handbook",
-  contract: "Contract",
+  contract: "Contact",
   report: "Financial reports",
+  operational_report: "Operational reports",
   other: "Other"
 };
 
 const DOCUMENT_TYPE_OPTIONS: { value: string; label: string }[] = [
   { value: "policy", label: "Policy" },
   { value: "report", label: "Financial reports" },
+  { value: "operational_report", label: "Operational reports" },
   { value: "procedure", label: "S&OP / operations" },
   { value: "handbook", label: "Handbook" },
-  { value: "contract", label: "Contract" },
+  { value: "contract", label: "Contact" },
   { value: "other", label: "Other" }
 ];
 

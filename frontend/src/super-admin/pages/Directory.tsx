@@ -160,7 +160,7 @@ const Directory: React.FC<DirectoryProps> = ({ embedded = false, onRequestAddTen
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-3xl font-black font-['Sen'] text-slate-900">{selectedBU}</h2>
-                <Badge className="bg-emerald-50 text-emerald-600 border-none font-bold text-[10px] mt-1 tracking-widest uppercase">Verified hub</Badge>
+                <Badge className="bg-emerald-50 text-emerald-600 border-none font-bold text-[10px] mt-1 tracking-widest uppercase">Verified</Badge>
               </div>
               <p className="text-slate-400 font-medium">Core business unit profile and performance monitoring</p>
             </div>
