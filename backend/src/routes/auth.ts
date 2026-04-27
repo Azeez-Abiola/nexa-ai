@@ -250,6 +250,14 @@ authRouter.post("/login", async (req: Request<{}, {}, AuthRequest>, res: Respons
       return res.status(401).json({ error: "Invalid email or password" });
     }
 
+    // Reject deactivated user accounts before any password check.
+    // Admins are gated separately by the AdminUser.isActive flag in their own login route.
+    if (!isAdminAccount && user.isActive === false) {
+      return res.status(403).json({
+        error: "Your account has been deactivated. Please contact your administrator."
+      });
+    }
+
     // Check if email is verified
     if (!user.emailVerified && user.businessUnit !== "SUPERADMIN") {
       return res.status(403).json({ 

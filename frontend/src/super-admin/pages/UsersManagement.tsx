@@ -4,7 +4,8 @@ import { useSearchParams, useNavigate, Link, useLocation } from 'react-router-do
 import {
   Users as UsersIcon,
   UserPlus,
-  Trash2,
+  Power,
+  PowerOff,
   Search,
   Loader2,
   Network,
@@ -12,6 +13,7 @@ import {
   FileUp,
   Mail
 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -305,20 +307,30 @@ const UsersManagement: React.FC = () => {
     }
   };
 
-  const handleDeleteUser = async (userId: string) => {
+  const handleToggleUserStatus = async (userId: string) => {
     try {
       setIsDeleting(userId);
-      await axios.delete(`/api/v1/admin/auth/users/${userId}`, { headers });
+      const { data } = await axios.patch(
+        `/api/v1/admin/auth/users/${userId}/toggle-status`,
+        {},
+        { headers }
+      );
+      const wasActivated = data?.user?.isActive === true;
+      const remaining = typeof data?.activeUserCount === "number" ? data.activeUserCount : null;
       toast({
-        title: "User Deleted",
-        description: "The user has been removed from your unit.",
+        title: wasActivated ? "User reactivated" : "User deactivated",
+        description: wasActivated
+          ? "They can sign in again immediately."
+          : remaining !== null
+            ? `Their license slot is freed. ${remaining} user${remaining === 1 ? "" : "s"} still active in this business unit.`
+            : "Their license slot is freed."
       });
       fetchUsers();
-    } catch (error) {
+    } catch (error: any) {
       toast({
         title: "Error",
-        description: "Failed to delete user.",
-        variant: "destructive",
+        description: error.response?.data?.error || "Failed to update user status.",
+        variant: "destructive"
       });
     } finally {
       setIsDeleting(null);
@@ -505,19 +517,37 @@ const UsersManagement: React.FC = () => {
                     })()}
                   </TableCell>
                   <TableCell>
-                    <Badge variant="outline" className="rounded-lg bg-emerald-50 text-emerald-600 border-none font-bold text-[10px] px-3">
-                      ACTIVE
-                    </Badge>
+                    {user.isActive === false ? (
+                      <Badge variant="outline" className="rounded-lg bg-slate-100 text-slate-500 border-none font-bold text-[10px] px-3">
+                        DEACTIVATED
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="rounded-lg bg-emerald-50 text-emerald-600 border-none font-bold text-[10px] px-3">
+                        ACTIVE
+                      </Badge>
+                    )}
                   </TableCell>
                   <TableCell className="text-right pr-8">
                     <Button
                       variant="ghost"
                       size="icon"
-                      onClick={() => handleDeleteUser(user._id)}
+                      onClick={() => handleToggleUserStatus(user._id)}
                       disabled={isDeleting === user._id}
-                      className="text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all"
+                      title={user.isActive === false ? "Reactivate user" : "Deactivate user"}
+                      className={cn(
+                        "rounded-lg transition-all",
+                        user.isActive === false
+                          ? "text-emerald-500 hover:text-emerald-600 hover:bg-emerald-50"
+                          : "text-slate-400 hover:text-rose-600 hover:bg-rose-50"
+                      )}
                     >
-                      {isDeleting === user._id ? <Loader2 size={18} className="animate-spin" /> : <Trash2 size={18} />}
+                      {isDeleting === user._id ? (
+                        <Loader2 size={18} className="animate-spin" />
+                      ) : user.isActive === false ? (
+                        <Power size={18} />
+                      ) : (
+                        <PowerOff size={18} />
+                      )}
                     </Button>
                   </TableCell>
                 </TableRow>

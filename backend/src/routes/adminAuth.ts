@@ -745,6 +745,44 @@ adminAuthRouter.delete("/users/:id", adminAuthMiddleware, async (req: Authentica
   }
 });
 
+// Toggle user active/inactive — BU admins can deactivate users in their BU.
+// Deactivated users keep their data and group memberships; their license slot
+// frees up and they cannot sign in until reactivated.
+adminAuthRouter.patch("/users/:id/toggle-status", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { businessUnit, isSuperAdmin } = req;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ error: "Invalid user id" });
+    }
+
+    const user = await User.findById(id);
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    if (!isSuperAdmin && user.businessUnit !== businessUnit) {
+      return res.status(403).json({ error: "Access denied: user belongs to another business unit" });
+    }
+
+    user.isActive = user.isActive === false ? true : false;
+    await user.save();
+
+    const activeUserCount = await User.countDocuments({
+      businessUnit: user.businessUnit,
+      isActive: { $ne: false }
+    });
+
+    res.json({
+      message: `User ${user.isActive ? "activated" : "deactivated"} successfully`,
+      user: { _id: user._id, isActive: user.isActive },
+      activeUserCount
+    });
+  } catch (error) {
+    console.error("Toggle user status error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // Update Profile — BU admins can update their BU logo, label, or color
 adminAuthRouter.put(
   "/profile",
