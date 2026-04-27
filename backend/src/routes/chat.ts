@@ -186,7 +186,8 @@ chatRouter.post("/", authMiddleware, buRateLimiter, async (req: AuthenticatedReq
 
     // Build context: RAG first, keyword fallback, Google in parallel
     const context = await buildContextForQuery(userMessage, businessUnit, {
-      userId: req.userId
+      userId: req.userId,
+      userDepartment: req.department
     });
 
     if (context.accessDenied) {

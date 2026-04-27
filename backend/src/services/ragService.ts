@@ -2,6 +2,7 @@ import { createHash } from "crypto";
 import { Types } from "mongoose";
 import { DocumentChunk } from "../models/DocumentChunk";
 import { KnowledgeGroup } from "../models/KnowledgeGroup";
+import { RagDocument } from "../models/RagDocument";
 import { generateEmbedding } from "./embeddingService";
 import { redisConnection } from "../queue/connection";
 import logger from "../utils/logger";
@@ -11,8 +12,17 @@ export interface RAGQuery {
   businessUnit: string;
   /** When set, knowledge-group restrictions on chunks are enforced */
   userId?: string;
+  /** Soft gate: chunks whose parent doc has a matching department get a relevance boost. */
+  userDepartment?: string;
   topK?: number;
 }
+
+/**
+ * Department soft-gate boost. Multiplies vector similarity by this factor when the
+ * employee's department matches the document's department. 1.15 ≈ "promote one
+ * tier in the ranking" without locking other-department results out entirely.
+ */
+const DEPARTMENT_BOOST_FACTOR = 1.15;
 
 export interface RetrievedChunk {
   content: string;
@@ -225,12 +235,43 @@ export async function retrieveRelevantChunks(query: RAGQuery): Promise<RAGResult
     }));
 
   const versionFiltered = applyLatestVersionFilter(mapped);
+
+  // Department soft-gate boost. We resolve which retrieved docs share the user's
+  // department in a single batched query, then multiply the score on matching chunks.
+  // Non-matching department chunks aren't filtered out — just deprioritized.
+  let boostedDocIds = new Set<string>();
+  if (query.userDepartment && versionFiltered.length > 0) {
+    const dept = query.userDepartment.trim();
+    if (dept) {
+      const docIds = Array.from(new Set(versionFiltered.map((c) => c.documentId).filter(Boolean)));
+      try {
+        const matchingDocs = await RagDocument.find({
+          _id: { $in: docIds },
+          department: dept
+        })
+          .select("_id")
+          .lean();
+        boostedDocIds = new Set(matchingDocs.map((d) => String(d._id)));
+        for (const chunk of versionFiltered) {
+          if (boostedDocIds.has(chunk.documentId)) {
+            chunk.score *= DEPARTMENT_BOOST_FACTOR;
+          }
+        }
+      } catch (err) {
+        // Boost is a best-effort enhancement — never let a boost-lookup failure break retrieval.
+        logger.warn("[RAG] department boost lookup failed", { err: (err as Error).message });
+      }
+    }
+  }
+
   const chunks: RetrievedChunk[] = versionFiltered.sort((a, b) => b.score - a.score).slice(0, topK);
 
   logger.info("[RAG] Retrieval complete", {
     query: query.query.substring(0, 80),
     businessUnit: query.businessUnit,
     userId: query.userId || null,
+    userDepartment: query.userDepartment || null,
+    departmentBoosted: boostedDocIds.size,
     chunksReturned: chunks.length,
     topScore: chunks[0]?.score ?? 0,
     queryEmbeddingLatencyMs,

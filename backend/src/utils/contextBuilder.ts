@@ -19,6 +19,8 @@ export interface ContextBuildOptions {
   topK?: number;
   /** Employee user id — used for knowledge-group access on RAG chunks */
   userId?: string;
+  /** Employee department — used as a relevance boost (soft gate) on RAG chunks. */
+  userDepartment?: string;
 }
 
 
@@ -63,7 +65,7 @@ export async function buildContextForQuery(
   businessUnit: string,
   options: ContextBuildOptions = {}
 ): Promise<ContextBuildResult> {
-  const { useRAG = true, topK, userId } = options;
+  const { useRAG = true, topK, userId, userDepartment } = options;
   const useGoogle = options.useGoogle !== false && needsWebSearch(query);
 
   let ragChunks: RetrievedChunk[] = [];
@@ -78,7 +80,7 @@ export async function buildContextForQuery(
   // and the countDocuments round-trip was adding 50–150ms on the critical path for zero correctness gain.
   if (useRAG) {
     try {
-      const ragOutcome = await retrieveRelevantChunks({ query, businessUnit, userId, topK });
+      const ragOutcome = await retrieveRelevantChunks({ query, businessUnit, userId, topK, userDepartment });
       if (ragOutcome?.chunks?.length) {
         ragChunks = ragOutcome.chunks;
         source = "rag";
