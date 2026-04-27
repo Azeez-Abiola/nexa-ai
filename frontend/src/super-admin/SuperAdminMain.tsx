@@ -41,6 +41,7 @@ import Administration from './pages/Administration';
 import AccessRequests from './pages/AccessRequests';
 import Departments from './pages/Departments';
 import ForceChangePasswordModal from './components/ForceChangePasswordModal';
+import NotificationsBell from './components/NotificationsBell';
 import EmailDomains from './pages/EmailDomains';
 import AuditLogs from './pages/AuditLogs';
 import HelpSupport from './pages/HelpSupport';
@@ -313,6 +314,7 @@ const SuperAdminMain: React.FC<SuperAdminMainProps> = ({ theme, toggleTheme }) =
                 {isSuperAdminContext ? "Nexa AI" : (user?.tenantLabel || user?.businessUnit || "Admin")}
               </p>
             </div>
+            <NotificationsBell isDark={theme === 'dark'} />
             <div
               className={cn(
                 "flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border transition-colors",
@@ -362,6 +364,7 @@ const SuperAdminMain: React.FC<SuperAdminMainProps> = ({ theme, toggleTheme }) =
                 )}
                 <p className={cn("text-sm font-bold leading-none", theme === 'dark' ? "text-white" : "text-slate-900")}>{user?.fullName || user?.email}</p>
               </div>
+              <NotificationsBell isDark={theme === 'dark'} />
               <div
                 className={cn(
                   "flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border transition-colors",

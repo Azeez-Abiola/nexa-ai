@@ -9,6 +9,7 @@ import { adminAuthMiddleware, AuthenticatedRequest } from "../middleware/auth";
 import { uploadDocument, deleteDocument } from "../services/cloudinaryService";
 import { cleanupDocumentChunks } from "../services/documentProcessingService";
 import { documentQueue } from "../queue/documentQueue";
+import { notifyDocumentAdded } from "../services/notificationService";
 import { logDocumentUpload } from "../services/auditService";
 import logger from "../utils/logger";
 
@@ -335,6 +336,29 @@ adminDocumentsRouter.post("/", upload.single("file"), async (req: AuthenticatedR
       jobId: job.id,
       businessUnit: targetBU
     });
+
+    // In-app notifications. Group-restricted docs fan out to those groups' members,
+    // otherwise we notify every active user in the BU. Fire-and-forget on failure.
+    (async () => {
+      let userIds: string[] | undefined;
+      if (parsedGroupObjectIds.length > 0) {
+        const groups = await KnowledgeGroup.find({ _id: { $in: parsedGroupObjectIds } })
+          .select("memberUserIds")
+          .lean();
+        const ids = new Set<string>();
+        for (const g of groups) {
+          for (const uid of g.memberUserIds || []) ids.add(String(uid));
+        }
+        userIds = Array.from(ids);
+      }
+      await notifyDocumentAdded({
+        businessUnit: targetBU!,
+        title: doc.title,
+        documentId: String(doc._id),
+        uploadedBy: adminName || adminEmail || "your admin",
+        userIds
+      });
+    })().catch((err) => logger.error("[AdminDocuments] notification fanout failed", { err: (err as Error).message }));
 
     res.status(201).json({
       document: {

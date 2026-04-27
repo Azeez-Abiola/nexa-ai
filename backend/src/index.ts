@@ -31,6 +31,8 @@ import { startWorker } from "./queue/documentWorker";
 import { startUserDocumentWorker } from "./queue/userDocumentWorker";
 import { userDocumentsRouter } from "./routes/userDocuments";
 import { documentGenerationRouter } from "./routes/documentGeneration";
+import { notificationsRouter } from "./routes/notifications";
+import { notifySuperAdminsAccessRequest } from "./services/notificationService";
 
 const app = express();
 
@@ -113,6 +115,7 @@ app.use("/api/v1/analytics", analyticsRouter);
 app.use("/api/v1/provisioning", provisioningRouter);
 app.use("/api/v1/employee-invite", employeeInviteRouter);
 app.use("/api/v1", documentGenerationRouter);
+app.use("/api/v1/notifications", notificationsRouter);
 
 // Public endpoint for fetching business units (no auth required)
 app.get("/api/v1/public/business-units", async (_req, res) => {
@@ -206,6 +209,13 @@ app.post("/api/v1/public/request-access", async (req, res) => {
 
     sendAccessRequestReceived(request.workEmail, request.companyName)
       .catch(err => logger.error("Access request confirmation email failed", { err }));
+
+    // In-app notification for every super-admin (fire-and-forget — never throws).
+    notifySuperAdminsAccessRequest({
+      companyName: request.companyName,
+      workEmail: request.workEmail,
+      requestId: String(request._id)
+    });
 
     res.status(201).json({ message: "Request submitted successfully. We'll be in touch." });
   } catch (error) {
