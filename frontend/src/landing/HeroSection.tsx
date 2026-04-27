@@ -203,24 +203,68 @@ const HeroSection = () => {
             <div className="absolute -bottom-10 -left-10 w-32 h-32 bg-accent/10 rounded-full blur-3xl -z-10" />
           </motion.div>
 
-          {/* Trust/Partners Section (Inspired by the bottom of the first screenshot) */}
+          {/* Trust/Partners Section (Infinite Ticker) */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 1, delay: 1.2 }}
-            className="mt-16 sm:mt-24 pt-8 sm:pt-12 border-t border-border/40"
+            className="mt-16 sm:mt-24 pt-8 sm:pt-12 border-t border-border/40 overflow-hidden"
           >
-            <p className="text-[13px] font-bold text-muted-foreground/60 uppercase tracking-[0.2em] mb-10">
-              Connect Nexa to the apps you love
+            <p className="text-[13px] font-bold text-muted-foreground/60 uppercase tracking-[0.2em] mb-10 text-center">
+              Businesses we serve
             </p>
-            <div className="flex flex-wrap justify-center items-center gap-x-6 sm:gap-x-10 md:gap-x-12 gap-y-5 sm:gap-y-8 opacity-40 grayscale hover:grayscale-0 transition-all duration-500">
-              {["Phoenix", "Foxen", "Boycott", "Arts Mafia", "Natural"].map((partner) => (
-                <span key={partner} className="text-base sm:text-lg md:text-2xl font-black tracking-tighter text-[#1A1A1A]">
-                  {partner}
-                </span>
-              ))}
+            
+            <div className="relative group left-1/2 -translate-x-1/2 w-screen overflow-hidden">
+              {/* Gradient Masks for smooth fade */}
+              <div className="absolute left-0 top-0 bottom-0 w-20 sm:w-32 bg-gradient-to-r from-[#F8F9FF] to-transparent z-10 pointer-events-none" />
+              <div className="absolute right-0 top-0 bottom-0 w-20 sm:w-32 bg-gradient-to-l from-[#F8F9FF] to-transparent z-10 pointer-events-none" />
+              
+              <motion.div 
+                className="flex whitespace-nowrap gap-x-12 sm:gap-x-20 md:gap-x-24 py-4"
+                animate={{
+                  x: [0, -1035], // Approximate width of one set
+                }}
+                transition={{
+                  x: {
+                    repeat: Infinity,
+                    repeatType: "loop",
+                    duration: 30,
+                    ease: "linear",
+                  },
+                }}
+              >
+                {(() => {
+                  const partners = [
+                    { name: "UAC of Nigeria PLC", logo: "/uacn.png" },
+                    { name: "Livestock Feeds PLC", logo: "/livestockfeeds.png" },
+                    { name: "Chemical Allied and Paint (CAP PLC)", logo: "/capplc.png" },
+                    { name: "UAC Foods Limited", logo: "/uacfoods.png" },
+                    { name: "CHI Limited", logo: "/chivita.png" },
+                    { name: "Grand Cereals Limited", logo: "/grandcereal.png" },
+                    { name: "UAC Restaurants", logo: "/uac-restaurant.png" },
+                  ];
+                  // Duplicate for seamless loop
+                  return [...partners, ...partners].map((partner, idx) => (
+                    <div
+                      key={`${partner.name}-${idx}`}
+                      className="flex items-center gap-3 sm:gap-4 shrink-0 opacity-60 hover:opacity-100 transition-opacity duration-300 cursor-default"
+                    >
+                      <img
+                        src={partner.logo}
+                        alt={`${partner.name} logo`}
+                        className="h-8 sm:h-10 md:h-12 w-auto object-contain shrink-0"
+                        loading="lazy"
+                      />
+                      <span className="text-sm sm:text-base md:text-lg font-bold tracking-tight text-[#1A1A1A]">
+                        {partner.name}
+                      </span>
+                    </div>
+                  ));
+                })()}
+              </motion.div>
             </div>
           </motion.div>
+
         </div>
       </div>
     </section>
