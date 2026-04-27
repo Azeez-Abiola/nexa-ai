@@ -14,8 +14,10 @@ import {
   Calendar,
   Layers,
   PlusCircle,
-  Download
+  Download,
+  UserPlus
 } from 'lucide-react';
+import InviteAdminSheet from '../components/InviteAdminSheet';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -38,6 +40,8 @@ const Directory: React.FC<DirectoryProps> = ({ embedded = false, onRequestAddTen
   const [buDetails, setBuDetails] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
+  const [inviteAdminOpen, setInviteAdminOpen] = useState(false);
+  const [inviteAdminBu, setInviteAdminBu] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     fetchBUs();
@@ -165,7 +169,24 @@ const Directory: React.FC<DirectoryProps> = ({ embedded = false, onRequestAddTen
               <p className="text-slate-400 font-medium">Core business unit profile and performance monitoring</p>
             </div>
           </div>
+          <Button
+            onClick={() => {
+              setInviteAdminBu(selectedBU || undefined);
+              setInviteAdminOpen(true);
+            }}
+            className="bg-[#ed0000] hover:bg-[#c40000] text-white rounded-xl h-11 px-6 shadow-lg shadow-red-900/10 flex items-center gap-2 group font-bold w-fit"
+          >
+            <UserPlus size={18} />
+            Invite admin
+          </Button>
         </div>
+
+        <InviteAdminSheet
+          isOpen={inviteAdminOpen}
+          onClose={() => setInviteAdminOpen(false)}
+          onSuccess={() => fetchBUDetails(selectedBU!)}
+          defaultBusinessUnit={inviteAdminBu}
+        />
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <ProfileStatCard value={buDetails.stats.users} label="Individual users" icon={<Users size={16} />} color="blue" />
@@ -258,6 +279,17 @@ const Directory: React.FC<DirectoryProps> = ({ embedded = false, onRequestAddTen
             Export CSV
           </button>
           <Button
+            variant="outline"
+            onClick={() => {
+              setInviteAdminBu(undefined);
+              setInviteAdminOpen(true);
+            }}
+            className="rounded-xl h-11 px-5 border-slate-200 bg-white text-slate-700 hover:border-[#ed0000]/40 hover:text-[#ed0000] flex items-center gap-2 font-bold"
+          >
+            <UserPlus size={18} />
+            Invite admin
+          </Button>
+          <Button
             onClick={() => {
               if (embedded) onRequestAddTenant?.();
               else navigate('/super-admin/tenants');
@@ -336,6 +368,13 @@ const Directory: React.FC<DirectoryProps> = ({ embedded = false, onRequestAddTen
           ))}
         </div>
       )}
+
+      <InviteAdminSheet
+        isOpen={inviteAdminOpen}
+        onClose={() => setInviteAdminOpen(false)}
+        onSuccess={fetchBUs}
+        defaultBusinessUnit={inviteAdminBu}
+      />
     </div>
   );
 };
