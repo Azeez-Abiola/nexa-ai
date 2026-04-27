@@ -253,11 +253,39 @@ adminAuthRouter.post("/login", async (req: Request<{}, {}, AdminAuthRequest>, re
         tenantLogo,
         tenantColor,
         tenantLabel,
-        emailVerified: admin.emailVerified
+        emailVerified: admin.emailVerified,
+        mustChangePassword: admin.mustChangePassword === true
       }
     });
   } catch (error) {
     console.error("Admin login error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// First-login forced password change.
+// Admins provisioned with auto-generated passwords land here on first sign-in.
+// The auth middleware accepts the token issued at login; the body provides the new password.
+adminAuthRouter.post("/change-password-first-login", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { newPassword } = req.body as { newPassword?: string };
+    if (!newPassword || typeof newPassword !== "string" || newPassword.length < 8) {
+      return res.status(400).json({ error: "newPassword is required and must be at least 8 characters." });
+    }
+    if (!req.adminId) {
+      return res.status(401).json({ error: "Authenticated admin context missing." });
+    }
+
+    const admin = await AdminUser.findById(req.adminId);
+    if (!admin) return res.status(404).json({ error: "Admin not found" });
+
+    admin.password = await bcryptjs.hash(newPassword, 10);
+    admin.mustChangePassword = false;
+    await admin.save();
+
+    res.json({ message: "Password updated. You can keep using the platform." });
+  } catch (error) {
+    console.error("Change password (first login) error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -998,7 +1026,8 @@ adminAuthRouter.post("/invite-peer-admin", adminAuthMiddleware, async (req: Auth
       fullName,
       businessUnit: bu,
       password: hashedPassword,
-      emailVerified: true
+      emailVerified: true,
+      mustChangePassword: true
     });
 
     await AdminInvite.create({

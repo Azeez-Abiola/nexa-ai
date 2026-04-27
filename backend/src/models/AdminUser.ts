@@ -13,6 +13,8 @@ export interface AdminUserDocument extends Document {
   resetToken?: string;
   resetTokenExpiry?: Date;
   isActive: boolean;
+  /** True when the password was auto-generated and the admin must change it on first sign-in. */
+  mustChangePassword: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -30,6 +32,7 @@ const AdminUserSchema = new Schema<AdminUserDocument>(
     password: { type: String, required: true },
     emailVerified: { type: Boolean, default: false },
     isActive: { type: Boolean, default: true },
+    mustChangePassword: { type: Boolean, default: false },
     emailVerificationOTP: { type: String, default: null },
     emailVerificationOTPExpiry: { type: Date, default: null },
     resetToken: { type: String, default: null },

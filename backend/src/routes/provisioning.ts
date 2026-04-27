@@ -112,7 +112,8 @@ provisioningRouter.post(
             fullName: label + " Administrator",
             businessUnit: name,
             password: hashedPassword,
-            emailVerified: true
+            emailVerified: true,
+            mustChangePassword: true
           });
 
           // Send email with credentials
@@ -239,7 +240,8 @@ provisioningRouter.post("/invite", superAdminMiddleware, async (req: Authenticat
       fullName,
       businessUnit,
       password: hashedPassword,
-      emailVerified: true // Superadmin-created accounts are pre-verified
+      emailVerified: true, // Superadmin-created accounts are pre-verified
+      mustChangePassword: true
     });
 
     // Also create an AdminInvite record for auditing/logging (status: accepted)
@@ -512,7 +514,8 @@ provisioningRouter.post("/access-requests/:id/provision", superAdminMiddleware, 
         fullName: adminFullName,
         businessUnit: tenant.name,
         password: hashedPassword,
-        emailVerified: true
+        emailVerified: true,
+        mustChangePassword: true
       });
 
       // Audit record

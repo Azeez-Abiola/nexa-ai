@@ -40,6 +40,7 @@ import KnowledgeBase from './pages/KnowledgeBase';
 import Administration from './pages/Administration';
 import AccessRequests from './pages/AccessRequests';
 import Departments from './pages/Departments';
+import ForceChangePasswordModal from './components/ForceChangePasswordModal';
 import EmailDomains from './pages/EmailDomains';
 import AuditLogs from './pages/AuditLogs';
 import HelpSupport from './pages/HelpSupport';
@@ -551,6 +552,13 @@ const SuperAdminMain: React.FC<SuperAdminMainProps> = ({ theme, toggleTheme }) =
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <ForceChangePasswordModal
+        open={!!user && user.mustChangePassword === true}
+        onSuccess={() => {
+          setUser((prev: any) => (prev ? { ...prev, mustChangePassword: false } : prev));
+        }}
+      />
     </div>
   );
 };
