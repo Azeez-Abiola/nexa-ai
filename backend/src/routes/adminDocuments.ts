@@ -128,7 +128,7 @@ adminDocumentsRouter.get("/:id", async (req: AuthenticatedRequest, res) => {
 // ─── Upload new document ───────────────────────────────────────────────────────
 adminDocumentsRouter.post("/", upload.single("file"), async (req: AuthenticatedRequest, res) => {
   try {
-    const { title, documentType, sensitivityLevel, content } = req.body;
+    const { title, documentType, sensitivityLevel, content, department } = req.body;
     const file = req.file;
     const { businessUnit: tokenBU, adminId, email: adminEmail, fullName: adminName, isSuperAdmin } = req;
 
@@ -276,9 +276,11 @@ adminDocumentsRouter.post("/", upload.single("file"), async (req: AuthenticatedR
     );
 
     // Create RagDocument record
+    const trimmedDepartment = typeof department === "string" ? department.trim() : "";
     const doc = await RagDocument.create({
       title,
       businessUnit: targetBU,
+      department: trimmedDepartment || undefined,
       documentType: docType,
       sensitivityLevel,
       documentSeriesId,

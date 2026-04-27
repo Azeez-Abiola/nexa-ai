@@ -94,6 +94,7 @@ export type RagDocumentRow = {
   _id: string;
   title: string;
   businessUnit: string;
+  department?: string;
   documentType: string;
   sensitivityLevel: string;
   allowedGroupIds?: string[];
@@ -150,6 +151,8 @@ const KnowledgeBase: React.FC = () => {
   const [file, setFile] = useState<File | null>(null);
   const [content, setContent] = useState("");
   const [documentType, setDocumentType] = useState("policy");
+  const [department, setDepartment] = useState("");
+  const [departments, setDepartments] = useState<{ _id: string; name: string }[]>([]);
   const [tenantOptions, setTenantOptions] = useState<{ _id: string; name: string; slug: string }[]>([]);
   const [targetBusinessUnit, setTargetBusinessUnit] = useState("");
   const [replacesDocumentId, setReplacesDocumentId] = useState("");
@@ -205,6 +208,25 @@ const KnowledgeBase: React.FC = () => {
   useEffect(() => {
     fetchUserGroups();
   }, [fetchUserGroups]);
+
+  useEffect(() => {
+    if (!token || isSuper) {
+      // Departments are scoped to a single BU's admin token. Super-admin chooses
+      // a tenant via the businessUnit dropdown; the department list is BU-admin only.
+      setDepartments([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await axios.get("/api/v1/admin/auth/departments", { headers });
+        if (!cancelled) setDepartments(data.departments || []);
+      } catch {
+        if (!cancelled) setDepartments([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [token, headers, isSuper]);
 
   const loadFilterGroups = useCallback(async () => {
     const bu = isSuper ? filterTenantSlug : effectiveBusinessUnit;
@@ -315,6 +337,7 @@ const KnowledgeBase: React.FC = () => {
       formData.append("title", title.trim());
       formData.append("documentType", documentType);
       formData.append("sensitivityLevel", sensitivityLevel);
+      if (department) formData.append("department", department);
       if (file) {
         formData.append("file", file);
       }
@@ -469,6 +492,7 @@ const KnowledgeBase: React.FC = () => {
     setFile(null);
     setContent("");
     setDocumentType("policy");
+    setDepartment("");
     setReplacesDocumentId("");
     setAmbiguousCandidates(null);
     setForceNewSeries(false);
@@ -791,6 +815,30 @@ const KnowledgeBase: React.FC = () => {
                     </Select>
                   </div>
 
+                  {!isSuper ? (
+                    <div className="space-y-2">
+                      <Label className="text-sm font-bold text-slate-700">Department <span className="font-normal text-slate-400">(optional)</span></Label>
+                      <Select value={department || "__none__"} onValueChange={(v) => setDepartment(v === "__none__" ? "" : v)}>
+                        <SelectTrigger className="h-12 rounded-xl border-slate-200">
+                          <SelectValue placeholder="Select a department" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">No department</SelectItem>
+                          {departments.map((d) => (
+                            <SelectItem key={d._id} value={d.name}>
+                              {d.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {departments.length === 0 ? (
+                        <p className="text-xs text-slate-400 font-medium">
+                          No departments configured yet. Add some on the Departments page if you want documents tagged by team.
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : null}
+
                   <div className="space-y-3">
                     <Label className="text-sm font-bold text-slate-700">File or pasted text</Label>
                     {!file ? (
@@ -1021,6 +1069,7 @@ const KnowledgeBase: React.FC = () => {
                   <TableHead className="font-bold text-slate-400 uppercase text-[10px] tracking-widest">BU</TableHead>
                 )}
                 <TableHead className="font-bold text-slate-400 uppercase text-[10px] tracking-widest">Type</TableHead>
+                <TableHead className="font-bold text-slate-400 uppercase text-[10px] tracking-widest">Department</TableHead>
                 <TableHead className="font-bold text-slate-400 uppercase text-[10px] tracking-widest">Source</TableHead>
                 <TableHead className="font-bold text-slate-400 uppercase text-[10px] tracking-widest">User groups</TableHead>
                 <TableHead className="font-bold text-slate-400 uppercase text-[10px] tracking-widest">
@@ -1068,6 +1117,18 @@ const KnowledgeBase: React.FC = () => {
                     <Badge variant="outline" className="text-[10px] font-bold capitalize">
                       {TYPE_LABELS[doc.documentType] || doc.documentType}
                     </Badge>
+                  </TableCell>
+                  <TableCell>
+                    {doc.department ? (
+                      <Badge
+                        variant="outline"
+                        className="text-[10px] font-bold rounded-md px-2 py-0.5 border-slate-200 text-slate-700"
+                      >
+                        {doc.department}
+                      </Badge>
+                    ) : (
+                      <span className="text-xs font-medium text-slate-400">—</span>
+                    )}
                   </TableCell>
                   <TableCell>
                     <Badge
