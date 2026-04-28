@@ -63,53 +63,33 @@ import { cn } from "@/lib/utils";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import type { UserGroupRow } from "../components/UserGroupsPanel";
 
-const ALL_GRADES_TOKEN = "ALL";
-
-const EMPLOYEE_GRADE_KEYS = new Set([
-  "Executive",
-  "Senior VP",
-  "VP",
-  "Associate",
-  "Senior Analyst",
-  "Analyst"
-]);
-
 const TYPE_LABELS: Record<string, string> = {
   policy: "Policy",
   procedure: "S&OP / procedure",
   handbook: "Handbook",
-  contract: "Contract",
+  contract: "Contact",
   report: "Financial reports",
+  operational_report: "Operational reports",
   other: "Other"
 };
 
 const DOCUMENT_TYPE_OPTIONS: { value: string; label: string }[] = [
   { value: "policy", label: "Policy" },
   { value: "report", label: "Financial reports" },
+  { value: "operational_report", label: "Operational reports" },
   { value: "procedure", label: "S&OP / operations" },
   { value: "handbook", label: "Handbook" },
-  { value: "contract", label: "Contract" },
+  { value: "contract", label: "Contact" },
   { value: "other", label: "Other" }
 ];
-
-const SENSITIVITY_LEVELS: { value: string; label: string }[] = [
-  { value: "public", label: "Public" },
-  { value: "internal", label: "Internal" },
-  { value: "confidential", label: "Confidential" },
-  { value: "restricted", label: "Restricted" }
-];
-
-function docUsesSpecificGrades(allowed?: string[]): boolean {
-  return (allowed ?? []).some((g) => EMPLOYEE_GRADE_KEYS.has(g));
-}
 
 export type RagDocumentRow = {
   _id: string;
   title: string;
   businessUnit: string;
+  department?: string;
   documentType: string;
   sensitivityLevel: string;
-  allowedGrades?: string[];
   allowedGroupIds?: string[];
   documentSeriesId?: string;
   version?: number;
@@ -164,6 +144,8 @@ const KnowledgeBase: React.FC = () => {
   const [file, setFile] = useState<File | null>(null);
   const [content, setContent] = useState("");
   const [documentType, setDocumentType] = useState("policy");
+  const [department, setDepartment] = useState("");
+  const [departments, setDepartments] = useState<{ _id: string; name: string }[]>([]);
   const [tenantOptions, setTenantOptions] = useState<{ _id: string; name: string; slug: string }[]>([]);
   const [targetBusinessUnit, setTargetBusinessUnit] = useState("");
   const [replacesDocumentId, setReplacesDocumentId] = useState("");
@@ -173,6 +155,8 @@ const KnowledgeBase: React.FC = () => {
   >(null);
   /** Escape hatch: admin intentionally uploading a same-titled file as an unrelated document. */
   const [forceNewSeries, setForceNewSeries] = useState(false);
+  /** Explicit choice on the upload form. "new" = stand-alone document, "replace" = update an existing series. */
+  const [uploadMode, setUploadMode] = useState<"new" | "replace">("new");
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([]);
   const [userGroups, setUserGroups] = useState<UserGroupRow[]>([]);
   const [userGroupsMenuOpen, setUserGroupsMenuOpen] = useState(false);
@@ -219,6 +203,25 @@ const KnowledgeBase: React.FC = () => {
   useEffect(() => {
     fetchUserGroups();
   }, [fetchUserGroups]);
+
+  useEffect(() => {
+    if (!token || isSuper) {
+      // Departments are scoped to a single BU's admin token. Super-admin chooses
+      // a tenant via the businessUnit dropdown; the department list is BU-admin only.
+      setDepartments([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await axios.get("/api/v1/admin/auth/departments", { headers });
+        if (!cancelled) setDepartments(data.departments || []);
+      } catch {
+        if (!cancelled) setDepartments([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [token, headers, isSuper]);
 
   const loadFilterGroups = useCallback(async () => {
     const bu = isSuper ? filterTenantSlug : effectiveBusinessUnit;
@@ -314,6 +317,14 @@ const KnowledgeBase: React.FC = () => {
       });
       return;
     }
+    if (uploadMode === "replace" && !replacesDocumentId) {
+      toast({
+        variant: "destructive",
+        title: "Pick the existing document",
+        description: "Choose which document this upload replaces, or switch back to 'New document'."
+      });
+      return;
+    }
     if (ambiguousCandidates && !replacesDocumentId && !forceNewSeries) {
       toast({
         variant: "destructive",
@@ -329,20 +340,23 @@ const KnowledgeBase: React.FC = () => {
       formData.append("title", title.trim());
       formData.append("documentType", documentType);
       formData.append("sensitivityLevel", sensitivityLevel);
+      if (department) formData.append("department", department);
       if (file) {
         formData.append("file", file);
       }
       if (trimmedContent && !file) {
         formData.append("content", trimmedContent);
       }
-      formData.append("allowedGrades", ALL_GRADES_TOKEN);
       if (isSuper) {
         formData.append("businessUnit", targetBusinessUnit);
       }
-      if (replacesDocumentId) {
+      if (uploadMode === "replace" && replacesDocumentId) {
         formData.append("replacesDocumentId", replacesDocumentId);
-      }
-      if (forceNewSeries) {
+      } else if (uploadMode === "new") {
+        // Explicit "this is a new document" — skip auto-replacement detection on the server
+        // even if titles collide; the admin already said it's its own series.
+        formData.append("forceNewSeries", "true");
+      } else if (forceNewSeries) {
         formData.append("forceNewSeries", "true");
       }
       if (selectedGroupIds.length > 0) {
@@ -415,7 +429,7 @@ const KnowledgeBase: React.FC = () => {
       setIsSavingAccess(true);
       const { data } = await axios.patch(
         `/api/v1/admin/documents/${detailDoc._id}/access`,
-        { allowedGroupIds: editGroupIds, allowedGrades: detailDoc.allowedGrades ?? ["ALL"] },
+        { allowedGroupIds: editGroupIds },
         { headers }
       );
       toast({
@@ -447,6 +461,7 @@ const KnowledgeBase: React.FC = () => {
   const handleStartVersionUpload = () => {
     if (!detailDoc) return;
     setVersionUploadParent(detailDoc);
+    setUploadMode("replace");
     setTitle(detailDoc.title);
     setDocumentType(detailDoc.documentType);
     setSensitivityLevel(detailDoc.sensitivityLevel);
@@ -484,11 +499,13 @@ const KnowledgeBase: React.FC = () => {
     setFile(null);
     setContent("");
     setDocumentType("policy");
+    setDepartment("");
     setReplacesDocumentId("");
     setAmbiguousCandidates(null);
     setForceNewSeries(false);
     setSelectedGroupIds([]);
     setVersionUploadParent(null);
+    setUploadMode("new");
     if (!isSuper) setTargetBusinessUnit("");
   };
 
@@ -606,13 +623,93 @@ const KnowledgeBase: React.FC = () => {
                     </div>
                   )}
 
+                  {!versionUploadParent ? (
+                    <div className="space-y-2">
+                      <Label className="text-sm font-bold text-slate-700">Type of upload</Label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setUploadMode("new");
+                            setReplacesDocumentId("");
+                          }}
+                          className={cn(
+                            "rounded-xl px-4 py-3 text-left transition-colors border",
+                            uploadMode === "new"
+                              ? "border-[var(--brand-color)] bg-[var(--brand-color)]/5 text-[var(--brand-color)]"
+                              : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
+                          )}
+                        >
+                          <p className="text-xs font-black uppercase tracking-wide">New document</p>
+                          <p className="text-[11px] font-medium mt-1 leading-snug opacity-80">
+                            Stand-alone — won't supersede anything.
+                          </p>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setUploadMode("replace")}
+                          className={cn(
+                            "rounded-xl px-4 py-3 text-left transition-colors border",
+                            uploadMode === "replace"
+                              ? "border-[var(--brand-color)] bg-[var(--brand-color)]/5 text-[var(--brand-color)]"
+                              : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
+                          )}
+                        >
+                          <p className="text-xs font-black uppercase tracking-wide">Replace existing</p>
+                          <p className="text-[11px] font-medium mt-1 leading-snug opacity-80">
+                            New version of a document already in the KB.
+                          </p>
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {uploadMode === "replace" && !versionUploadParent ? (
+                    <div className="space-y-2">
+                      <Label className="text-sm font-bold text-slate-700">Document being replaced</Label>
+                      <Select
+                        value={replacesDocumentId || "__none__"}
+                        onValueChange={(v) => {
+                          if (v === "__none__") {
+                            setReplacesDocumentId("");
+                            return;
+                          }
+                          setReplacesDocumentId(v);
+                          const doc = documents.find((d) => d._id === v);
+                          if (doc) {
+                            setTitle(doc.title);
+                            setDocumentType(doc.documentType);
+                            setSensitivityLevel(doc.sensitivityLevel);
+                          }
+                        }}
+                      >
+                        <SelectTrigger className="h-12 rounded-xl border-slate-200">
+                          <SelectValue placeholder="Choose the document this replaces" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">Pick a document…</SelectItem>
+                          {documents
+                            .filter((d) => d.processingStatus !== "superseded")
+                            .map((d) => (
+                              <SelectItem key={d._id} value={d._id}>
+                                {d.title} — v{d.version ?? 1}
+                              </SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-slate-400 leading-relaxed">
+                        The previous version stays archived so older citations still work; the new file becomes the latest.
+                      </p>
+                    </div>
+                  ) : null}
+
                   <div className="space-y-2">
                     <Label className="text-sm font-bold text-slate-700">Title</Label>
                     <Input
                       placeholder="e.g. FY24 Sales playbook"
                       value={title}
                       onChange={(e) => setTitle(e.target.value)}
-                      disabled={!!versionUploadParent}
+                      disabled={!!versionUploadParent || (uploadMode === "replace" && !!replacesDocumentId)}
                       className="h-12 rounded-xl border-slate-200 focus-visible:ring-0 focus-visible:ring-offset-0 focus:border-[var(--brand-color)] disabled:opacity-70 disabled:cursor-not-allowed"
                     />
                   </div>
@@ -790,21 +887,29 @@ const KnowledgeBase: React.FC = () => {
                     </p>
                   </div>
 
-                  <div className="space-y-2">
-                    <Label className="text-sm font-bold text-slate-700">Sensitivity</Label>
-                    <Select value={sensitivityLevel} onValueChange={setSensitivityLevel}>
-                      <SelectTrigger className="h-12 rounded-xl border-slate-200">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {SENSITIVITY_LEVELS.map((s) => (
-                          <SelectItem key={s.value} value={s.value}>
-                            {s.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
+                  {!isSuper ? (
+                    <div className="space-y-2">
+                      <Label className="text-sm font-bold text-slate-700">Department <span className="font-normal text-slate-400">(optional)</span></Label>
+                      <Select value={department || "__none__"} onValueChange={(v) => setDepartment(v === "__none__" ? "" : v)}>
+                        <SelectTrigger className="h-12 rounded-xl border-slate-200">
+                          <SelectValue placeholder="Select a department" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">No department</SelectItem>
+                          {departments.map((d) => (
+                            <SelectItem key={d._id} value={d.name}>
+                              {d.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {departments.length === 0 ? (
+                        <p className="text-xs text-slate-400 font-medium">
+                          No departments configured yet. Add some on the Departments page if you want documents tagged by team.
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : null}
 
                   <div className="space-y-3">
                     <Label className="text-sm font-bold text-slate-700">File or pasted text</Label>
@@ -1036,13 +1141,10 @@ const KnowledgeBase: React.FC = () => {
                   <TableHead className="font-bold text-slate-400 uppercase text-[10px] tracking-widest">BU</TableHead>
                 )}
                 <TableHead className="font-bold text-slate-400 uppercase text-[10px] tracking-widest">Type</TableHead>
+                <TableHead className="font-bold text-slate-400 uppercase text-[10px] tracking-widest">Department</TableHead>
                 <TableHead className="font-bold text-slate-400 uppercase text-[10px] tracking-widest">Source</TableHead>
                 <TableHead className="font-bold text-slate-400 uppercase text-[10px] tracking-widest">User groups</TableHead>
-                <TableHead className="font-bold text-slate-400 uppercase text-[10px] tracking-widest">
-                  Sensitivity
-                </TableHead>
                 <TableHead className="font-bold text-slate-400 uppercase text-[10px] tracking-widest">Status</TableHead>
-                <TableHead className="font-bold text-slate-400 uppercase text-[10px] tracking-widest">Grades</TableHead>
                 <TableHead className="font-bold text-slate-400 uppercase text-[10px] tracking-widest">File</TableHead>
                 <TableHead className="font-bold text-slate-400 uppercase text-[10px] tracking-widest">Created</TableHead>
                 <TableHead className="w-[120px]" />
@@ -1086,6 +1188,18 @@ const KnowledgeBase: React.FC = () => {
                     </Badge>
                   </TableCell>
                   <TableCell>
+                    {doc.department ? (
+                      <Badge
+                        variant="outline"
+                        className="text-[10px] font-bold rounded-md px-2 py-0.5 border-slate-200 text-slate-700"
+                      >
+                        {doc.department}
+                      </Badge>
+                    ) : (
+                      <span className="text-xs font-medium text-slate-400">—</span>
+                    )}
+                  </TableCell>
+                  <TableCell>
                     <Badge
                       variant="secondary"
                       className={cn(
@@ -1117,31 +1231,9 @@ const KnowledgeBase: React.FC = () => {
                     )}
                   </TableCell>
                   <TableCell>
-                    <span className="text-xs font-semibold text-slate-600 capitalize">{doc.sensitivityLevel}</span>
-                  </TableCell>
-                  <TableCell>
                     <Badge className={cn("text-[10px] font-bold border-0 capitalize", statusBadgeClass(doc.processingStatus))}>
                       {doc.processingStatus}
                     </Badge>
-                  </TableCell>
-                  <TableCell>
-                    {!docUsesSpecificGrades(doc.allowedGrades) ? (
-                      <span className="text-xs font-bold text-[var(--brand-color)]">All users</span>
-                    ) : (
-                      <div className="flex flex-wrap gap-1 max-w-[180px]">
-                        {(doc.allowedGrades ?? [])
-                          .filter((g) => EMPLOYEE_GRADE_KEYS.has(g))
-                          .map((g) => (
-                            <Badge
-                              key={g}
-                              variant="secondary"
-                              className="text-[10px] font-bold rounded-md px-2 py-0.5 bg-[var(--brand-color)]/10 text-[var(--brand-color)] border-0"
-                            >
-                              {g}
-                            </Badge>
-                          ))}
-                      </div>
-                    )}
                   </TableCell>
                   <TableCell>
                     <span className="text-xs font-bold text-slate-600 truncate max-w-[140px] block" title={doc.originalFilename}>
@@ -1227,10 +1319,6 @@ const KnowledgeBase: React.FC = () => {
                 <p>
                   <span className="text-slate-400">Type:</span>{" "}
                   {detailDoc && (TYPE_LABELS[detailDoc.documentType] || detailDoc.documentType)}
-                </p>
-                <p>
-                  <span className="text-slate-400">Sensitivity:</span>{" "}
-                  <span className="capitalize">{detailDoc?.sensitivityLevel}</span>
                 </p>
                 <p>
                   <span className="text-slate-400">Version:</span> v{detailDoc?.version ?? 1}

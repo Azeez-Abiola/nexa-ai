@@ -184,7 +184,7 @@ const Tenants: React.FC = () => {
             Tenant registry
           </TabsTrigger>
           <TabsTrigger value="registered" className="rounded-xl font-bold data-[state=active]:shadow-md flex-1">
-            Registered BUs
+            Manage Tenants
           </TabsTrigger>
         </TabsList>
 
@@ -205,7 +205,7 @@ const Tenants: React.FC = () => {
             </CardContent>
           </Card>
         )) : (<>
-          <MiniStatCard label="Total units" value={stats.total} icon={<Building2 size={20} />} trend="Global" />
+          <MiniStatCard label="Total tenants" value={stats.total} icon={<Building2 size={20} />} trend="Global" />
           <MiniStatCard label="Active Tenants" value={stats.active} icon={<ShieldCheck size={20} />} trend="Online" />
           <MiniStatCard label="Active users" value={activeUsersCount} icon={<Users size={20} />} trend="Staff" />
           <MiniStatCard label="Pending" value={stats.inactive} icon={<ShieldAlert size={20} />} trend="Setup" />

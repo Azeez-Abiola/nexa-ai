@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>New Access Request — Nexa AI</title>
+</head>
+<body style="margin:0;padding:0;background:#f0f0f0;font-family:Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f0f0;padding:32px 0;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;border-radius:8px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.08);">
+
+          <!-- Header -->
+          <tr>
+            <td style="background:linear-gradient(135deg,#ed0000 0%,#a00000 100%);padding:40px 32px;text-align:left;">
+              <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td width="60" style="vertical-align:middle;">
+                    <img src="http://localhost:4000/1879-22.png" alt="1879" width="45" style="display:block;border-radius:8px;filter:brightness(0) invert(1);" />
+                  </td>
+                  <td style="vertical-align:middle;padding-left:12px;">
+                    <h1 style="color:#ffffff;margin:0;font-size:22px;font-weight:700;">New Access Request</h1>
+                    <p style="color:rgba(255,255,255,0.85);margin:4px 0 0;font-size:13px;">A business has requested access to Nexa AI</p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="background:#ffffff;padding:40px 32px;">
+              <p style="color:#333;font-size:16px;margin:0 0 20px;">A new organisation has requested access to Nexa AI. Review the details below and provision their tenant when ready.</p>
+
+              <!-- Details Table -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 28px;">
+                <tr>
+                  <td style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:20px;">
+                    <table width="100%" cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td style="padding:8px 0;border-bottom:1px solid #f3f4f6;">
+                          <span style="color:#6b7280;font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;">Company</span>
+                        </td>
+                        <td style="padding:8px 0;border-bottom:1px solid #f3f4f6;text-align:right;">
+                          <span style="color:#111827;font-size:15px;font-weight:700;"><%= companyName %></span>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding:8px 0;border-bottom:1px solid #f3f4f6;">
+                          <span style="color:#6b7280;font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;">Work Email</span>
+                        </td>
+                        <td style="padding:8px 0;border-bottom:1px solid #f3f4f6;text-align:right;">
+                          <a href="mailto:<%= workEmail %>" style="color:#ed0000;font-size:14px;"><%= workEmail %></a>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding:8px 0;border-bottom:1px solid #f3f4f6;">
+                          <span style="color:#6b7280;font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;">Phone</span>
+                        </td>
+                        <td style="padding:8px 0;border-bottom:1px solid #f3f4f6;text-align:right;">
+                          <span style="color:#111827;font-size:14px;"><%= phone %></span>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding:8px 0;">
+                          <span style="color:#6b7280;font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;">Employees</span>
+                        </td>
+                        <td style="padding:8px 0;text-align:right;">
+                          <span style="color:#111827;font-size:14px;"><%= employeeCount %></span>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="color:#6b7280;font-size:13px;margin:0 0 24px;">Submitted: <%= submittedAt %></p>
+
+              <!-- CTA -->
+              <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td align="center" style="padding:8px 0 24px;">
+                    <a href="<%= reviewUrl %>"
+                       style="display:inline-block;background:#ed0000;color:#ffffff;padding:14px 36px;text-decoration:none;border-radius:6px;font-size:15px;font-weight:700;">
+                      Review in Admin Panel
+                    </a>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background:#f8f9fa;padding:24px 20px;text-align:center;border-top:1px solid #eee;">
+              <p style="color:#94a3b8;font-size:11px;margin:0;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;">&copy; <%= new Date().getFullYear() %> Nexa AI. All rights reserved.</p>
+              <p style="color:#cbd5e1;font-size:10px;margin:8px 0 0;font-weight:700;">POWERED BY 1879 TECHHUB</p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

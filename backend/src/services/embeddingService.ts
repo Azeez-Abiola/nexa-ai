@@ -42,6 +42,12 @@ const EMBED_CACHE_TTL_MS = 5 * 60 * 1000; // 5 min
 const EMBED_CACHE_MAX = 200;
 const embedCache = new Map<string, CacheEntry>();
 
+// ── In-flight deduplication ───────────────────────────────────────────────────
+// Two concurrent calls for the same query text (e.g. global RAG + session RAG
+// running in parallel for the same message) share a single OpenAI API call
+// rather than each issuing their own request.
+const inFlight = new Map<string, Promise<number[]>>();
+
 function normalizeKey(text: string): string {
   return createHash("sha256").update(text.trim().toLowerCase()).digest("hex");
 }
@@ -99,18 +105,30 @@ export async function generateEmbedding(text: string): Promise<number[]> {
     return l2;
   }
 
-  // Cache miss — call OpenAI
-  const response = await withRetry(() =>
+  // Deduplicate concurrent requests for the same text (e.g. global RAG + session RAG
+  // running in parallel share one API call instead of each issuing their own).
+  const existing = inFlight.get(key);
+  if (existing) return existing;
+
+  const promise = withRetry(() =>
     openai.embeddings.create({
       model: EMBEDDING_MODEL,
       input: text,
       dimensions: EMBEDDING_DIMENSIONS
     })
-  );
-  const embedding = response.data[0].embedding;
-  l1Set(key, embedding);
-  void l2Set(key, embedding); // fire-and-forget
-  return embedding;
+  ).then((response) => {
+    const embedding = response.data[0].embedding;
+    l1Set(key, embedding);
+    void l2Set(key, embedding);
+    inFlight.delete(key);
+    return embedding;
+  }).catch((err) => {
+    inFlight.delete(key);
+    throw err;
+  });
+
+  inFlight.set(key, promise);
+  return promise;
 }
 
 export async function generateEmbeddingBatch(

@@ -23,14 +23,16 @@ import { adminDocumentsRouter } from "./routes/adminDocuments";
 import { adminKnowledgeGroupsRouter } from "./routes/adminKnowledgeGroups";
 import { adminAuditLogsRouter } from "./routes/adminAuditLogs";
 import { BusinessUnit } from "./models/BusinessUnit";
-import { EMPLOYEE_GRADES } from "./models/User";
-import { getUACNInfo, formatBusinessUnit } from "./config/businessUnits";
 import { tenantMiddleware } from "./middleware/tenant";
 import logger from "./utils/logger";
-import { sendContactFormInquiry } from "./services/emailService";
+import { sendContactFormInquiry, sendAccessRequestNotification, sendAccessRequestReceived } from "./services/emailService";
+import { TenantRequest } from "./models/TenantRequest";
 import { startWorker } from "./queue/documentWorker";
 import { startUserDocumentWorker } from "./queue/userDocumentWorker";
 import { userDocumentsRouter } from "./routes/userDocuments";
+import { documentGenerationRouter } from "./routes/documentGeneration";
+import { notificationsRouter } from "./routes/notifications";
+import { notifySuperAdminsAccessRequest } from "./services/notificationService";
 
 const app = express();
 
@@ -112,6 +114,8 @@ app.use("/api/v1/admin/audit-logs", adminAuditLogsRouter);
 app.use("/api/v1/analytics", analyticsRouter);
 app.use("/api/v1/provisioning", provisioningRouter);
 app.use("/api/v1/employee-invite", employeeInviteRouter);
+app.use("/api/v1", documentGenerationRouter);
+app.use("/api/v1/notifications", notificationsRouter);
 
 // Public endpoint for fetching business units (no auth required)
 app.get("/api/v1/public/business-units", async (_req, res) => {
@@ -129,17 +133,7 @@ app.get("/api/v1/public/business-units", async (_req, res) => {
     res.json({ businessUnits });
   } catch (error) {
     logger.error("Get BU list error", { error });
-    // Fallback to default business units if MongoDB fetch fails
-    const fallbackUnits = [
-      { value: "GCL", label: "Grand Cereals Limited (GCL)", name: "GCL" },
-      { value: "LSF", label: "Livestocks Feeds PLC (LSF)", name: "LSF" },
-      { value: "CAP", label: "Chemical and Allied Products PLC (CAP)", name: "CAP" },
-      { value: "UFL", label: "UAC Foods Limited (UFL)", name: "UFL" },
-      { value: "CHI", label: "Chivita|Hollandia Limited (CHI)", name: "CHI" },
-      { value: "UAC-Restaurants", label: "UAC Restaurants (UAC-Restaurants)", name: "UAC-Restaurants" },
-      { value: "UPDC", label: "UPDC (UPDC)", name: "UPDC" }
-    ];
-    res.json({ businessUnits: fallbackUnits });
+    res.status(500).json({ error: "Failed to fetch business units" });
   }
 });
 
@@ -168,10 +162,66 @@ app.post("/api/v1/public/contact", async (req, res) => {
   }
 });
 
-// Public endpoint: employee grades for registration form
-// Returns the real grades only — "ALL" is a document access-control value, not an employee grade
-app.get("/api/v1/public/grades", (_req, res) => {
-  res.json({ grades: EMPLOYEE_GRADES });
+// Public endpoint: business access request (no account created — super-admin reviews and provisions)
+app.post("/api/v1/public/request-access", async (req, res) => {
+  try {
+    const { companyName, workEmail, phone, employeeCount } = req.body as Record<string, string | number | undefined>;
+
+    if (!companyName || !workEmail || !phone || employeeCount == null) {
+      return res.status(400).json({ error: "companyName, workEmail, phone, and employeeCount are required" });
+    }
+
+    const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(workEmail).trim());
+    if (!emailOk) {
+      return res.status(400).json({ error: "Please enter a valid work email address" });
+    }
+
+    const count = Number(employeeCount);
+    if (!Number.isInteger(count) || count < 1) {
+      return res.status(400).json({ error: "employeeCount must be a positive whole number" });
+    }
+
+    const normalizedEmail = String(workEmail).trim().toLowerCase();
+    const duplicate = await TenantRequest.findOne({ workEmail: normalizedEmail, status: "pending" });
+    if (duplicate) {
+      return res.status(409).json({ error: "A request is already pending for this email address" });
+    }
+
+    const request = await TenantRequest.create({
+      companyName: String(companyName).trim(),
+      workEmail: normalizedEmail,
+      phone: String(phone).trim(),
+      employeeCount: count
+    });
+
+    const reviewUrl = `${process.env.FRONTEND_URL || "http://localhost:3000"}/admin/access-requests`;
+    const submittedAt = new Date().toLocaleString("en-GB", { timeZone: "Africa/Lagos" });
+
+    // Fire-and-forget — don't block the response on email delivery
+    sendAccessRequestNotification({
+      companyName: request.companyName,
+      workEmail: request.workEmail,
+      phone: request.phone,
+      employeeCount: request.employeeCount,
+      submittedAt,
+      reviewUrl
+    }).catch(err => logger.error("Access request notification email failed", { err }));
+
+    sendAccessRequestReceived(request.workEmail, request.companyName)
+      .catch(err => logger.error("Access request confirmation email failed", { err }));
+
+    // In-app notification for every super-admin (fire-and-forget — never throws).
+    notifySuperAdminsAccessRequest({
+      companyName: request.companyName,
+      workEmail: request.workEmail,
+      requestId: String(request._id)
+    });
+
+    res.status(201).json({ message: "Request submitted successfully. We'll be in touch." });
+  } catch (error) {
+    logger.error("Request access error", { error });
+    res.status(500).json({ error: "Internal server error" });
+  }
 });
 
 // Get business unit names only (for C-Panel sidebar)
@@ -203,38 +253,6 @@ app.get('*', (req, res, next) => {
 // Only listen on a port if running as standalone (PORT env var set without being mounted)
 const mongoUri = process.env.MONGODB_URI!;
 
-// Initialize default business units
-const initializeDefaultBUs = async () => {
-  try {
-    const businessUnitData = getUACNInfo();
-    const DEFAULT_BUS = businessUnitData.map(bu => ({
-      name: bu.abbr,
-      label: `${bu.fullName} (${bu.abbr})`,
-      // Auto-generate slug from abbreviation: lowercase, replace spaces/underscores with hyphens
-      slug: bu.abbr.toLowerCase().replace(/[^a-z0-9]/g, "-")
-    }));
-
-    // Insert any BUs that don't exist yet (upsert by name)
-    for (const bu of DEFAULT_BUS) {
-      await BusinessUnit.updateOne(
-        { name: bu.name },
-        { $setOnInsert: bu },
-        { upsert: true }
-      );
-    }
-
-    // Backfill slug for any existing BUs that don't have one
-    const busMissingSlug = await BusinessUnit.find({ slug: { $exists: false } });
-    for (const bu of busMissingSlug) {
-      bu.slug = bu.name.toLowerCase().replace(/[^a-z0-9]/g, "-");
-      await bu.save();
-    }
-
-    logger.info("Business units initialized");
-  } catch (error) {
-    logger.error("Error initializing business units", { error });
-  }
-};
 
 // Initialize MongoDB connection options for better resilience
 const mongooseOptions = {
@@ -249,8 +267,6 @@ const mongooseOptions = {
 mongoose.connect(mongoUri, mongooseOptions)
   .then(async () => {
     logger.info("MongoDB connected successfully");
-    await initializeDefaultBUs();
-    
     // Check Redis availability before starting workers
     const { redisConnection } = require("./queue/connection");
     redisConnection.ping()

@@ -17,7 +17,6 @@ export interface ProcessingJob {
   cloudinaryUrl: string;
   mimeType: string;
   businessUnit: string;
-  allowedGrades: string[];
   /** Hex string ObjectIds from the job queue */
   allowedGroupIds: string[];
   sensitivityLevel: string;
@@ -57,7 +56,6 @@ export async function processDocument(job: ProcessingJob): Promise<void> {
     cloudinaryUrl,
     mimeType,
     businessUnit,
-    allowedGrades,
     allowedGroupIds: allowedGroupIdStrings,
     sensitivityLevel
   } = job;
@@ -105,7 +103,6 @@ export async function processDocument(job: ProcessingJob): Promise<void> {
     const chunkDocs = chunks.map((chunk, i) => ({
       documentId: doc._id,
       businessUnit,
-      allowedGrades,
       allowedGroupIds: allowedGroupObjectIds,
       sensitivityLevel,
       chunkIndex: chunk.chunkIndex,

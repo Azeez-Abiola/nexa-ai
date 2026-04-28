@@ -2,6 +2,7 @@ import { createHash } from "crypto";
 import { Types } from "mongoose";
 import { DocumentChunk } from "../models/DocumentChunk";
 import { KnowledgeGroup } from "../models/KnowledgeGroup";
+import { RagDocument } from "../models/RagDocument";
 import { generateEmbedding } from "./embeddingService";
 import { redisConnection } from "../queue/connection";
 import logger from "../utils/logger";
@@ -9,11 +10,19 @@ import logger from "../utils/logger";
 export interface RAGQuery {
   query: string;
   businessUnit: string;
-  userGrade: string;
   /** When set, knowledge-group restrictions on chunks are enforced */
   userId?: string;
+  /** Soft gate: chunks whose parent doc has a matching department get a relevance boost. */
+  userDepartment?: string;
   topK?: number;
 }
+
+/**
+ * Department soft-gate boost. Multiplies vector similarity by this factor when the
+ * employee's department matches the document's department. 1.15 ≈ "promote one
+ * tier in the ranking" without locking other-department results out entirely.
+ */
+const DEPARTMENT_BOOST_FACTOR = 1.15;
 
 export interface RetrievedChunk {
   content: string;
@@ -26,6 +35,8 @@ export interface RetrievedChunk {
   version?: number;
   /** When false, chunk belongs to a superseded upload (kept for non-policy types) */
   isLatestVersion?: boolean;
+  /** ISO date — when this chunk was created (≈ when the document was uploaded). */
+  uploadedAt?: string;
 }
 
 /** Policy-like types: retrieval keeps only the latest version chunk set */
@@ -63,7 +74,7 @@ function ragCacheKey(q: RAGQuery): string {
   return (
     REDIS_RAG_PREFIX +
     createHash("sha256")
-      .update(`${q.businessUnit}|${q.userGrade}|${q.userId ?? ""}|${q.topK ?? DEFAULT_TOP_K}|${q.query}`)
+      .update(`${q.businessUnit}|${q.userId ?? ""}|${q.topK ?? DEFAULT_TOP_K}|${q.query}`)
       .digest("hex")
   );
 }
@@ -164,16 +175,8 @@ export async function retrieveRelevantChunks(query: RAGQuery): Promise<RAGResult
   // Step 2b: Atlas Vector Search with pre-filter
   const retrievalStart = Date.now();
 
-  // NOTE: Atlas $vectorSearch filter only supports $gt/$gte/$lt/$lte/$eq/$ne/$in/$nin/$exists/$not.
-  // $size is NOT allowed — using it here would fail the whole pipeline (PlanExecutor error).
-  // Uploads always stamp chunks with ["ALL"] when unrestricted, so $in: ["ALL"] covers that case.
-  const gradeOr = [
-    { allowedGrades: { $in: ["ALL"] } },
-    { allowedGrades: { $in: [query.userGrade] } }
-  ];
-
-  // Same restriction for groups. Chunks without any group restriction have the field absent;
-  // chunks restricted to specific groups are only allowed when the user is a member of one.
+  // Group restriction: chunks without a group restriction are open to all BU users;
+  // chunks restricted to specific groups are only allowed when the user is a member.
   const groupOr: Record<string, unknown>[] = [
     { allowedGroupIds: { $exists: false } }
   ];
@@ -192,7 +195,7 @@ export async function retrieveRelevantChunks(query: RAGQuery): Promise<RAGResult
         limit: Math.min(Math.max(topK * 4, 15), 40), // over-fetch; then threshold + version filter
         filter: {
           businessUnit: { $eq: query.businessUnit },
-          $and: [{ $or: gradeOr }, { $or: groupOr }]
+          $or: groupOr
         }
       }
     },
@@ -201,6 +204,7 @@ export async function retrieveRelevantChunks(query: RAGQuery): Promise<RAGResult
         content: 1,
         chunkIndex: 1,
         documentId: 1,
+        createdAt: 1,
         "metadata.documentTitle": 1,
         "metadata.documentType": 1,
         "metadata.documentSeriesId": 1,
@@ -226,17 +230,48 @@ export async function retrieveRelevantChunks(query: RAGQuery): Promise<RAGResult
       documentId: r.documentId?.toString() || "",
       documentSeriesId: r.metadata?.documentSeriesId || "",
       version: typeof r.metadata?.version === "number" ? r.metadata.version : 1,
-      isLatestVersion: r.metadata?.isLatestVersion !== false
+      isLatestVersion: r.metadata?.isLatestVersion !== false,
+      uploadedAt: r.createdAt ? new Date(r.createdAt).toISOString() : undefined
     }));
 
   const versionFiltered = applyLatestVersionFilter(mapped);
+
+  // Department soft-gate boost. We resolve which retrieved docs share the user's
+  // department in a single batched query, then multiply the score on matching chunks.
+  // Non-matching department chunks aren't filtered out — just deprioritized.
+  let boostedDocIds = new Set<string>();
+  if (query.userDepartment && versionFiltered.length > 0) {
+    const dept = query.userDepartment.trim();
+    if (dept) {
+      const docIds = Array.from(new Set(versionFiltered.map((c) => c.documentId).filter(Boolean)));
+      try {
+        const matchingDocs = await RagDocument.find({
+          _id: { $in: docIds },
+          department: dept
+        })
+          .select("_id")
+          .lean();
+        boostedDocIds = new Set(matchingDocs.map((d) => String(d._id)));
+        for (const chunk of versionFiltered) {
+          if (boostedDocIds.has(chunk.documentId)) {
+            chunk.score *= DEPARTMENT_BOOST_FACTOR;
+          }
+        }
+      } catch (err) {
+        // Boost is a best-effort enhancement — never let a boost-lookup failure break retrieval.
+        logger.warn("[RAG] department boost lookup failed", { err: (err as Error).message });
+      }
+    }
+  }
+
   const chunks: RetrievedChunk[] = versionFiltered.sort((a, b) => b.score - a.score).slice(0, topK);
 
   logger.info("[RAG] Retrieval complete", {
     query: query.query.substring(0, 80),
     businessUnit: query.businessUnit,
-    userGrade: query.userGrade,
     userId: query.userId || null,
+    userDepartment: query.userDepartment || null,
+    departmentBoosted: boostedDocIds.size,
     chunksReturned: chunks.length,
     topScore: chunks[0]?.score ?? 0,
     queryEmbeddingLatencyMs,
@@ -258,8 +293,11 @@ export function buildRAGContext(chunks: RetrievedChunk[]): string {
     const v =
       chunk.version != null && chunk.version > 1 ? ` — file version v${chunk.version}` : "";
     const superseded = chunk.isLatestVersion === false ? " (superseded upload)" : "";
+    // Surface the upload date so the model can answer "when was the code of conduct
+    // last updated?" without guessing.
+    const uploaded = chunk.uploadedAt ? ` — uploaded ${chunk.uploadedAt.slice(0, 10)}` : "";
     return [
-      `[Chunk ${i + 1}] Source: ${chunk.documentTitle} (${chunk.documentType})${v}${superseded} — relevance: ${score}%`,
+      `[Chunk ${i + 1}] Source: ${chunk.documentTitle} (${chunk.documentType})${v}${superseded}${uploaded} — relevance: ${score}%`,
       chunk.content,
       "---"
     ].join("\n");

@@ -9,8 +9,9 @@ import { AdminUser } from "../models/AdminUser";
 import { User } from "../models/User";
 import { RagDocument } from "../models/RagDocument";
 import { AdminInvite } from "../models/AdminInvite";
+import { TenantRequest } from "../models/TenantRequest";
 import { superAdminMiddleware, AuthenticatedRequest } from "../middleware/auth";
-import { sendTenantCredentialsEmail } from "../services/emailService";
+import { sendTenantCredentialsEmail, sendAccessRequestRejected } from "../services/emailService";
 
 export const provisioningRouter = express.Router();
 
@@ -26,7 +27,7 @@ const logoUpload = multer({
       cb(null, `${Date.now()}${ext}`);
     }
   }),
-  limits: { fileSize: 2 * 1024 * 1024 },
+  limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     if (file.mimetype.startsWith("image/")) cb(null, true);
     else cb(new Error("Only image files are allowed"));
@@ -35,6 +36,34 @@ const logoUpload = multer({
 
 function hashToken(token: string): string {
   return crypto.createHash("sha256").update(token).digest("hex");
+}
+
+/** Hash the bytes of a file on disk so we can dedupe identical logo uploads. */
+function hashFile(absolutePath: string): string {
+  const buf = fs.readFileSync(absolutePath);
+  return crypto.createHash("sha256").update(buf).digest("hex");
+}
+
+/**
+ * If the just-uploaded logo file matches an existing tenant's logoHash, delete the
+ * orphan from disk and return the offending tenant so the caller can 409. Otherwise
+ * returns the new logo's hash so the caller can persist it on the BusinessUnit.
+ */
+async function detectDuplicateLogo(uploadedFile: Express.Multer.File): Promise<
+  { duplicate: { name: string; label: string }; freedHash: null } | { duplicate: null; freedHash: string }
+> {
+  const filePath = path.join(logosDir, uploadedFile.filename);
+  const logoHash = hashFile(filePath);
+  const collision = await BusinessUnit.findOne({ logoHash });
+  if (collision) {
+    try {
+      fs.unlinkSync(filePath);
+    } catch {
+      /* best-effort cleanup */
+    }
+    return { duplicate: { name: collision.name, label: collision.label }, freedHash: null };
+  }
+  return { duplicate: null, freedHash: logoHash };
 }
 
 // ─── TENANT MANAGEMENT ────────────────────────────────────────────────────────
@@ -85,13 +114,25 @@ provisioningRouter.post(
       if (nameTaken) return res.status(409).json({ error: `Tenant name "${name}" already exists` });
       if (slugTaken) return res.status(409).json({ error: `Slug "${slug}" is already taken` });
 
-      const logoPath = req.file ? `/logos/${req.file.filename}` : undefined;
+      let logoPath: string | undefined;
+      let logoHash: string | undefined;
+      if (req.file) {
+        const dedupe = await detectDuplicateLogo(req.file);
+        if (dedupe.duplicate) {
+          return res.status(409).json({
+            error: `That logo is already used by tenant "${dedupe.duplicate.label}". Upload a different image.`
+          });
+        }
+        logoPath = `/logos/${req.file.filename}`;
+        logoHash = dedupe.freedHash;
+      }
 
       const tenant = await BusinessUnit.create({
         name,
         label,
         slug: slug.toLowerCase(),
         logo: logoPath,
+        logoHash,
         contactEmail: contactEmail || undefined,
         colorCode: colorCode || "#ed0000",
         /** Inactive until a super-admin activates the tenant (employees cannot register until then). */
@@ -111,7 +152,8 @@ provisioningRouter.post(
             fullName: label + " Administrator",
             businessUnit: name,
             password: hashedPassword,
-            emailVerified: true
+            emailVerified: true,
+            mustChangePassword: true
           });
 
           // Send email with credentials
@@ -228,6 +270,14 @@ provisioningRouter.post("/invite", superAdminMiddleware, async (req: Authenticat
       return res.status(409).json({ error: "An admin account already exists with this email" });
     }
 
+    // One-admin-per-organization rule. Reactivate a deactivated admin instead of stacking.
+    const activeAdminForBU = await AdminUser.findOne({ businessUnit, isActive: { $ne: false } });
+    if (activeAdminForBU) {
+      return res.status(409).json({
+        error: `${businessUnit} already has an active administrator (${activeAdminForBU.email}). Deactivate that account before assigning a new admin.`
+      });
+    }
+
     // Auto-generate a secure random password
     const autoPassword = crypto.randomBytes(6).toString("hex"); // e.g. "a1b2c3d4e5f6"
     const hashedPassword = await bcryptjs.hash(autoPassword, 10);
@@ -238,7 +288,8 @@ provisioningRouter.post("/invite", superAdminMiddleware, async (req: Authenticat
       fullName,
       businessUnit,
       password: hashedPassword,
-      emailVerified: true // Superadmin-created accounts are pre-verified
+      emailVerified: true, // Superadmin-created accounts are pre-verified
+      mustChangePassword: true
     });
 
     // Also create an AdminInvite record for auditing/logging (status: accepted)
@@ -401,6 +452,196 @@ provisioningRouter.post("/invite/accept", async (req, res) => {
     });
   } catch (error) {
     console.error("Accept invite error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─── ACCESS REQUESTS ──────────────────────────────────────────────────────────
+
+// GET /provisioning/access-requests — list all access requests (filterable by status)
+provisioningRouter.get("/access-requests", superAdminMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { status } = req.query as { status?: string };
+    const filter: Record<string, string> = {};
+    if (status && ["pending", "rejected", "provisioned"].includes(status)) {
+      filter.status = status;
+    }
+    const requests = await TenantRequest.find(filter).sort({ createdAt: -1 }).lean();
+    res.json({ requests });
+  } catch (error) {
+    console.error("List access requests error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// PATCH /provisioning/access-requests/:id/reject — mark rejected and notify requester
+provisioningRouter.patch("/access-requests/:id/reject", superAdminMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { note } = req.body as { note?: string };
+    const request = await TenantRequest.findById(req.params.id);
+    if (!request) return res.status(404).json({ error: "Access request not found" });
+    if (request.status !== "pending") {
+      return res.status(400).json({ error: "Only pending requests can be rejected" });
+    }
+    request.status = "rejected";
+    request.reviewedBy = req.email!;
+    request.reviewedAt = new Date();
+    if (note) request.rejectionNote = note;
+    await request.save();
+
+    sendAccessRequestRejected(request.workEmail, request.companyName, note)
+      .catch(err => console.error("Rejection email failed:", err));
+
+    res.json({ message: "Request rejected and notification sent to the company.", request });
+  } catch (error) {
+    console.error("Reject access request error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// POST /provisioning/access-requests/:id/provision
+// One-step: create tenant + admin account + send credentials, then mark request as provisioned.
+// Works from "pending" or "approved" status so super-admin can skip the separate approve step.
+provisioningRouter.post("/access-requests/:id/provision", superAdminMiddleware, logoUpload.single("logo"), async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const request = await TenantRequest.findById(req.params.id);
+    if (!request) return res.status(404).json({ error: "Access request not found" });
+    if (request.status === "rejected" || request.status === "provisioned") {
+      return res.status(400).json({ error: `Request is already ${request.status}` });
+    }
+
+    // Allow caller to override label/slug/colorCode; fall back to sensible defaults from the request
+    const label: string = String(req.body.label || request.companyName).trim();
+    const colorCode: string = String(req.body.colorCode || "#ed0000").trim();
+
+    // Generate a slug from the company name — lowercase, spaces/special chars → hyphens
+    const baseSlug = request.companyName
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+
+    // Resolve a unique slug (append -2, -3, … on collision)
+    let slug = baseSlug;
+    let suffix = 2;
+    while (await BusinessUnit.findOne({ slug })) {
+      slug = `${baseSlug}-${suffix++}`;
+    }
+
+    // Also guard against duplicate tenant name
+    const nameTaken = await BusinessUnit.findOne({ name: request.companyName });
+    if (nameTaken) {
+      return res.status(409).json({
+        error: `A tenant named "${request.companyName}" already exists. Provision manually with a different name.`
+      });
+    }
+
+    let logoPath: string | undefined;
+    let logoHash: string | undefined;
+    if (req.file) {
+      const dedupe = await detectDuplicateLogo(req.file);
+      if (dedupe.duplicate) {
+        return res.status(409).json({
+          error: `That logo is already used by tenant "${dedupe.duplicate.label}". Provision again with a different image.`
+        });
+      }
+      logoPath = `/logos/${req.file.filename}`;
+      logoHash = dedupe.freedHash;
+    }
+
+    // Create the tenant — activate immediately since the request has already been vetted
+    const tenant = await BusinessUnit.create({
+      name: request.companyName,
+      label,
+      slug,
+      logo: logoPath,
+      logoHash,
+      contactEmail: request.workEmail,
+      colorCode,
+      isActive: true
+    });
+
+    // Auto-generate admin credentials
+    const autoPassword = crypto.randomBytes(6).toString("hex");
+    const hashedPassword = await bcryptjs.hash(autoPassword, 10);
+    const adminFullName = `${request.companyName} Administrator`;
+
+    // Prevent duplicate admin account
+    const existingAdmin = await AdminUser.findOne({ email: request.workEmail });
+    let admin;
+    if (!existingAdmin) {
+      admin = await AdminUser.create({
+        email: request.workEmail,
+        fullName: adminFullName,
+        businessUnit: tenant.name,
+        password: hashedPassword,
+        emailVerified: true,
+        mustChangePassword: true
+      });
+
+      // Audit record
+      await AdminInvite.create({
+        email: request.workEmail,
+        fullName: adminFullName,
+        businessUnit: tenant.name,
+        tenantId: tenant.tenantId,
+        status: "accepted",
+        invitedBy: req.email!,
+        expiresAt: new Date(),
+        token: "ACCESS-REQUEST-PROVISIONED"
+      });
+    }
+
+    // Send credentials email — if it fails the tenant + admin still exist; super-admin is informed
+    try {
+      await sendTenantCredentialsEmail(
+        request.workEmail,
+        adminFullName,
+        tenant.name,
+        tenant.slug,
+        autoPassword
+      );
+    } catch (emailError) {
+      console.error("Credentials email failed after provisioning:", emailError);
+      // Mark request provisioned even on email failure — don't roll back the DB writes
+      request.status = "provisioned";
+      request.reviewedBy = req.email!;
+      request.reviewedAt = new Date();
+      request.provisionedTenantId = tenant.tenantId;
+      await request.save();
+
+      return res.status(207).json({
+        message: "Tenant provisioned but credentials email could not be sent. Reset the admin password manually.",
+        tenant: { tenantId: tenant.tenantId, name: tenant.name, slug: tenant.slug },
+        adminEmail: request.workEmail
+      });
+    }
+
+    // Mark request as provisioned and link to the new tenant
+    request.status = "provisioned";
+    request.reviewedBy = req.email!;
+    request.reviewedAt = new Date();
+    request.provisionedTenantId = tenant.tenantId;
+    await request.save();
+
+    res.status(201).json({
+      message: `Tenant provisioned and credentials sent to ${request.workEmail}`,
+      tenant: {
+        tenantId: tenant.tenantId,
+        name: tenant.name,
+        label: tenant.label,
+        slug: tenant.slug,
+        subdomain: `${tenant.slug}.nexa.ai`,
+        isActive: tenant.isActive
+      },
+      admin: {
+        email: request.workEmail,
+        fullName: adminFullName,
+        existedAlready: !!existingAdmin
+      },
+      request: { id: request._id, status: request.status }
+    });
+  } catch (error) {
+    console.error("Provision from request error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });

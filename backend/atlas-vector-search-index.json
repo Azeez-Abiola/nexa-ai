@@ -17,18 +17,6 @@
         },
         {
           "type": "filter",
-          "path": "allowedGrades"
-        },
-        {
-          "type": "filter",
-          "path": "allowedGroupIds"
-        },
-        {
-          "type": "filter",
-          "path": "sensitivityLevel"
-        },
-        {
-          "type": "filter",
           "path": "documentId"
         },
         {

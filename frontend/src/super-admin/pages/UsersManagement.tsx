@@ -4,7 +4,8 @@ import { useSearchParams, useNavigate, Link, useLocation } from 'react-router-do
 import {
   Users as UsersIcon,
   UserPlus,
-  Trash2,
+  Power,
+  PowerOff,
   Search,
   Loader2,
   Network,
@@ -12,6 +13,7 @@ import {
   FileUp,
   Mail
 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -46,14 +48,12 @@ import {
   writeSuperAdminDirectoryBu
 } from '../lib/superAdminDirectoryBu';
 
-const GRADES = ['Executive', 'Senior VP', 'VP', 'Associate', 'Senior Analyst', 'Analyst'] as const;
-
 const inputBu =
   'rounded-xl h-11 border-slate-200 focus-visible:ring-2 focus-visible:ring-[var(--brand-color)] focus-visible:border-[var(--brand-color)]/55 focus-visible:ring-offset-0';
 
-const CSV_TEMPLATE = `fullName,email,password,grade
-Jane Doe,jane@company.com,YourTempPass123,Analyst
-John Smith,john@company.com,,Senior Analyst`;
+const CSV_TEMPLATE = `fullName,email,password,department
+Jane Doe,jane@company.com,YourTempPass123,Finance
+John Smith,john@company.com,,Operations`;
 
 function readStoredAdminUser(): { businessUnit?: string; tenantName?: string } | null {
   for (const key of ['nexa-user', 'cpanelUser'] as const) {
@@ -79,24 +79,22 @@ const UsersManagement: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState<string | null>(null);
-  const [inviteAdminOpen, setInviteAdminOpen] = useState(false);
   const [inviteEmployeeOpen, setInviteEmployeeOpen] = useState(false);
   const [csvUploading, setCsvUploading] = useState(false);
   const csvInputRef = useRef<HTMLInputElement>(null);
-  const [inviteForm, setInviteForm] = useState({ fullName: '', email: '' });
-  const [employeeInviteForm, setEmployeeInviteForm] = useState({ fullName: '', email: '' });
-  const [inviteSubmitting, setInviteSubmitting] = useState(false);
+  const [employeeInviteForm, setEmployeeInviteForm] = useState({ firstName: '', lastName: '', email: '', department: '' });
   const [employeeInviteSubmitting, setEmployeeInviteSubmitting] = useState(false);
-  const [inviteError, setInviteError] = useState('');
   const [employeeInviteError, setEmployeeInviteError] = useState('');
   const { toast } = useToast();
 
   const [newUser, setNewUser] = useState({
-    fullName: '',
+    firstName: '',
+    lastName: '',
     email: '',
     password: '',
-    grade: 'Analyst' as (typeof GRADES)[number]
+    department: ''
   });
+  const [departments, setDepartments] = useState<{ _id: string; name: string }[]>([]);
 
   const isSuperPath = location.pathname.startsWith('/super-admin');
   const token = useMemo(
@@ -188,6 +186,20 @@ const UsersManagement: React.FC = () => {
     fetchUsers();
   }, [fetchUsers]);
 
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await axios.get('/api/v1/admin/auth/departments', { headers });
+        if (!cancelled) setDepartments(data.departments || []);
+      } catch (err) {
+        if (!cancelled) setDepartments([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [token, headers]);
+
   const downloadCsvTemplate = () => {
     const blob = new Blob([CSV_TEMPLATE], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
@@ -232,25 +244,6 @@ const UsersManagement: React.FC = () => {
     }
   };
 
-  const handleInvitePeerAdmin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setInviteSubmitting(true);
-    setInviteError('');
-    try {
-      await axios.post('/api/v1/admin/auth/invite-peer-admin', inviteForm, { headers });
-      toast({
-        title: 'Administrator added',
-        description: `Login credentials were emailed to ${inviteForm.email}.`,
-      });
-      setInviteForm({ fullName: '', email: '' });
-      setInviteAdminOpen(false);
-    } catch (err: any) {
-      setInviteError(err.response?.data?.error || err.response?.data?.message || 'Could not complete invite.');
-    } finally {
-      setInviteSubmitting(false);
-    }
-  };
-
   const handleInviteEmployee = async (e: React.FormEvent) => {
     e.preventDefault();
     setEmployeeInviteSubmitting(true);
@@ -261,7 +254,7 @@ const UsersManagement: React.FC = () => {
         title: 'Invitation sent',
         description: `A secure sign-up link was emailed to ${employeeInviteForm.email} (valid 7 days).`,
       });
-      setEmployeeInviteForm({ fullName: '', email: '' });
+      setEmployeeInviteForm({ firstName: '', lastName: '', email: '', department: '' });
       setInviteEmployeeOpen(false);
     } catch (err: any) {
       setEmployeeInviteError(
@@ -278,10 +271,10 @@ const UsersManagement: React.FC = () => {
       await axios.post('/api/v1/admin/auth/users', newUser, { headers });
       toast({
         title: "Success",
-        description: `${newUser.fullName} has been added to your business unit.`,
+        description: `${newUser.firstName} ${newUser.lastName} has been added to your business unit.`,
       });
       setIsAddModalOpen(false);
-      setNewUser({ fullName: '', email: '', password: '', grade: 'Analyst' });
+      setNewUser({ firstName: '', lastName: '', email: '', password: '', department: '' });
       fetchUsers();
     } catch (error: any) {
       toast({
@@ -292,20 +285,30 @@ const UsersManagement: React.FC = () => {
     }
   };
 
-  const handleDeleteUser = async (userId: string) => {
+  const handleToggleUserStatus = async (userId: string) => {
     try {
       setIsDeleting(userId);
-      await axios.delete(`/api/v1/admin/auth/users/${userId}`, { headers });
+      const { data } = await axios.patch(
+        `/api/v1/admin/auth/users/${userId}/toggle-status`,
+        {},
+        { headers }
+      );
+      const wasActivated = data?.user?.isActive === true;
+      const remaining = typeof data?.activeUserCount === "number" ? data.activeUserCount : null;
       toast({
-        title: "User Deleted",
-        description: "The user has been removed from your unit.",
+        title: wasActivated ? "User reactivated" : "User deactivated",
+        description: wasActivated
+          ? "They can sign in again immediately."
+          : remaining !== null
+            ? `Their license slot is freed. ${remaining} user${remaining === 1 ? "" : "s"} still active in this business unit.`
+            : "Their license slot is freed."
       });
       fetchUsers();
-    } catch (error) {
+    } catch (error: any) {
       toast({
         title: "Error",
-        description: "Failed to delete user.",
-        variant: "destructive",
+        description: error.response?.data?.error || "Failed to update user status.",
+        variant: "destructive"
       });
     } finally {
       setIsDeleting(null);
@@ -388,18 +391,6 @@ const UsersManagement: React.FC = () => {
               >
                 <Mail size={18} className="text-[var(--brand-color)]" />
                 Invite employee
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                className="rounded-xl h-11 px-5 font-bold border-slate-200 gap-2"
-                onClick={() => {
-                  setInviteError('');
-                  setInviteAdminOpen(true);
-                }}
-              >
-                <Send size={18} className="text-[var(--brand-color)]" />
-                Invite admin
               </Button>
               <Button
                 type="button"
@@ -492,19 +483,37 @@ const UsersManagement: React.FC = () => {
                     })()}
                   </TableCell>
                   <TableCell>
-                    <Badge variant="outline" className="rounded-lg bg-emerald-50 text-emerald-600 border-none font-bold text-[10px] px-3">
-                      ACTIVE
-                    </Badge>
+                    {user.isActive === false ? (
+                      <Badge variant="outline" className="rounded-lg bg-slate-100 text-slate-500 border-none font-bold text-[10px] px-3">
+                        DEACTIVATED
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="rounded-lg bg-emerald-50 text-emerald-600 border-none font-bold text-[10px] px-3">
+                        ACTIVE
+                      </Badge>
+                    )}
                   </TableCell>
                   <TableCell className="text-right pr-8">
                     <Button
                       variant="ghost"
                       size="icon"
-                      onClick={() => handleDeleteUser(user._id)}
+                      onClick={() => handleToggleUserStatus(user._id)}
                       disabled={isDeleting === user._id}
-                      className="text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all"
+                      title={user.isActive === false ? "Reactivate user" : "Deactivate user"}
+                      className={cn(
+                        "rounded-lg transition-all",
+                        user.isActive === false
+                          ? "text-emerald-500 hover:text-emerald-600 hover:bg-emerald-50"
+                          : "text-slate-400 hover:text-rose-600 hover:bg-rose-50"
+                      )}
                     >
-                      {isDeleting === user._id ? <Loader2 size={18} className="animate-spin" /> : <Trash2 size={18} />}
+                      {isDeleting === user._id ? (
+                        <Loader2 size={18} className="animate-spin" />
+                      ) : user.isActive === false ? (
+                        <Power size={18} />
+                      ) : (
+                        <PowerOff size={18} />
+                      )}
                     </Button>
                   </TableCell>
                 </TableRow>
@@ -525,14 +534,27 @@ const UsersManagement: React.FC = () => {
             </SheetDescription>
           </SheetHeader>
           <form onSubmit={handleAddUser} className="mt-8 space-y-5 px-1">
-            <div className="space-y-2">
-              <label className="text-sm font-bold text-slate-700">Full name</label>
-              <Input
-                value={newUser.fullName}
-                onChange={(e) => setNewUser({ ...newUser, fullName: e.target.value })}
-                className={inputBu}
-                required
-              />
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <label className="text-sm font-bold text-slate-700">First name</label>
+                <Input
+                  value={newUser.firstName}
+                  onChange={(e) => setNewUser({ ...newUser, firstName: e.target.value })}
+                  className={inputBu}
+                  required
+                  placeholder="Jane"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-bold text-slate-700">Last name</label>
+                <Input
+                  value={newUser.lastName}
+                  onChange={(e) => setNewUser({ ...newUser, lastName: e.target.value })}
+                  className={inputBu}
+                  required
+                  placeholder="Doe"
+                />
+              </div>
             </div>
             <div className="space-y-2">
               <label className="text-sm font-bold text-slate-700">Email</label>
@@ -555,22 +577,28 @@ const UsersManagement: React.FC = () => {
               />
             </div>
             <div className="space-y-2">
-              <Label className="text-sm font-bold text-slate-700">Employee grade</Label>
+              <Label className="text-sm font-bold text-slate-700">Department <span className="font-normal text-slate-400">(optional)</span></Label>
               <Select
-                value={newUser.grade}
-                onValueChange={(v) => setNewUser({ ...newUser, grade: v as (typeof GRADES)[number] })}
+                value={newUser.department || "__none__"}
+                onValueChange={(v) => setNewUser({ ...newUser, department: v === "__none__" ? "" : v })}
               >
                 <SelectTrigger className={inputBu}>
-                  <SelectValue placeholder="Grade" />
+                  <SelectValue placeholder="Select a department" />
                 </SelectTrigger>
                 <SelectContent>
-                  {GRADES.map((g) => (
-                    <SelectItem key={g} value={g}>
-                      {g}
+                  <SelectItem value="__none__">No department</SelectItem>
+                  {departments.map((d) => (
+                    <SelectItem key={d._id} value={d.name}>
+                      {d.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              {departments.length === 0 ? (
+                <p className="text-xs text-slate-400">
+                  No departments yet for this business unit. You can leave this blank.
+                </p>
+              ) : null}
             </div>
             <Button type="submit" className="w-full h-12 rounded-xl font-bold text-white" style={{ backgroundColor: 'var(--brand-color)' }}>
               Create user
@@ -583,9 +611,9 @@ const UsersManagement: React.FC = () => {
               Bulk import (CSV)
             </div>
             <p className="text-xs text-slate-500 font-medium leading-relaxed">
-              Columns: <span className="font-bold text-slate-700">fullName</span>, <span className="font-bold text-slate-700">email</span>, optional{" "}
+              Columns: <span className="font-bold text-slate-700">fullName</span> (or <span className="font-bold text-slate-700">firstName</span> + <span className="font-bold text-slate-700">lastName</span>), <span className="font-bold text-slate-700">email</span>, optional{" "}
               <span className="font-bold text-slate-700">password</span> (min 6 chars — if blank, a temporary password is generated and emailed), optional{" "}
-              <span className="font-bold text-slate-700">grade</span> (defaults to Analyst).
+              <span className="font-bold text-slate-700">department</span>.
             </p>
             <div className="flex flex-wrap gap-2">
               <Button type="button" variant="outline" size="sm" className="rounded-lg font-bold" onClick={downloadCsvTemplate}>
@@ -625,15 +653,27 @@ const UsersManagement: React.FC = () => {
             {employeeInviteError ? (
               <div className="p-4 bg-red-50 border border-red-100 text-red-600 rounded-xl text-xs font-bold">{employeeInviteError}</div>
             ) : null}
-            <div className="space-y-2">
-              <Label className="text-sm font-bold text-slate-700">Full name</Label>
-              <Input
-                value={employeeInviteForm.fullName}
-                onChange={(e) => setEmployeeInviteForm({ ...employeeInviteForm, fullName: e.target.value })}
-                className={inputBu}
-                required
-                placeholder="e.g. Jane Doe"
-              />
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label className="text-sm font-bold text-slate-700">First name</Label>
+                <Input
+                  value={employeeInviteForm.firstName}
+                  onChange={(e) => setEmployeeInviteForm({ ...employeeInviteForm, firstName: e.target.value })}
+                  className={inputBu}
+                  required
+                  placeholder="Jane"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-sm font-bold text-slate-700">Last name</Label>
+                <Input
+                  value={employeeInviteForm.lastName}
+                  onChange={(e) => setEmployeeInviteForm({ ...employeeInviteForm, lastName: e.target.value })}
+                  className={inputBu}
+                  required
+                  placeholder="Doe"
+                />
+              </div>
             </div>
             <div className="space-y-2">
               <Label className="text-sm font-bold text-slate-700">Work email</Label>
@@ -646,6 +686,25 @@ const UsersManagement: React.FC = () => {
                 placeholder="colleague@company.com"
               />
             </div>
+            <div className="space-y-2">
+              <Label className="text-sm font-bold text-slate-700">Department <span className="font-normal text-slate-400">(optional)</span></Label>
+              <Select
+                value={employeeInviteForm.department || "__none__"}
+                onValueChange={(v) => setEmployeeInviteForm({ ...employeeInviteForm, department: v === "__none__" ? "" : v })}
+              >
+                <SelectTrigger className={inputBu}>
+                  <SelectValue placeholder="Select a department" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">No department</SelectItem>
+                  {departments.map((d) => (
+                    <SelectItem key={d._id} value={d.name}>
+                      {d.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <SheetFooter className="mt-auto px-0 flex-row gap-3 sm:gap-3">
               <Button type="button" variant="ghost" className="flex-1 rounded-xl font-bold" onClick={() => setInviteEmployeeOpen(false)}>
                 Cancel
@@ -657,57 +716,6 @@ const UsersManagement: React.FC = () => {
                 style={{ backgroundColor: 'var(--brand-color)' }}
               >
                 {employeeInviteSubmitting ? <Loader2 className="animate-spin" size={18} /> : 'Send invite'}
-              </Button>
-            </SheetFooter>
-          </form>
-        </SheetContent>
-      </Sheet>
-
-      <Sheet open={inviteAdminOpen} onOpenChange={setInviteAdminOpen}>
-        <SheetContent side="right" className="sm:max-w-md flex flex-col">
-          <SheetHeader className="text-left space-y-2">
-            <SheetTitle className="text-2xl font-black font-['Sen']">Invite administrator</SheetTitle>
-            <SheetDescription className="text-slate-500 font-medium text-sm leading-relaxed">
-              Adds another business administrator for <span className="font-bold text-slate-800">{directoryBuLabel}</span>.
-              They receive an email with a generated password (same flow as platform provisioning).
-            </SheetDescription>
-          </SheetHeader>
-          <form onSubmit={handleInvitePeerAdmin} className="mt-6 flex flex-col gap-5 flex-1">
-            {inviteError ? (
-              <div className="p-4 bg-red-50 border border-red-100 text-red-600 rounded-xl text-xs font-bold">{inviteError}</div>
-            ) : null}
-            <div className="space-y-2">
-              <Label className="text-sm font-bold text-slate-700">Full name</Label>
-              <Input
-                value={inviteForm.fullName}
-                onChange={(e) => setInviteForm({ ...inviteForm, fullName: e.target.value })}
-                className={inputBu}
-                required
-                placeholder="e.g. Jane Doe"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label className="text-sm font-bold text-slate-700">Work email</Label>
-              <Input
-                type="email"
-                value={inviteForm.email}
-                onChange={(e) => setInviteForm({ ...inviteForm, email: e.target.value })}
-                className={inputBu}
-                required
-                placeholder="admin@company.com"
-              />
-            </div>
-            <SheetFooter className="mt-auto px-0 flex-row gap-3 sm:gap-3">
-              <Button type="button" variant="ghost" className="flex-1 rounded-xl font-bold" onClick={() => setInviteAdminOpen(false)}>
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                disabled={inviteSubmitting}
-                className="flex-[2] rounded-xl font-bold text-white h-11"
-                style={{ backgroundColor: 'var(--brand-color)' }}
-              >
-                {inviteSubmitting ? <Loader2 className="animate-spin" size={18} /> : 'Send invite'}
               </Button>
             </SheetFooter>
           </form>

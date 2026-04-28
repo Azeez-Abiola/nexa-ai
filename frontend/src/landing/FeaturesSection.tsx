@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { Search, TrendingUp, ShieldCheck, ClipboardCheck, BookOpen, ArrowRight } from "lucide-react";
+import { Search, TrendingUp, ShieldCheck, ClipboardCheck, BookOpen, ArrowRight, BarChart3 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import {
   Dialog,
@@ -79,6 +79,18 @@ const features: Feature[] = [
       "The result is a single assistant experience that stays relevant as your organization’s information estate grows.",
     ],
   },
+  {
+    icon: BarChart3,
+    title: "Insights & Adoption Analytics",
+    desc: "See what your team is asking, which documents drive answers, and where knowledge gaps are forming.",
+    highlight: false,
+    detailTitle: "Insights & adoption analytics",
+    detailParagraphs: [
+      "Administrators get a clear view of usage trends — top questions, most-cited documents, and active users by department — so adoption is measurable, not assumed.",
+      "Surface knowledge gaps quickly: when employees repeatedly ask questions Nexa cannot confidently answer, you know exactly which content to publish or update next.",
+      "Tie usage back to ROI by understanding which teams benefit most and where to invest in expanding the knowledge base.",
+    ],
+  },
 ];
 
 const FeaturesSection = () => {
@@ -95,7 +107,7 @@ const FeaturesSection = () => {
           className="text-center mb-12 sm:mb-20"
         >
           <h2 className="text-2xl sm:text-3xl md:text-5xl font-extrabold tracking-tight text-[#1A1A1A] mb-4 sm:mb-6 font-sans px-1">
-            Everything Your Organization <span className="gradient-text">Needs to Know</span>
+            Everything Your Team <span className="gradient-text">Needs to Know</span>
           </h2>
         </motion.div>
 

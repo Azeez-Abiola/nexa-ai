@@ -45,9 +45,9 @@ const ProblemSection = () => (
           />
           
           <p className="text-base sm:text-xl md:text-2xl text-muted-foreground leading-relaxed font-medium px-1">
-            Nexa is your friendly AI chatbot designed to make daily conversations smarter and easier. 
-            Whether you need quick answers, creative ideas, or just someone to chat with, Nexa fits 
-            perfectly into your everyday life and workflow.
+            Nexa is your enterprise AI assistant designed to make every workday smarter.
+            Whether you need quick answers from policy, faster reporting, or instant context
+            from your approved knowledge base, Nexa fits cleanly into your team's workflow.
           </p>
         </div>
       </motion.div>

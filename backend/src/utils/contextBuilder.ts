@@ -19,24 +19,10 @@ export interface ContextBuildOptions {
   topK?: number;
   /** Employee user id — used for knowledge-group access on RAG chunks */
   userId?: string;
+  /** Employee department — used as a relevance boost (soft gate) on RAG chunks. */
+  userDepartment?: string;
 }
 
-// Filter policies by grade — keeps existing semantics
-function filterPoliciesByGrade(policies: any[], userGrade?: string): { accessible: any[]; restricted: any[] } {
-  const accessible: any[] = [];
-  const restricted: any[] = [];
-  for (const policy of policies) {
-    const grades: string[] = policy.allowedGrades ?? [];
-    if (grades.length === 0 || grades.includes("ALL") || !userGrade) {
-      accessible.push(policy);
-    } else if (grades.includes(userGrade)) {
-      accessible.push(policy);
-    } else {
-      restricted.push(policy);
-    }
-  }
-  return { accessible, restricted };
-}
 
 async function keywordSearch(query: string, businessUnit: string): Promise<any[]> {
   try {
@@ -77,10 +63,9 @@ function needsWebSearch(query: string): boolean {
 export async function buildContextForQuery(
   query: string,
   businessUnit: string,
-  userGrade: string,
   options: ContextBuildOptions = {}
 ): Promise<ContextBuildResult> {
-  const { useRAG = true, topK, userId } = options;
+  const { useRAG = true, topK, userId, userDepartment } = options;
   const useGoogle = options.useGoogle !== false && needsWebSearch(query);
 
   let ragChunks: RetrievedChunk[] = [];
@@ -95,7 +80,7 @@ export async function buildContextForQuery(
   // and the countDocuments round-trip was adding 50–150ms on the critical path for zero correctness gain.
   if (useRAG) {
     try {
-      const ragOutcome = await retrieveRelevantChunks({ query, businessUnit, userGrade, userId, topK });
+      const ragOutcome = await retrieveRelevantChunks({ query, businessUnit, userId, topK, userDepartment });
       if (ragOutcome?.chunks?.length) {
         ragChunks = ragOutcome.chunks;
         source = "rag";
@@ -114,13 +99,10 @@ export async function buildContextForQuery(
     try {
       const allPolicies = await keywordSearch(query, businessUnit);
       const strong = allPolicies.filter((p: any) => (p.score ?? 0) >= KEYWORD_MIN_SCORE);
-      const { accessible, restricted } = filterPoliciesByGrade(strong, userGrade);
 
-      if (accessible.length > 0) {
-        policies = accessible;
+      if (strong.length > 0) {
+        policies = strong;
         source = "keyword";
-      } else if (restricted.length > 0) {
-        accessDenied = true;
       }
     } catch (err) {
       logger.error("[ContextBuilder] Keyword search failed", { error: (err as Error).message });
@@ -129,19 +111,30 @@ export async function buildContextForQuery(
 
   // Google only runs when the KB (RAG + strong keyword) produced nothing. Skipped for access-denied
   // too, since the user's answer should come from the company source and not a public fallback.
+  // Hard 3s ceiling: SerpAPI has no built-in timeout and enrichment fetches real pages — together
+  // they can take 6–8s. If they don't finish in 3s, skip Google and let the model answer from
+  // training data (acceptable for general-knowledge queries; RAG answers are already fast).
+  const GOOGLE_TOTAL_TIMEOUT_MS = 3_000;
   const kbEmpty = ragChunks.length === 0 && policies.length === 0;
   if (useGoogle && kbEmpty && !accessDenied) {
     try {
-      const googleOutcome = await searchGoogle(query, 3);
-      if (googleOutcome?.success && googleOutcome.results?.length) {
-        // Fetch the actual page content behind each URL so the model gets real text,
-        // not just the 2-line Google snippet. Each fetch has a 4s timeout so one slow
-        // page doesn't hold up the whole response; failures gracefully keep the snippet.
-        googleResults = await enrichResultsWithPageContent(googleOutcome.results);
-        source = "google_only";
-      }
+      const googlePromise = (async () => {
+        const googleOutcome = await searchGoogle(query, 3);
+        if (googleOutcome?.success && googleOutcome.results?.length) {
+          googleResults = await enrichResultsWithPageContent(googleOutcome.results);
+          source = "google_only";
+        }
+      })();
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("google_timeout")), GOOGLE_TOTAL_TIMEOUT_MS)
+      );
+      await Promise.race([googlePromise, timeoutPromise]);
     } catch (err) {
-      logger.error("[ContextBuilder] Google search failed", { error: (err as Error).message });
+      if ((err as Error).message === "google_timeout") {
+        logger.warn("[ContextBuilder] Google search timed out — skipping", { query: query.slice(0, 80) });
+      } else {
+        logger.error("[ContextBuilder] Google search failed", { error: (err as Error).message });
+      }
     }
   }
 

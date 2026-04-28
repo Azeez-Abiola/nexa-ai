@@ -39,6 +39,7 @@ interface DashboardStats {
   totalAdmins: number;
   totalConversations: number;
   totalDocs: number;
+  totalPolicies: number;
   totalTenants: number;
   /** Users with at least one chat message (not session count). */
   usersWhoChatted?: number;
@@ -241,9 +242,9 @@ const Dashboard: React.FC = () => {
 
       <div className={cn(
         "grid grid-cols-1 md:grid-cols-2 gap-6",
-        isSuperAdminContext ? "lg:grid-cols-5" : "lg:grid-cols-4"
+        "lg:grid-cols-5"
       )}>
-        {isLoading ? [1, 2, 3, 4, isSuperAdminContext && 5].filter(Boolean).map((i: any) => (
+        {isLoading ? [1, 2, 3, 4, 5].map((i: any) => (
           <Card key={i} className="border-none shadow-xl shadow-slate-200/50 rounded-2xl bg-white p-8 border border-slate-50">
             <CardContent className="p-0 w-full">
               <div className="flex justify-between items-start">
@@ -258,27 +259,31 @@ const Dashboard: React.FC = () => {
           </Card>
         )) : (<>
           <StatCard
-            title={isSuperAdminContext ? "Platform users" : "BU users"}
+            title={isSuperAdminContext ? "Platform users" : "Users"}
             value={stats?.totalUsers || 0}
             icon={<Users size={20} />}
             trend="+12.5%"
             isLoading={false}
           />
           <StatCard
-            title={isSuperAdminContext ? "Members using AI" : "Members using AI"}
+            title="Active users"
             value={stats?.usersWhoChatted ?? 0}
             icon={<MessageSquare size={20} />}
             trend="Stable"
             isLoading={false}
           />
           <StatCard
-            title={isSuperAdminContext ? "Knowledge policies" : "Knowledge policies"}
+            title="Knowledge"
             value={stats?.totalDocs || 0}
             icon={<Files size={20} />}
             trend="+89"
             isLoading={false}
           />
-          {isSuperAdminContext && <StatCard title="Business units" value={stats?.totalTenants || 0} icon={<Building size={20} />} trend="Stable" isLoading={false} />}
+          {isSuperAdminContext ? (
+            <StatCard title="Business units" value={stats?.totalTenants || 0} icon={<Building size={20} />} trend="Stable" isLoading={false} />
+          ) : (
+            <StatCard title="Policy" value={stats?.totalPolicies || 0} icon={<ShieldAlert size={20} />} trend="Stable" isLoading={false} />
+          )}
           <StatCard
             title={
               isSuperAdminContext
@@ -287,7 +292,7 @@ const Dashboard: React.FC = () => {
                   : adminFilter === "active"
                     ? "Admins (active)"
                     : "Admins (inactive)"
-                : "Admins"
+                : "Administrators"
             }
             value={
               isSuperAdminContext

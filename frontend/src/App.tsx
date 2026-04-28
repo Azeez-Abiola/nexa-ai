@@ -46,11 +46,18 @@ interface MessageSource {
   url?: string;
 }
 
+interface GeneratedDocument {
+  url: string;
+  filename: string;
+  documentType: string;
+}
+
 interface Message {
   role: "user" | "assistant";
   content: string;
   imageUrls?: string[];
   sources?: MessageSource[];
+  generatedDocument?: GeneratedDocument;
   timestamp: Date;
 }
 
@@ -1710,6 +1717,23 @@ export const App: React.FC = () => {
                               })}
                             </div>
                           ) : null}
+                          {m.role === "assistant" && m.generatedDocument ? (
+                            <div className="generated-doc-download-v2">
+                              <a
+                                href={(() => {
+                                  const u = m.generatedDocument!.url;
+                                  if (u.startsWith("http://") || u.startsWith("https://")) return u;
+                                  const base = (import.meta.env.VITE_API_URL || "").replace(/\/$/, "");
+                                  return base ? `${base}${u}` : u;
+                                })()}
+                                download={m.generatedDocument.filename}
+                                className="generated-doc-btn-v2"
+                              >
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                                <span>{m.generatedDocument.filename}</span>
+                              </a>
+                            </div>
+                          ) : null}
                         </div>
                         <div className="message-copy-stack-v2">
                           <button
@@ -3275,12 +3299,23 @@ export const App: React.FC = () => {
           align-items: flex-end;
         }
 
+        /* Assistant: copy button sits to the right of the response bubble. */
+        .message-row-v2.assistant .message-bubble-wrap-v2 {
+          flex-direction: row;
+          align-items: flex-start;
+          gap: 8px;
+        }
+
         .message-copy-stack-v2 {
           display: flex;
           flex-direction: column;
           align-items: center;
           gap: 2px;
           min-height: 22px;
+        }
+
+        .message-row-v2.assistant .message-copy-stack-v2 {
+          padding-top: 4px;
         }
 
         .message-row-v2.user .message-copy-stack-v2 {
@@ -3511,6 +3546,30 @@ export const App: React.FC = () => {
           opacity: 0.75;
           letter-spacing: 0.02em;
         }
+
+        /* Generated document download chip */
+        .generated-doc-download-v2 {
+          margin-top: 10px;
+        }
+        .generated-doc-btn-v2 {
+          display: inline-flex;
+          align-items: center;
+          gap: 7px;
+          padding: 7px 14px;
+          border-radius: 8px;
+          background: var(--brand-color, #ed0000);
+          color: #fff;
+          font-size: 13px;
+          font-weight: 600;
+          text-decoration: none;
+          transition: opacity 0.15s;
+          max-width: 100%;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .generated-doc-btn-v2:hover { opacity: 0.85; }
+        .dark-theme .generated-doc-btn-v2 { background: var(--brand-color, #ed0000); }
 
         .message-image-grid-v2 {
           display: grid;

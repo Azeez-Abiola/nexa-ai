@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useSearchParams, Link } from "react-router-dom";
 import axios from "axios";
 import Navbar from "@/landing/Navbar";
+import Footer from "@/landing/Footer";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -140,6 +141,7 @@ const ContactPage = () => {
           </form>
         )}
       </main>
+      <Footer />
     </div>
   );
 };

@@ -3,8 +3,7 @@ import mongoose, { Schema, Document, Types } from "mongoose";
 export interface DocumentChunkDocument extends Document {
   documentId: Types.ObjectId;
   businessUnit: string;
-  allowedGrades: string[];
-  /** Empty = all BU users (subject to grade rules). Non-empty = only members of these user groups. */
+  /** Empty = all BU users. Non-empty = only members of these user groups. */
   allowedGroupIds: Types.ObjectId[];
   sensitivityLevel: string;
   chunkIndex: number;
@@ -31,7 +30,6 @@ const DocumentChunkSchema = new Schema<DocumentChunkDocument>(
   {
     documentId: { type: Schema.Types.ObjectId, ref: "RagDocument", required: true, index: true },
     businessUnit: { type: String, required: true, index: true, trim: true },
-    allowedGrades: { type: [String], default: [] },
     allowedGroupIds: { type: [{ type: Schema.Types.ObjectId, ref: "KnowledgeGroup" }], default: [] },
     sensitivityLevel: { type: String, required: true },
     chunkIndex: { type: Number, required: true },

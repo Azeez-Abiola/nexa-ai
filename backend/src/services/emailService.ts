@@ -99,7 +99,7 @@ function escapeHtml(s: string): string {
     .replace(/"/g, "&quot;");
 }
 
-/** Public marketing / contact form — delivered to CONTACT_INBOX_EMAIL or hi@nexa.com */
+/** Public marketing / contact form — delivered to CONTACT_INBOX_EMAIL or info@1879techub.com */
 export async function sendContactFormInquiry(payload: {
   name: string;
   email: string;
@@ -107,7 +107,7 @@ export async function sendContactFormInquiry(payload: {
   message: string;
   intent?: string;
 }): Promise<void> {
-  const inbox = process.env.CONTACT_INBOX_EMAIL || "hi@nexa.com";
+  const inbox = process.env.CONTACT_INBOX_EMAIL || "info@1879techub.com";
   const prefix = payload.intent === "demo" ? "[Demo request] " : "[Contact] ";
   const html = `
     <p><strong>Name:</strong> ${escapeHtml(payload.name)}</p>
@@ -208,6 +208,68 @@ export async function sendWelcomeEmail(
     throw error;
   }
 }
+/**
+ * Notify super-admin of a new business access request
+ */
+export async function sendAccessRequestNotification(payload: {
+  companyName: string;
+  workEmail: string;
+  phone: string;
+  employeeCount: number;
+  submittedAt: string;
+  reviewUrl: string;
+}): Promise<void> {
+  const inbox =
+    process.env.SUPERADMIN_NOTIFICATION_EMAIL ||
+    process.env.CONTACT_INBOX_EMAIL ||
+    "hi@nexa.ai";
+  try {
+    const html = await renderTemplate("access-request-notification", payload);
+    await sendEmail(inbox, `[Access Request] ${payload.companyName} — Nexa AI`, html);
+  } catch (error) {
+    console.error("[EmailService] Failed to send access-request notification:", error);
+  }
+}
+
+/**
+ * Confirm to the requester that their access request was received
+ */
+export async function sendAccessRequestReceived(
+  workEmail: string,
+  companyName: string
+): Promise<void> {
+  try {
+    const html = await renderTemplate("access-request-received", {
+      companyName,
+      workEmail,
+      year: new Date().getFullYear()
+    });
+    await sendEmail(workEmail, "We've received your Nexa AI access request", html);
+  } catch (error) {
+    console.error("[EmailService] Failed to send access-request-received email:", error);
+  }
+}
+
+/**
+ * Notify the requester that their access request was rejected
+ */
+export async function sendAccessRequestRejected(
+  workEmail: string,
+  companyName: string,
+  note?: string
+): Promise<void> {
+  try {
+    const html = await renderTemplate("access-request-rejected", {
+      companyName,
+      note: note || "",
+      year: new Date().getFullYear()
+    });
+    await sendEmail(workEmail, "Update on your Nexa AI access request", html);
+  } catch (error) {
+    console.error("[EmailService] Failed to send access-request-rejected email:", error);
+  }
+}
+
 /**
  * Send welcome email with auto-generated credentials to new BU admin
  */
