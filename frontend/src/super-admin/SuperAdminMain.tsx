@@ -40,6 +40,7 @@ import KnowledgeBase from './pages/KnowledgeBase';
 import Administration from './pages/Administration';
 import AccessRequests from './pages/AccessRequests';
 import Departments from './pages/Departments';
+import DepartmentDetail from './pages/DepartmentDetail';
 import ForceChangePasswordModal from './components/ForceChangePasswordModal';
 import NotificationsBell from './components/NotificationsBell';
 import EmailDomains from './pages/EmailDomains';
@@ -399,6 +400,7 @@ const SuperAdminMain: React.FC<SuperAdminMainProps> = ({ theme, toggleTheme }) =
                   <Route path="/admin/knowledge-groups" element={<Navigate to="/admin/user-groups" replace />} />
                   <Route path="/admin/users" element={<UsersManagement />} />
                   <Route path="/admin/departments" element={<Departments />} />
+                  <Route path="/admin/departments/:id" element={<DepartmentDetail />} />
                   <Route path="/admin/audit" element={<AuditLogs />} />
                   <Route path="/admin/help" element={<HelpSupport />} />
                   <Route path="/admin/profile" element={<BusinessProfile />} />

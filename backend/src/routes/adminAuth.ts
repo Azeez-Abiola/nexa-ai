@@ -20,6 +20,7 @@ import {
 import { AdminInvite } from "../models/AdminInvite";
 import { EmployeeInvite } from "../models/EmployeeInvite";
 import { Department } from "../models/Department";
+import { RagDocument } from "../models/RagDocument";
 import { hashInviteToken } from "../utils/inviteToken";
 import {
   adminAuthMiddleware,
@@ -1161,9 +1162,94 @@ adminAuthRouter.get("/departments", adminAuthMiddleware, async (req: Authenticat
     const { businessUnit, isSuperAdmin } = req;
     const filter = isSuperAdmin ? {} : { businessUnit };
     const departments = await Department.find(filter).sort({ name: 1 }).lean();
-    res.json({ departments });
+
+    // Stack one count query per dimension (employees + documents) so the cards on the
+    // Departments page can render with no extra round-trips. Both queries scope to the
+    // BU on department name to mirror how soft-gate retrieval matches.
+    const enriched = await Promise.all(
+      departments.map(async (d) => {
+        const [employeeCount, documentCount] = await Promise.all([
+          User.countDocuments({ businessUnit: d.businessUnit, department: d.name, isActive: { $ne: false } }),
+          RagDocument.countDocuments({ businessUnit: d.businessUnit, department: d.name })
+        ]);
+        return { ...d, employeeCount, documentCount };
+      })
+    );
+
+    res.json({ departments: enriched });
   } catch (error) {
     console.error("List departments error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Single-department detail — includes the active employees in the dept and the
+// RagDocuments tagged with it. Powers the Department detail page.
+adminAuthRouter.get("/departments/:id", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { businessUnit, isSuperAdmin } = req;
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ error: "Invalid department id" });
+    }
+    const dept = await Department.findById(id).lean();
+    if (!dept) return res.status(404).json({ error: "Department not found" });
+    if (!isSuperAdmin && dept.businessUnit !== businessUnit) {
+      return res.status(403).json({ error: "Access denied" });
+    }
+
+    const [employees, documents] = await Promise.all([
+      User.find(
+        { businessUnit: dept.businessUnit, department: dept.name, isActive: { $ne: false } },
+        { password: 0, resetToken: 0, resetTokenExpiry: 0 }
+      )
+        .sort({ fullName: 1 })
+        .lean(),
+      RagDocument.find({ businessUnit: dept.businessUnit, department: dept.name })
+        .select("_id title documentType version createdAt processingStatus allowedGroupIds")
+        .sort({ createdAt: -1 })
+        .lean()
+    ]);
+
+    res.json({ department: dept, employees, documents });
+  } catch (error) {
+    console.error("Get department detail error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Bulk-assign documents to a department. Sets RagDocument.department = dept.name on
+// each id passed in. Documents not in the admin's BU are silently skipped (the BU
+// scope is enforced via the filter, not a per-doc 403).
+adminAuthRouter.patch("/departments/:id/documents", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { businessUnit, isSuperAdmin } = req;
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ error: "Invalid department id" });
+    }
+    const dept = await Department.findById(id).lean();
+    if (!dept) return res.status(404).json({ error: "Department not found" });
+    if (!isSuperAdmin && dept.businessUnit !== businessUnit) {
+      return res.status(403).json({ error: "Access denied" });
+    }
+
+    const documentIds = Array.isArray(req.body.documentIds) ? req.body.documentIds : [];
+    const validIds = documentIds.filter((id: unknown): id is string =>
+      typeof id === "string" && mongoose.Types.ObjectId.isValid(id)
+    );
+
+    const result = await RagDocument.updateMany(
+      { _id: { $in: validIds }, businessUnit: dept.businessUnit },
+      { $set: { department: dept.name } }
+    );
+
+    res.json({
+      message: `Tagged ${result.modifiedCount} document${result.modifiedCount === 1 ? "" : "s"} with ${dept.name}.`,
+      modifiedCount: result.modifiedCount
+    });
+  } catch (error) {
+    console.error("Assign documents to department error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });
