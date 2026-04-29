@@ -527,6 +527,70 @@ adminAuthRouter.post("/users", adminAuthMiddleware, async (req: AuthenticatedReq
   }
 });
 
+// Single-user fetch — for the user detail page.
+adminAuthRouter.get("/users/:id", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { businessUnit, isSuperAdmin } = req;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ error: "Invalid user id" });
+    }
+    const user = await User.findById(id, { password: 0, resetToken: 0, resetTokenExpiry: 0 }).lean();
+    if (!user) return res.status(404).json({ error: "User not found" });
+    if (!isSuperAdmin && user.businessUnit !== businessUnit) {
+      return res.status(403).json({ error: "Access denied: user belongs to another business unit" });
+    }
+
+    res.json({ user });
+  } catch (error) {
+    console.error("Get user error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Update user — BU admin can change a user's department (and other safe fields).
+// Email + password + businessUnit aren't editable here on purpose; those need their
+// own dedicated flows (re-invite, password reset, tenant move).
+adminAuthRouter.patch("/users/:id", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { businessUnit, isSuperAdmin } = req;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ error: "Invalid user id" });
+    }
+    const user = await User.findById(id);
+    if (!user) return res.status(404).json({ error: "User not found" });
+    if (!isSuperAdmin && user.businessUnit !== businessUnit) {
+      return res.status(403).json({ error: "Access denied: user belongs to another business unit" });
+    }
+
+    const { department, fullName } = req.body as { department?: string | null; fullName?: string };
+
+    if (typeof fullName === "string") {
+      const trimmed = fullName.trim();
+      if (!trimmed) return res.status(400).json({ error: "fullName cannot be empty" });
+      user.fullName = trimmed;
+    }
+    if (department !== undefined) {
+      // null or "" clears the department; otherwise store the trimmed value
+      const cleaned =
+        department === null || (typeof department === "string" && !department.trim())
+          ? undefined
+          : String(department).trim();
+      user.department = cleaned;
+    }
+
+    await user.save();
+    const safe = await User.findById(id, { password: 0, resetToken: 0, resetTokenExpiry: 0 }).lean();
+    res.json({ message: "User updated", user: safe });
+  } catch (error) {
+    console.error("Update user error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 const EMPLOYEE_INVITE_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000;
 
 // Invite employee — BU admins only; signed token email (business unit cannot be forged).
@@ -1214,6 +1278,41 @@ adminAuthRouter.get("/departments/:id", adminAuthMiddleware, async (req: Authent
     res.json({ department: dept, employees, documents });
   } catch (error) {
     console.error("Get department detail error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Bulk-assign users to a department. Sets User.department = dept.name on each id
+// passed in. Users outside the admin's BU are silently skipped via the filter.
+adminAuthRouter.patch("/departments/:id/users", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { businessUnit, isSuperAdmin } = req;
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ error: "Invalid department id" });
+    }
+    const dept = await Department.findById(id).lean();
+    if (!dept) return res.status(404).json({ error: "Department not found" });
+    if (!isSuperAdmin && dept.businessUnit !== businessUnit) {
+      return res.status(403).json({ error: "Access denied" });
+    }
+
+    const userIds = Array.isArray(req.body.userIds) ? req.body.userIds : [];
+    const validIds = userIds.filter((u: unknown): u is string =>
+      typeof u === "string" && mongoose.Types.ObjectId.isValid(u)
+    );
+
+    const result = await User.updateMany(
+      { _id: { $in: validIds }, businessUnit: dept.businessUnit },
+      { $set: { department: dept.name } }
+    );
+
+    res.json({
+      message: `Assigned ${result.modifiedCount} user${result.modifiedCount === 1 ? "" : "s"} to ${dept.name}.`,
+      modifiedCount: result.modifiedCount
+    });
+  } catch (error) {
+    console.error("Assign users to department error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });

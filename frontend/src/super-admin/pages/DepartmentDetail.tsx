@@ -8,6 +8,7 @@ import {
   FileText,
   Layers,
   Loader2,
+  Plus,
   Trash2,
   Users
 } from "lucide-react";
@@ -15,6 +16,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/lib/use-toast";
 import {
   Table,
@@ -24,6 +28,14 @@ import {
   TableHeader,
   TableRow
 } from "@/components/ui/table";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle
+} from "@/components/ui/sheet";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -70,6 +82,14 @@ const DepartmentDetail: React.FC = () => {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
+  // Assign-employees Sheet state
+  const [assignOpen, setAssignOpen] = useState(false);
+  const [eligibleUsers, setEligibleUsers] = useState<Employee[]>([]);
+  const [eligibleLoading, setEligibleLoading] = useState(false);
+  const [selectedUserIds, setSelectedUserIds] = useState<Set<string>>(new Set());
+  const [userFilter, setUserFilter] = useState("");
+  const [assigning, setAssigning] = useState(false);
+
   const token = useMemo(() => localStorage.getItem("nexa-token"), []);
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
@@ -104,6 +124,80 @@ const DepartmentDetail: React.FC = () => {
   useEffect(() => {
     fetchDetail();
   }, [fetchDetail]);
+
+  // Lazy-load eligible users only when the assign Sheet opens, so admins on a
+  // BU with hundreds of users don't pay for it on every page visit. We pull the
+  // BU-scoped user list and filter out anyone already in this dept client-side.
+  useEffect(() => {
+    if (!assignOpen || !dept || !token) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        setEligibleLoading(true);
+        const { data } = await axios.get("/api/v1/admin/auth/users", { headers });
+        if (cancelled) return;
+        const list: Employee[] = (data.users || []).filter(
+          (u: any) =>
+            u.isActive !== false &&
+            (u.department || "") !== dept.name
+        );
+        setEligibleUsers(list);
+      } catch {
+        if (!cancelled) setEligibleUsers([]);
+      } finally {
+        if (!cancelled) setEligibleLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [assignOpen, dept, headers, token]);
+
+  const filteredEligible = useMemo(() => {
+    const q = userFilter.trim().toLowerCase();
+    if (!q) return eligibleUsers;
+    return eligibleUsers.filter(
+      (u) =>
+        u.fullName?.toLowerCase().includes(q) || u.email?.toLowerCase().includes(q)
+    );
+  }, [eligibleUsers, userFilter]);
+
+  const toggleUser = (uid: string) => {
+    setSelectedUserIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(uid)) next.delete(uid);
+      else next.add(uid);
+      return next;
+    });
+  };
+
+  const handleAssignUsers = async () => {
+    if (!dept || selectedUserIds.size === 0) return;
+    try {
+      setAssigning(true);
+      await axios.patch(
+        `/api/v1/admin/auth/departments/${dept._id}/users`,
+        { userIds: Array.from(selectedUserIds) },
+        { headers }
+      );
+      toast({
+        title: "Users assigned",
+        description: `${selectedUserIds.size} user${selectedUserIds.size === 1 ? "" : "s"} now belong to ${dept.name}.`
+      });
+      setAssignOpen(false);
+      setSelectedUserIds(new Set());
+      setUserFilter("");
+      fetchDetail();
+    } catch (err: any) {
+      toast({
+        variant: "destructive",
+        title: "Could not assign users",
+        description: err.response?.data?.error || "Please try again."
+      });
+    } finally {
+      setAssigning(false);
+    }
+  };
 
   const handleDelete = async () => {
     if (!dept) return;
@@ -197,18 +291,28 @@ const DepartmentDetail: React.FC = () => {
 
       <Card className="border-none shadow-xl shadow-slate-200/50 rounded-2xl bg-white">
         <CardContent className="p-0">
-          <div className="px-6 py-4 border-b border-slate-100">
-            <p className="font-black font-['Sen'] text-slate-900">Employees</p>
-            <p className="text-xs font-medium text-slate-400">
-              Active users currently assigned to {dept.name}.
-            </p>
+          <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between gap-3">
+            <div>
+              <p className="font-black font-['Sen'] text-slate-900">Employees</p>
+              <p className="text-xs font-medium text-slate-400">
+                Active users currently assigned to {dept.name}.
+              </p>
+            </div>
+            <Button
+              onClick={() => setAssignOpen(true)}
+              className="rounded-xl font-bold text-white h-10 px-5 shrink-0"
+              style={{ backgroundColor: "var(--brand-color)" }}
+            >
+              <Plus size={16} className="mr-2" />
+              Add employees
+            </Button>
           </div>
           {employees.length === 0 ? (
             <div className="px-6 py-12 text-center">
               <Users size={28} className="text-slate-300 mx-auto mb-3" />
               <p className="text-sm font-bold text-slate-700">No one assigned yet</p>
               <p className="text-xs text-slate-400 font-medium mt-1">
-                Add or invite users from the Users page and pick {dept.name} as their department.
+                Click <span className="font-bold">Add employees</span> above to pull existing BU users into {dept.name}.
               </p>
             </div>
           ) : (
@@ -342,6 +446,121 @@ const DepartmentDetail: React.FC = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Sheet
+        open={assignOpen}
+        onOpenChange={(o) => {
+          if (!o && assigning) return;
+          setAssignOpen(o);
+          if (!o) {
+            setSelectedUserIds(new Set());
+            setUserFilter("");
+          }
+        }}
+      >
+        <SheetContent side="right" className="sm:max-w-lg flex flex-col p-0">
+          <SheetHeader className="text-left space-y-2 px-8 pt-8 pb-4">
+            <SheetTitle className="text-2xl font-black font-['Sen']">Assign employees to {dept.name}</SheetTitle>
+            <SheetDescription className="text-slate-500 font-medium text-sm leading-relaxed">
+              Pick existing users in this business unit to move into {dept.name}. Users already in this department
+              don't appear here. If a user is currently in another department, picking them re-assigns them to {dept.name}.
+            </SheetDescription>
+          </SheetHeader>
+
+          <div className="flex-1 overflow-y-auto px-8 pb-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <Label className="text-sm font-bold text-slate-700">
+                Available users
+              </Label>
+              {selectedUserIds.size > 0 ? (
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--brand-color)]">
+                  {selectedUserIds.size} selected
+                </span>
+              ) : null}
+            </div>
+            <Input
+              value={userFilter}
+              onChange={(e) => setUserFilter(e.target.value)}
+              placeholder="Search by name or email…"
+              className="rounded-xl h-11 border-slate-200"
+            />
+            <div className="rounded-xl border border-slate-200 bg-white max-h-[420px] overflow-y-auto">
+              {eligibleLoading ? (
+                <div className="py-8 text-center">
+                  <Loader2 size={18} className="animate-spin text-slate-400 mx-auto" />
+                </div>
+              ) : filteredEligible.length === 0 ? (
+                <p className="py-6 px-4 text-xs text-slate-400 text-center font-medium">
+                  {eligibleUsers.length === 0
+                    ? "Every active user in this BU is already in this department."
+                    : "No users match that search."}
+                </p>
+              ) : (
+                <ul className="divide-y divide-slate-100">
+                  {filteredEligible.map((u) => {
+                    const checked = selectedUserIds.has(u._id);
+                    const reassigning = !!(u as any).department;
+                    return (
+                      <li key={u._id}>
+                        <label className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-slate-50 transition-colors">
+                          <Checkbox
+                            checked={checked}
+                            onCheckedChange={() => toggleUser(u._id)}
+                            className="shrink-0"
+                          />
+                          <div className="w-9 h-9 rounded-xl bg-[var(--brand-color)]/10 text-[var(--brand-color)] flex items-center justify-center font-bold shrink-0">
+                            {u.fullName?.charAt(0).toUpperCase() || "?"}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-bold text-slate-900 truncate">{u.fullName}</p>
+                            <p className="text-xs font-medium text-slate-500 truncate">{u.email}</p>
+                            {reassigning ? (
+                              <p className="text-[10px] font-medium text-amber-600 mt-0.5">
+                                Currently in: {(u as any).department}
+                              </p>
+                            ) : null}
+                          </div>
+                        </label>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          </div>
+
+          <SheetFooter className="px-8 py-6 border-t border-slate-100 flex-row gap-3 sm:gap-3 bg-slate-50/50">
+            <Button
+              type="button"
+              variant="ghost"
+              className="flex-1 rounded-xl font-bold"
+              onClick={() => {
+                if (assigning) return;
+                setAssignOpen(false);
+                setSelectedUserIds(new Set());
+                setUserFilter("");
+              }}
+              disabled={assigning}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleAssignUsers}
+              disabled={assigning || selectedUserIds.size === 0}
+              className="flex-[2] rounded-xl font-bold text-white h-11"
+              style={{ backgroundColor: "var(--brand-color)" }}
+            >
+              {assigning ? (
+                <Loader2 className="animate-spin" size={18} />
+              ) : selectedUserIds.size === 0 ? (
+                "Pick at least one"
+              ) : (
+                `Assign ${selectedUserIds.size} user${selectedUserIds.size === 1 ? "" : "s"}`
+              )}
+            </Button>
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 };

@@ -4,16 +4,25 @@ import { useSearchParams, useNavigate, Link, useLocation } from 'react-router-do
 import {
   Users as UsersIcon,
   UserPlus,
-  Power,
-  PowerOff,
   Search,
   Loader2,
   Network,
   Send,
   FileUp,
-  Mail
+  Mail,
+  ChevronRight
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle
+} from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -79,6 +88,7 @@ const UsersManagement: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState<string | null>(null);
+  const [toggleTarget, setToggleTarget] = useState<{ id: string; fullName: string; isActive: boolean } | null>(null);
   const [inviteEmployeeOpen, setInviteEmployeeOpen] = useState(false);
   const [csvUploading, setCsvUploading] = useState(false);
   const csvInputRef = useRef<HTMLInputElement>(null);
@@ -285,11 +295,12 @@ const UsersManagement: React.FC = () => {
     }
   };
 
-  const handleToggleUserStatus = async (userId: string) => {
+  const confirmToggleUserStatus = async () => {
+    if (!toggleTarget) return;
     try {
-      setIsDeleting(userId);
+      setIsDeleting(toggleTarget.id);
       const { data } = await axios.patch(
-        `/api/v1/admin/auth/users/${userId}/toggle-status`,
+        `/api/v1/admin/auth/users/${toggleTarget.id}/toggle-status`,
         {},
         { headers }
       );
@@ -303,6 +314,7 @@ const UsersManagement: React.FC = () => {
             ? `Their license slot is freed. ${remaining} user${remaining === 1 ? "" : "s"} still active in this business unit.`
             : "Their license slot is freed."
       });
+      setToggleTarget(null);
       fetchUsers();
     } catch (error: any) {
       toast({
@@ -448,7 +460,11 @@ const UsersManagement: React.FC = () => {
             </TableHeader>
             <TableBody>
               {filteredUsers.map((user) => (
-                <TableRow key={user._id} className="group border-slate-50 hover:bg-slate-50/50 transition-colors">
+                <TableRow
+                  key={user._id}
+                  onClick={() => navigate(`/admin/users/${user._id}`)}
+                  className="group border-slate-50 hover:bg-slate-50/50 transition-colors cursor-pointer"
+                >
                   <TableCell className="pl-8 py-5">
                     <div className="flex items-center gap-4">
                       <div className="w-10 h-10 rounded-xl bg-[var(--brand-color)]/10 text-[var(--brand-color)] flex items-center justify-center font-bold">
@@ -494,27 +510,36 @@ const UsersManagement: React.FC = () => {
                     )}
                   </TableCell>
                   <TableCell className="text-right pr-8">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => handleToggleUserStatus(user._id)}
-                      disabled={isDeleting === user._id}
-                      title={user.isActive === false ? "Reactivate user" : "Deactivate user"}
-                      className={cn(
-                        "rounded-lg transition-all",
-                        user.isActive === false
-                          ? "text-emerald-500 hover:text-emerald-600 hover:bg-emerald-50"
-                          : "text-slate-400 hover:text-rose-600 hover:bg-rose-50"
-                      )}
-                    >
-                      {isDeleting === user._id ? (
-                        <Loader2 size={18} className="animate-spin" />
-                      ) : user.isActive === false ? (
-                        <Power size={18} />
-                      ) : (
-                        <PowerOff size={18} />
-                      )}
-                    </Button>
+                    <div className="flex items-center justify-end gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setToggleTarget({
+                            id: user._id,
+                            fullName: user.fullName,
+                            isActive: user.isActive !== false
+                          });
+                        }}
+                        disabled={isDeleting === user._id}
+                        className={cn(
+                          "rounded-lg font-bold h-8 px-3 text-xs",
+                          user.isActive === false
+                            ? "border-emerald-200 text-emerald-600 hover:bg-emerald-50"
+                            : "border-slate-200 text-slate-700 hover:text-rose-600 hover:border-rose-200 hover:bg-rose-50"
+                        )}
+                      >
+                        {isDeleting === user._id ? (
+                          <Loader2 size={14} className="animate-spin" />
+                        ) : user.isActive === false ? (
+                          "Activate"
+                        ) : (
+                          "Deactivate"
+                        )}
+                      </Button>
+                      <ChevronRight size={16} className="text-slate-300 group-hover:text-[var(--brand-color)] transition-colors" />
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
@@ -721,6 +746,42 @@ const UsersManagement: React.FC = () => {
           </form>
         </SheetContent>
       </Sheet>
+
+      <AlertDialog
+        open={!!toggleTarget}
+        onOpenChange={(o) => {
+          if (!o && isDeleting) return;
+          if (!o) setToggleTarget(null);
+        }}
+      >
+        <AlertDialogContent className="rounded-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-xl font-black font-['Sen']">
+              {toggleTarget?.isActive ? `Deactivate ${toggleTarget?.fullName}?` : `Activate ${toggleTarget?.fullName}?`}
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-slate-500 font-medium leading-relaxed">
+              {toggleTarget?.isActive
+                ? "They will no longer be able to sign in until reactivated. Their data, group memberships, and document access stay intact — this just locks the account."
+                : "They will be able to sign in again immediately and consume an active license slot."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="rounded-xl font-bold" disabled={!!isDeleting}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmToggleUserStatus}
+              disabled={!!isDeleting}
+              className={cn(
+                "rounded-xl font-bold",
+                toggleTarget?.isActive ? "bg-red-600 hover:bg-red-700" : "bg-emerald-600 hover:bg-emerald-700"
+              )}
+            >
+              {isDeleting ? <Loader2 className="animate-spin" size={16} /> : toggleTarget?.isActive ? "Deactivate" : "Activate"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
     </div>
   );
