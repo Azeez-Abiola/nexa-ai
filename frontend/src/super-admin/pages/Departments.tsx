@@ -142,7 +142,7 @@ const Departments: React.FC = () => {
             />
             <Button
               type="submit"
-              disabled={creating || !newName.trim()}
+              disabled={creating}
               className="rounded-xl font-bold text-white h-11 px-6"
               style={{ backgroundColor: "var(--brand-color)" }}
             >
