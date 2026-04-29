@@ -1,6 +1,7 @@
 import mongoose, { Schema, Document, Types } from "mongoose";
 
-export type DocumentType = "policy" | "procedure" | "handbook" | "contract" | "report" | "other";
+/** Free-form string — see DocumentCategory model for built-ins + admin-created entries. */
+export type DocumentType = string;
 export type SensitivityLevel = "public" | "internal" | "confidential" | "restricted";
 export type ProcessingStatus =
   | "pending"
@@ -50,8 +51,8 @@ const RagDocumentSchema = new Schema<RagDocumentDocument>(
     department: { type: String, trim: true, index: true },
     documentType: {
       type: String,
-      enum: ["policy", "procedure", "handbook", "contract", "report", "other"],
-      required: true
+      required: true,
+      trim: true
     },
     sensitivityLevel: {
       type: String,

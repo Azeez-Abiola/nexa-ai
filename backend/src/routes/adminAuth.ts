@@ -21,6 +21,11 @@ import { AdminInvite } from "../models/AdminInvite";
 import { EmployeeInvite } from "../models/EmployeeInvite";
 import { Department } from "../models/Department";
 import { RagDocument } from "../models/RagDocument";
+import {
+  DocumentCategory,
+  BUILTIN_DOCUMENT_CATEGORIES,
+  BUILTIN_NAMES
+} from "../models/DocumentCategory";
 import { hashInviteToken } from "../utils/inviteToken";
 import {
   adminAuthMiddleware,
@@ -1067,14 +1072,83 @@ adminAuthRouter.put("/change-password", adminAuthMiddleware, async (req: Authent
   }
 });
 
-// /invite-peer-admin — disabled by the one-admin-per-organization policy.
-// Kept registered (instead of removed) so legacy callers get a clear 409 instead of a 404.
-// Adding more admins now goes through the super-admin team.
+// Invite / provision another administrator for the same business unit (BU admins only).
+// All admins of a BU share the same scope and powers — there is no "primary" vs "peer".
 adminAuthRouter.post("/invite-peer-admin", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const bu = req.businessUnit;
-    return res.status(409).json({
-      error: `${bu || "Your organization"} already has an active administrator. Only one admin is allowed per organization — contact the super-admin team to change who is in that role.`
+    if (!bu || bu === "SUPERADMIN") {
+      return res.status(403).json({
+        error: "Only business unit administrators can invite peer admins for their unit."
+      });
+    }
+
+    const { email, firstName, lastName } = req.body;
+    if (!email || !firstName || !lastName) {
+      return res.status(400).json({ error: "email, firstName and lastName are required" });
+    }
+    const fullName = `${String(firstName).trim()} ${String(lastName).trim()}`;
+
+    const tenant = await BusinessUnitModel.findOne({ name: bu });
+    if (!tenant) {
+      return res.status(404).json({
+        error: "Your business unit is not registered as a tenant. Contact support."
+      });
+    }
+
+    const existing = await AdminUser.findOne({ email: email.toLowerCase() });
+    if (existing) {
+      return res.status(409).json({ error: "An admin account already exists with this email" });
+    }
+
+    const autoPassword = crypto.randomBytes(6).toString("hex");
+    const hashedPassword = await bcryptjs.hash(autoPassword, 10);
+
+    const admin = await AdminUser.create({
+      email: email.toLowerCase(),
+      fullName,
+      businessUnit: bu,
+      password: hashedPassword,
+      emailVerified: true,
+      mustChangePassword: true
+    });
+
+    await AdminInvite.create({
+      email: email.toLowerCase(),
+      fullName,
+      businessUnit: bu,
+      tenantId: tenant.tenantId,
+      status: "accepted",
+      invitedBy: req.email!,
+      expiresAt: new Date(),
+      token: "BU-ADMIN-INVITE"
+    });
+
+    try {
+      await sendTenantCredentialsEmail(
+        email.toLowerCase(),
+        fullName,
+        bu,
+        tenant.slug,
+        autoPassword
+      );
+    } catch (emailError) {
+      console.error("Failed to send credentials email:", emailError);
+      return res.status(500).json({
+        message: `Admin account created for ${email}, but credentials email failed.`,
+        error: "Failed to send email. You may need to manually reset the password."
+      });
+    }
+
+    res.status(201).json({
+      message: `Admin account created and credentials sent to ${email}`,
+      admin: {
+        id: admin._id,
+        email: admin.email,
+        fullName: admin.fullName,
+        businessUnit: admin.businessUnit,
+        status: "active"
+      }
     });
   } catch (error) {
     console.error("BU peer admin invite error:", error);
@@ -1114,16 +1188,6 @@ adminAuthRouter.post("/create-direct", superAdminMiddleware, async (req: Authent
 
     const existingAdmin = await AdminUser.findOne({ email: email.toLowerCase() });
     if (existingAdmin) return res.status(409).json({ error: "Admin already exists" });
-
-    // One-admin-per-organization rule — block creating a second active admin for the same BU.
-    if (businessUnit !== "SUPERADMIN") {
-      const activeAdminForBU = await AdminUser.findOne({ businessUnit, isActive: { $ne: false } });
-      if (activeAdminForBU) {
-        return res.status(409).json({
-          error: `${businessUnit} already has an active administrator (${activeAdminForBU.email}). Deactivate that account before assigning a new one.`
-        });
-      }
-    }
 
     const hashedPassword = await bcryptjs.hash(password, 10);
     const admin = new AdminUser({
@@ -1216,6 +1280,119 @@ adminAuthRouter.delete("/email-domains/:id", superAdminMiddleware, async (req: A
     res.json({ message: "Domain mapping deleted" });
   } catch (error) {
     res.status(500).json({ error: "Failed to delete domain mapping" });
+  }
+});
+
+// ─── Document categories (BU admins only) ────────────────────────────────────
+// Each BU gets the universal built-ins (policy, report, etc.) plus any custom
+// categories admins have created. Built-ins live as a constant so the universal
+// set can evolve without per-tenant migrations; custom ones persist in
+// DocumentCategory.
+
+adminAuthRouter.get("/categories", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { businessUnit, isSuperAdmin } = req;
+    const filter = isSuperAdmin ? {} : { businessUnit };
+    const custom = await DocumentCategory.find(filter).sort({ label: 1 }).lean();
+
+    const merged = [
+      ...BUILTIN_DOCUMENT_CATEGORIES.map((c) => ({
+        _id: `builtin:${c.name}`,
+        name: c.name,
+        label: c.label,
+        builtin: true as const
+      })),
+      ...custom.map((c) => ({
+        _id: String(c._id),
+        name: c.name,
+        label: c.label,
+        builtin: false as const,
+        createdAt: c.createdAt
+      }))
+    ];
+
+    res.json({ categories: merged });
+  } catch (error) {
+    console.error("List categories error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+adminAuthRouter.post("/categories", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { businessUnit, tenantId, isSuperAdmin } = req;
+    if (isSuperAdmin) {
+      return res.status(403).json({ error: "Super admins must specify a business unit — use tenant provisioning." });
+    }
+    if (!businessUnit) return res.status(400).json({ error: "Business unit not found in token" });
+
+    const rawLabel = typeof req.body.label === "string" ? req.body.label.trim() : "";
+    if (!rawLabel || rawLabel.length < 1 || rawLabel.length > 60) {
+      return res.status(400).json({ error: "label is required (1–60 characters)" });
+    }
+    // Derive a stable slug from the label (lowercase, snake_case).
+    const name = rawLabel.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+    if (!name) return res.status(400).json({ error: "label must contain at least one alphanumeric character" });
+    if (BUILTIN_NAMES.has(name)) {
+      return res.status(409).json({
+        error: `"${rawLabel}" matches a built-in category — pick a different label.`
+      });
+    }
+
+    const tenant = await BusinessUnitModel.findOne({ name: businessUnit });
+    const resolvedTenantId = tenantId || tenant?.tenantId || "";
+
+    try {
+      const cat = await DocumentCategory.create({
+        name,
+        label: rawLabel,
+        businessUnit,
+        tenantId: resolvedTenantId
+      });
+      return res.status(201).json({ category: { _id: cat._id, name: cat.name, label: cat.label, builtin: false } });
+    } catch (err: any) {
+      if (err?.code === 11000) {
+        return res.status(409).json({ error: "A category with this label already exists in your organization." });
+      }
+      throw err;
+    }
+  } catch (error) {
+    console.error("Create category error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+adminAuthRouter.delete("/categories/:id", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { businessUnit, isSuperAdmin } = req;
+    const { id } = req.params;
+
+    if (id.startsWith("builtin:")) {
+      return res.status(403).json({ error: "Built-in categories can't be deleted." });
+    }
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ error: "Invalid category id" });
+    }
+
+    const cat = await DocumentCategory.findById(id);
+    if (!cat) return res.status(404).json({ error: "Category not found" });
+    if (!isSuperAdmin && cat.businessUnit !== businessUnit) {
+      return res.status(403).json({ error: "Access denied" });
+    }
+
+    // Refuse delete if any document in the BU still uses this category.
+    const inUse = await RagDocument.countDocuments({ businessUnit: cat.businessUnit, documentType: cat.name });
+    if (inUse > 0) {
+      return res.status(409).json({
+        error: `${cat.label} is still tagged on ${inUse} document${inUse === 1 ? "" : "s"}. Re-tag those before deleting.`
+      });
+    }
+
+    await DocumentCategory.findByIdAndDelete(id);
+    res.json({ message: "Category deleted" });
+  } catch (error) {
+    console.error("Delete category error:", error);
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 

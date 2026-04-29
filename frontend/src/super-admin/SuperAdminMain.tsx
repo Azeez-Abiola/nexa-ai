@@ -13,6 +13,7 @@ import {
   UserCircle,
   ChevronRight,
   BookOpen,
+  FolderTree,
   Network,
   BarChart3,
   HelpCircle,
@@ -42,6 +43,7 @@ import AccessRequests from './pages/AccessRequests';
 import Departments from './pages/Departments';
 import DepartmentDetail from './pages/DepartmentDetail';
 import UserDetail from './pages/UserDetail';
+import Categories from './pages/Categories';
 import ForceChangePasswordModal from './components/ForceChangePasswordModal';
 import NotificationsBell from './components/NotificationsBell';
 import EmailDomains from './pages/EmailDomains';
@@ -147,6 +149,7 @@ const SuperAdminMain: React.FC<SuperAdminMainProps> = ({ theme, toggleTheme }) =
     { name: 'Knowledge Base', path: '/admin/knowledge', icon: BookOpen },
     { name: 'Users', path: '/admin/users', icon: Users },
     { name: 'Departments', path: '/admin/departments', icon: Layers },
+    { name: 'Categories', path: '/admin/categories', icon: FolderTree },
     { name: 'User groups', path: '/admin/user-groups', icon: Network },
     { name: 'Analytics', path: '/admin/analytics', icon: BarChart3 },
     { name: 'Audit Logs', path: '/admin/audit', icon: Shield },
@@ -403,6 +406,7 @@ const SuperAdminMain: React.FC<SuperAdminMainProps> = ({ theme, toggleTheme }) =
                   <Route path="/admin/users/:id" element={<UserDetail />} />
                   <Route path="/admin/departments" element={<Departments />} />
                   <Route path="/admin/departments/:id" element={<DepartmentDetail />} />
+                  <Route path="/admin/categories" element={<Categories />} />
                   <Route path="/admin/audit" element={<AuditLogs />} />
                   <Route path="/admin/help" element={<HelpSupport />} />
                   <Route path="/admin/profile" element={<BusinessProfile />} />

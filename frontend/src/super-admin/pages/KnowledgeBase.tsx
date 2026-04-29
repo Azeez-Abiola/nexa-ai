@@ -63,7 +63,12 @@ import { cn } from "@/lib/utils";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import type { UserGroupRow } from "../components/UserGroupsPanel";
 
-const TYPE_LABELS: Record<string, string> = {
+/**
+ * Fallback labels for the universal built-in categories. Used only when the
+ * categories API hasn't loaded yet (or for super-admin who renders pre-fetch).
+ * The real label list comes from GET /api/v1/admin/auth/categories at runtime.
+ */
+const FALLBACK_TYPE_LABELS: Record<string, string> = {
   policy: "Policy",
   procedure: "S&OP / procedure",
   handbook: "Handbook",
@@ -72,16 +77,6 @@ const TYPE_LABELS: Record<string, string> = {
   operational_report: "Operational reports",
   other: "Other"
 };
-
-const DOCUMENT_TYPE_OPTIONS: { value: string; label: string }[] = [
-  { value: "policy", label: "Policy" },
-  { value: "report", label: "Financial reports" },
-  { value: "operational_report", label: "Operational reports" },
-  { value: "procedure", label: "S&OP / operations" },
-  { value: "handbook", label: "Handbook" },
-  { value: "contract", label: "Contact" },
-  { value: "other", label: "Other" }
-];
 
 export type RagDocumentRow = {
   _id: string;
@@ -146,6 +141,7 @@ const KnowledgeBase: React.FC = () => {
   const [documentType, setDocumentType] = useState("policy");
   const [department, setDepartment] = useState("");
   const [departments, setDepartments] = useState<{ _id: string; name: string }[]>([]);
+  const [categories, setCategories] = useState<{ name: string; label: string; builtin: boolean }[]>([]);
   const [tenantOptions, setTenantOptions] = useState<{ _id: string; name: string; slug: string }[]>([]);
   const [targetBusinessUnit, setTargetBusinessUnit] = useState("");
   const [replacesDocumentId, setReplacesDocumentId] = useState("");
@@ -222,6 +218,30 @@ const KnowledgeBase: React.FC = () => {
     })();
     return () => { cancelled = true; };
   }, [token, headers, isSuper]);
+
+  // Categories are admin-creatable now; the list endpoint returns built-ins +
+  // any custom entries the admin has added.
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await axios.get("/api/v1/admin/auth/categories", { headers });
+        if (!cancelled) setCategories(data.categories || []);
+      } catch {
+        if (!cancelled) setCategories([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [token, headers]);
+
+  const typeLabel = useCallback(
+    (name: string) => {
+      const fromApi = categories.find((c) => c.name === name)?.label;
+      return fromApi || FALLBACK_TYPE_LABELS[name] || name;
+    },
+    [categories]
+  );
 
   const loadFilterGroups = useCallback(async () => {
     const bu = isSuper ? filterTenantSlug : effectiveBusinessUnit;
@@ -875,8 +895,8 @@ const KnowledgeBase: React.FC = () => {
                         <SelectValue placeholder="Select type" />
                       </SelectTrigger>
                       <SelectContent>
-                        {DOCUMENT_TYPE_OPTIONS.map((opt) => (
-                          <SelectItem key={opt.value} value={opt.value}>
+                        {categories.map((opt) => (
+                          <SelectItem key={opt.name} value={opt.name}>
                             {opt.label}
                           </SelectItem>
                         ))}
@@ -1184,7 +1204,7 @@ const KnowledgeBase: React.FC = () => {
                   )}
                   <TableCell>
                     <Badge variant="outline" className="text-[10px] font-bold capitalize">
-                      {TYPE_LABELS[doc.documentType] || doc.documentType}
+                      {typeLabel(doc.documentType)}
                     </Badge>
                   </TableCell>
                   <TableCell>
@@ -1318,7 +1338,7 @@ const KnowledgeBase: React.FC = () => {
                 </p>
                 <p>
                   <span className="text-slate-400">Type:</span>{" "}
-                  {detailDoc && (TYPE_LABELS[detailDoc.documentType] || detailDoc.documentType)}
+                  {detailDoc && typeLabel(detailDoc.documentType)}
                 </p>
                 <p>
                   <span className="text-slate-400">Version:</span> v{detailDoc?.version ?? 1}

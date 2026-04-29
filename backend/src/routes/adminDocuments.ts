@@ -10,6 +10,7 @@ import { uploadDocument, deleteDocument } from "../services/cloudinaryService";
 import { cleanupDocumentChunks } from "../services/documentProcessingService";
 import { documentQueue } from "../queue/documentQueue";
 import { notifyDocumentAdded } from "../services/notificationService";
+import { DocumentCategory, BUILTIN_NAMES } from "../models/DocumentCategory";
 import { logDocumentUpload } from "../services/auditService";
 import logger from "../utils/logger";
 
@@ -141,14 +142,20 @@ adminDocumentsRouter.post("/", upload.single("file"), async (req: AuthenticatedR
     if (!sensitivityLevel) return res.status(400).json({ error: "sensitivityLevel is required" });
 
     const docType = (documentType || "policy").toLowerCase();
-    const allowedTypes = ["policy", "procedure", "handbook", "contract", "report", "other"];
-    if (!allowedTypes.includes(docType)) {
-      return res.status(400).json({ error: "Invalid documentType" });
-    }
 
     const targetBU = isSuperAdmin ? (req.body.businessUnit || tokenBU) : tokenBU;
     if (isSuperAdmin && !req.body.businessUnit) {
       return res.status(400).json({ error: "SUPERADMIN must specify a businessUnit" });
+    }
+
+    // Validate documentType against the universal built-ins or this BU's custom categories.
+    if (!BUILTIN_NAMES.has(docType)) {
+      const exists = await DocumentCategory.exists({ businessUnit: targetBU, name: docType });
+      if (!exists) {
+        return res.status(400).json({
+          error: `Unknown document category "${docType}". Create it from Admin → Categories first.`
+        });
+      }
     }
 
     let replaceIdRaw =
