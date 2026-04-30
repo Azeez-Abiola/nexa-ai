@@ -101,13 +101,17 @@ export interface ShareError {
  *  1. The conversation group must exist and belong to the sender.
  *  2. The recipient must exist.
  *  3. sender.businessUnit === recipient.businessUnit — hard reject otherwise.
- *  4. Duplicate shares (same sender + recipient + group) are rejected with 409.
+ *  4. Duplicate shares (same sender + recipient + group + messageIndex) are rejected with 409.
+ *
+ * When `messageIndex` is provided, the share is scoped to that single AI response.
+ * The recipient sees only that message plus the preceding user question.
  */
 export async function shareConversation(
   senderUserId: string,
   senderBusinessUnit: string,
   conversationGroupId: string,
-  recipientEmail: string
+  recipientEmail: string,
+  messageIndex?: number
 ): Promise<ShareResult | ShareError> {
   // 1. Validate ObjectId format to avoid DB errors
   if (!mongoose.Types.ObjectId.isValid(conversationGroupId)) {
@@ -129,6 +133,26 @@ export async function shareConversation(
 
   if (!group) {
     return { success: false, status: 404, error: "Conversation not found" };
+  }
+
+  // Validate messageIndex (when present): must point at an assistant message in this group.
+  // Sharing a user's own question makes no sense — they'd want the AI's reply too.
+  if (messageIndex !== undefined && messageIndex !== null) {
+    if (
+      typeof messageIndex !== "number" ||
+      !Number.isInteger(messageIndex) ||
+      messageIndex < 0 ||
+      messageIndex >= group.messages.length
+    ) {
+      return { success: false, status: 400, error: "Invalid message index" };
+    }
+    if (group.messages[messageIndex].role !== "assistant") {
+      return {
+        success: false,
+        status: 400,
+        error: "Only AI responses can be shared as a single message — pick the assistant reply, not the question."
+      };
+    }
   }
 
   // 3. Look up the recipient
@@ -167,18 +191,24 @@ export async function shareConversation(
     };
   }
 
-  // 5. Prevent duplicate shares
+  // 5. Prevent duplicate shares (per-conversation OR per-message — keyed independently)
+  const normalizedIndex =
+    typeof messageIndex === "number" && Number.isInteger(messageIndex) ? messageIndex : null;
+
   const existing = await SharedConversation.findOne({
     sharedByUserId: new mongoose.Types.ObjectId(senderUserId),
     sharedWithUserId: recipient._id,
-    conversationGroupId: new mongoose.Types.ObjectId(conversationGroupId)
+    conversationGroupId: new mongoose.Types.ObjectId(conversationGroupId),
+    messageIndex: normalizedIndex
   });
 
   if (existing) {
     return {
       success: false,
       status: 409,
-      error: "This conversation has already been shared with that user"
+      error: normalizedIndex !== null
+        ? "You've already shared this AI response with that user."
+        : "This conversation has already been shared with that user"
     };
   }
 
@@ -187,21 +217,26 @@ export async function shareConversation(
     conversationGroupId: new mongoose.Types.ObjectId(conversationGroupId),
     sharedByUserId: new mongoose.Types.ObjectId(senderUserId),
     sharedWithUserId: recipient._id,
-    businessUnit: senderBusinessUnit
+    businessUnit: senderBusinessUnit,
+    messageIndex: normalizedIndex
   });
 
   // 7. Audit log (fire-and-forget — never blocks the response)
   logEvent("conversation_shared", {
     userId: senderUserId,
     businessUnit: senderBusinessUnit,
-    action: "Conversation Shared",
-    details: `Shared conversation "${group.title}" with ${recipient.email}`,
+    action: normalizedIndex !== null ? "AI Response Shared" : "Conversation Shared",
+    details:
+      normalizedIndex !== null
+        ? `Shared a single AI response from "${group.title}" with ${recipient.email}`
+        : `Shared conversation "${group.title}" with ${recipient.email}`,
     metadata: {
       shareId: share._id.toString(),
       conversationGroupId,
       conversationTitle: group.title,
       sharedWithUserId: recipient._id.toString(),
-      sharedWithEmail: recipient.email
+      sharedWithEmail: recipient.email,
+      messageIndex: normalizedIndex
     }
   });
 
@@ -252,7 +287,24 @@ export async function getConversationsSharedWithMe(recipientUserId: string) {
         .select("fullName email")
         .lean();
 
-      const visibleMessages = await redactMessagesForRecipient(group.messages, recipient);
+      // Per-message share: scope the visible messages to the focused AI reply
+      // plus the immediately-preceding user question (so the recipient has the
+      // context for what was asked). Whole-conversation shares pass through.
+      let scopedMessages = group.messages;
+      const isSingleMessageShare =
+        typeof share.messageIndex === "number" && share.messageIndex !== null;
+      if (isSingleMessageShare) {
+        const idx = share.messageIndex as number;
+        if (idx >= 0 && idx < group.messages.length) {
+          const start = idx > 0 ? idx - 1 : idx;
+          scopedMessages = group.messages.slice(start, idx + 1);
+        } else {
+          // Index pointed past the group (message deleted since share was created) — drop the share.
+          return null;
+        }
+      }
+
+      const visibleMessages = await redactMessagesForRecipient(scopedMessages, recipient);
       const redactedCount = visibleMessages.filter((m) => (m as RedactedMessage).redacted).length;
 
       return {
@@ -261,6 +313,8 @@ export async function getConversationsSharedWithMe(recipientUserId: string) {
         sharedBy: sharedByUser
           ? { userId: share.sharedByUserId, fullName: sharedByUser.fullName, email: sharedByUser.email }
           : { userId: share.sharedByUserId },
+        /** When true, this share targets a single AI response within the conversation. */
+        singleMessage: isSingleMessageShare,
         conversation: {
           _id: group._id,
           title: group.title,

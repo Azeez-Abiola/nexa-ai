@@ -81,6 +81,8 @@ interface SharedConversation {
   shareId: string;
   sharedAt: string;
   sharedBy: { userId?: string; fullName?: string; email?: string };
+  /** True when the share scopes a single AI response within the conversation. */
+  singleMessage?: boolean;
   conversation: {
     _id: string;
     title: string;
@@ -219,6 +221,8 @@ export const App: React.FC = () => {
 
   // Conversation sharing
   const [shareModalConvId, setShareModalConvId] = useState<string | null>(null);
+  /** When set alongside shareModalConvId, the modal shares a single AI response at this index instead of the whole chat. */
+  const [shareMessageIndex, setShareMessageIndex] = useState<number | null>(null);
   const [shareRecipientEmail, setShareRecipientEmail] = useState("");
   const [shareSubmitting, setShareSubmitting] = useState(false);
   const [shareError, setShareError] = useState("");
@@ -708,9 +712,17 @@ export const App: React.FC = () => {
   const handleOpenShareModal = (convId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     setShareModalConvId(convId);
+    setShareMessageIndex(null);
     setShareRecipientEmail("");
     setShareError("");
     setActiveMenuId(null);
+  };
+
+  const handleOpenShareMessageModal = (convId: string, messageIndex: number) => {
+    setShareModalConvId(convId);
+    setShareMessageIndex(messageIndex);
+    setShareRecipientEmail("");
+    setShareError("");
   };
 
   const confirmShareConversation = async (e: React.FormEvent) => {
@@ -719,17 +731,26 @@ export const App: React.FC = () => {
     try {
       setShareSubmitting(true);
       setShareError("");
+      const url =
+        shareMessageIndex !== null
+          ? `/api/v1/conversations/${shareModalConvId}/messages/${shareMessageIndex}/share`
+          : `/api/v1/conversations/${shareModalConvId}/share`;
       const { data } = await axios.post(
-        `/api/v1/conversations/${shareModalConvId}/share`,
+        url,
         { recipientEmail: shareRecipientEmail.trim() },
         { headers: { Authorization: `Bearer ${token}` } }
       );
+      const wasMessage = shareMessageIndex !== null;
       setShareModalConvId(null);
+      setShareMessageIndex(null);
       setShareRecipientEmail("");
-      // Toast — reuse the alert path that exists in this file
-      alert(`Shared with ${data.sharedWithEmail || shareRecipientEmail.trim()}.`);
+      alert(
+        wasMessage
+          ? `AI response shared with ${data.sharedWithEmail || shareRecipientEmail.trim()}.`
+          : `Conversation shared with ${data.sharedWithEmail || shareRecipientEmail.trim()}.`
+      );
     } catch (err: any) {
-      setShareError(err.response?.data?.error || "Could not share conversation.");
+      setShareError(err.response?.data?.error || "Could not share.");
     } finally {
       setShareSubmitting(false);
     }
@@ -1320,10 +1341,10 @@ export const App: React.FC = () => {
                         onClick={() => openSharedConversation(s)}
                       >
                         <div className="conv-title-v2 shared-conv-title">
-                          {s.conversation.title}
+                          {s.singleMessage ? "💬 " : ""}{s.conversation.title}
                         </div>
                         <div className="shared-meta">
-                          {s.sharedBy?.fullName || s.sharedBy?.email || "Someone"}
+                          {s.singleMessage ? "Single response · " : ""}{s.sharedBy?.fullName || s.sharedBy?.email || "Someone"}
                         </div>
                       </button>
                     ))}
@@ -1891,6 +1912,20 @@ export const App: React.FC = () => {
                           >
                             <BiCopy size={16} />
                           </button>
+                          {/* Share single AI response. Only render on assistant messages, in your
+                              own conversations (not on a shared-with-me view), and not on redacted
+                              ones since there's nothing to share. */}
+                          {m.role === "assistant" && !currentConversation?.isShared && !m.redacted && currentConversation?._id ? (
+                            <button
+                              type="button"
+                              className="message-copy-btn-v2"
+                              title="Share this response"
+                              aria-label="Share this response"
+                              onClick={() => handleOpenShareMessageModal(currentConversation._id, idx)}
+                            >
+                              <BiShareAlt size={16} />
+                            </button>
+                          ) : null}
                           {copiedMessageIndex === idx ? (
                             <span className="message-copied-label-v2" role="status">
                               Copied
@@ -2019,11 +2054,11 @@ export const App: React.FC = () => {
           <div className="modal-overlay-v2">
             <div className="modal-card-v2">
               <div className="modal-header-v2">
-                <h3>Share conversation</h3>
+                <h3>{shareMessageIndex !== null ? "Share AI response" : "Share conversation"}</h3>
                 <p>
-                  Share this chat with a teammate in your business unit. They'll see your messages and the AI's
-                  responses, except where the AI cited documents they don't have permission to view — those replies
-                  are hidden from them automatically.
+                  {shareMessageIndex !== null
+                    ? "Share this single AI reply with a teammate in your business unit. They'll see your question and the AI's answer — but if the response cited documents they don't have permission to view, it'll be hidden from them automatically."
+                    : "Share this chat with a teammate in your business unit. They'll see your messages and the AI's responses, except where the AI cited documents they don't have permission to view — those replies are hidden from them automatically."}
                 </p>
               </div>
               <form onSubmit={confirmShareConversation}>
@@ -2047,6 +2082,7 @@ export const App: React.FC = () => {
                     onClick={() => {
                       if (shareSubmitting) return;
                       setShareModalConvId(null);
+                      setShareMessageIndex(null);
                       setShareError("");
                       setShareRecipientEmail("");
                     }}
