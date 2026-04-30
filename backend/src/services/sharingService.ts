@@ -1,7 +1,9 @@
+import crypto from "crypto";
 import mongoose from "mongoose";
 import { User } from "../models/User";
 import { Conversation, ChatMessage } from "../models/Conversation";
 import { SharedConversation } from "../models/SharedConversation";
+import { ShareLink } from "../models/ShareLink";
 import { RagDocument } from "../models/RagDocument";
 import { KnowledgeGroup } from "../models/KnowledgeGroup";
 import { logEvent } from "./auditService";
@@ -369,4 +371,147 @@ export async function revokeShare(
   });
 
   return { success: true };
+}
+
+// ─── Tokenised share-link flow ───────────────────────────────────────────────
+// Generates a per-conversation (or per-message) random token. Anyone with the
+// token who is authenticated AND in the sharer's business unit can open the
+// link and see the conversation — subject to the same per-source redaction.
+
+export interface ShareLinkResult {
+  success: true;
+  token: string;
+}
+
+/**
+ * Create (or return existing) a share link for a conversation group, optionally
+ * scoped to a single AI response. Idempotent — calling twice for the same
+ * (sender, group, messageIndex) returns the same token.
+ */
+export async function createShareLink(
+  senderUserId: string,
+  senderBusinessUnit: string,
+  conversationGroupId: string,
+  messageIndex?: number
+): Promise<ShareLinkResult | ShareError> {
+  if (!mongoose.Types.ObjectId.isValid(conversationGroupId)) {
+    return { success: false, status: 400, error: "Invalid conversation ID" };
+  }
+
+  const senderConversations = await Conversation.findOne({
+    userId: new mongoose.Types.ObjectId(senderUserId)
+  });
+  if (!senderConversations) {
+    return { success: false, status: 404, error: "Conversation not found" };
+  }
+  const group = senderConversations.conversationGroups.find(
+    (g) => g._id.toString() === conversationGroupId
+  );
+  if (!group) {
+    return { success: false, status: 404, error: "Conversation not found" };
+  }
+
+  const normalizedIndex =
+    typeof messageIndex === "number" && Number.isInteger(messageIndex) ? messageIndex : null;
+
+  if (normalizedIndex !== null) {
+    if (normalizedIndex < 0 || normalizedIndex >= group.messages.length) {
+      return { success: false, status: 400, error: "Invalid message index" };
+    }
+    if (group.messages[normalizedIndex].role !== "assistant") {
+      return {
+        success: false,
+        status: 400,
+        error: "Only AI responses can be shared as a single message."
+      };
+    }
+  }
+
+  // Look up an existing link for the same (sender, group, messageIndex) so the URL
+  // stays stable across repeated "Copy link" clicks.
+  const existing = await ShareLink.findOne({
+    sharedByUserId: new mongoose.Types.ObjectId(senderUserId),
+    conversationGroupId: new mongoose.Types.ObjectId(conversationGroupId),
+    messageIndex: normalizedIndex
+  });
+  if (existing) return { success: true, token: existing.token };
+
+  const token = crypto.randomBytes(18).toString("base64url");
+
+  await ShareLink.create({
+    token,
+    conversationGroupId: new mongoose.Types.ObjectId(conversationGroupId),
+    sharedByUserId: new mongoose.Types.ObjectId(senderUserId),
+    businessUnit: senderBusinessUnit,
+    messageIndex: normalizedIndex
+  });
+
+  return { success: true, token };
+}
+
+/**
+ * Resolve a share-link token for a viewing user. Enforces same-BU and applies
+ * the per-source redaction tailored to the viewer's group memberships.
+ */
+export async function getConversationByShareLink(token: string, viewerUserId: string) {
+  const link = await ShareLink.findOne({ token }).lean();
+  if (!link) return { success: false as const, status: 404, error: "This share link is invalid or has been revoked." };
+
+  if (!mongoose.Types.ObjectId.isValid(viewerUserId)) {
+    return { success: false as const, status: 401, error: "Sign in to view this share." };
+  }
+  const viewer = await User.findById(viewerUserId).select("_id businessUnit fullName email").lean();
+  if (!viewer) return { success: false as const, status: 401, error: "Sign in to view this share." };
+
+  if (viewer.businessUnit !== link.businessUnit) {
+    return {
+      success: false as const,
+      status: 403,
+      error: "This share link is restricted to a different business unit."
+    };
+  }
+
+  const ownerConversations = await Conversation.findOne({ userId: link.sharedByUserId }).lean();
+  if (!ownerConversations) {
+    return { success: false as const, status: 404, error: "The original conversation no longer exists." };
+  }
+  const group = ownerConversations.conversationGroups.find(
+    (g) => g._id.toString() === link.conversationGroupId.toString()
+  );
+  if (!group) {
+    return { success: false as const, status: 404, error: "The original conversation no longer exists." };
+  }
+
+  // Slice for single-message links; redact for everyone.
+  let scopedMessages = group.messages;
+  const isSingleMessage = typeof link.messageIndex === "number" && link.messageIndex !== null;
+  if (isSingleMessage) {
+    const idx = link.messageIndex as number;
+    if (idx < 0 || idx >= group.messages.length) {
+      return { success: false as const, status: 404, error: "The original message no longer exists." };
+    }
+    const start = idx > 0 ? idx - 1 : idx;
+    scopedMessages = group.messages.slice(start, idx + 1);
+  }
+
+  const visibleMessages = await redactMessagesForRecipient(scopedMessages, viewer);
+  const redactedCount = visibleMessages.filter((m) => (m as RedactedMessage).redacted).length;
+
+  const sharedByUser = await User.findById(link.sharedByUserId).select("fullName email").lean();
+
+  return {
+    success: true as const,
+    sharedBy: sharedByUser
+      ? { userId: link.sharedByUserId, fullName: sharedByUser.fullName, email: sharedByUser.email }
+      : { userId: link.sharedByUserId },
+    singleMessage: isSingleMessage,
+    conversation: {
+      _id: group._id,
+      title: group.title,
+      messages: visibleMessages,
+      createdAt: group.createdAt,
+      updatedAt: group.updatedAt
+    },
+    redactedMessageCount: redactedCount
+  };
 }

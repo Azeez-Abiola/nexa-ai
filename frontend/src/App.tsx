@@ -6,7 +6,7 @@ import {
   BiUserCircle, BiCog, BiMessageSquareAdd, BiSearch, BiImage, BiCodeBlock,
   BiBoltCircle, BiShareAlt, BiHelpCircle, BiChevronDown,
   BiUpArrowAlt, BiMessageRounded, BiPlus, BiDotsHorizontalRounded,
-  BiPaperclip, BiMicrophone, BiMoon, BiSun, BiCamera, BiCopy
+  BiPaperclip, BiMicrophone, BiMoon, BiSun, BiCamera, BiCopy, BiCheck
 } from "react-icons/bi";
 import { MdPushPin, MdAutoAwesome } from "react-icons/md";
 import { FiLogOut, FiDownload, FiTrash2, FiExternalLink } from "react-icons/fi";
@@ -228,6 +228,11 @@ export const App: React.FC = () => {
   const [shareError, setShareError] = useState("");
   const [sharedConversations, setSharedConversations] = useState<SharedConversation[]>([]);
   const [isSharedSectionCollapsed, setIsSharedSectionCollapsed] = useState(false);
+  // Share link state — token, URL, copy feedback, and link-fetch loading.
+  const [shareLinkUrl, setShareLinkUrl] = useState<string>("");
+  const [shareLinkLoading, setShareLinkLoading] = useState(false);
+  const [shareLinkCopied, setShareLinkCopied] = useState(false);
+  const shareLinkCopyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [suggestions, setSuggestions] = useState<{ title: string; category: string; prompt: string }[]>([]);
   const [isSuggestionsLoading, setIsSuggestionsLoading] = useState(false);
   const [pinnedConversations, setPinnedConversations] = useState<Set<string>>(() => {
@@ -530,11 +535,27 @@ export const App: React.FC = () => {
     setUser(authUser);
     setIsAuthenticated(true);
 
+    // Honour a share-link redirect that was stashed before the user was bounced
+    // to /login (so deep links to /shared/:token survive the auth round-trip).
+    let postLoginPath: string | null = null;
+    try {
+      postLoginPath = sessionStorage.getItem("post-login-redirect");
+      if (postLoginPath) sessionStorage.removeItem("post-login-redirect");
+    } catch {
+      /* ignore */
+    }
+
     // Role-based redirection
     if (authUser.businessUnit === 'SUPERADMIN') {
       window.location.href = "/super-admin/dashboard";
     } else if (authUser.isAdmin === true) {
       window.location.href = "/admin/dashboard";
+    } else if (postLoginPath && postLoginPath.startsWith("/shared/")) {
+      window.history.pushState(null, "", postLoginPath);
+      setIsConversationsLoading(true);
+      axios.defaults.headers.common["Authorization"] = `Bearer ${authToken}`;
+      applyTenantBrandFromSession(authUser.tenantColor);
+      await loadConversations(authToken);
     } else {
       window.history.pushState(null, "", "/user-chat");
       setIsConversationsLoading(true);
@@ -715,6 +736,8 @@ export const App: React.FC = () => {
     setShareMessageIndex(null);
     setShareRecipientEmail("");
     setShareError("");
+    setShareLinkUrl("");
+    setShareLinkCopied(false);
     setActiveMenuId(null);
   };
 
@@ -723,6 +746,47 @@ export const App: React.FC = () => {
     setShareMessageIndex(messageIndex);
     setShareRecipientEmail("");
     setShareError("");
+    setShareLinkUrl("");
+    setShareLinkCopied(false);
+  };
+
+  // Fetch (or reuse) the share link whenever the modal opens. The backend is
+  // idempotent on (sender, group, messageIndex), so reopening returns the same URL.
+  useEffect(() => {
+    if (!shareModalConvId || !token) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        setShareLinkLoading(true);
+        const { data } = await axios.post(
+          `/api/v1/conversations/${shareModalConvId}/share-link`,
+          shareMessageIndex !== null ? { messageIndex: shareMessageIndex } : {},
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        if (!cancelled && data?.token) {
+          setShareLinkUrl(`${window.location.origin}/shared/${data.token}`);
+        }
+      } catch {
+        // Best-effort — the email path still works without a link.
+      } finally {
+        if (!cancelled) setShareLinkLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [shareModalConvId, shareMessageIndex, token]);
+
+  const copyShareLink = async () => {
+    if (!shareLinkUrl) return;
+    try {
+      await navigator.clipboard.writeText(shareLinkUrl);
+      setShareLinkCopied(true);
+      if (shareLinkCopyTimer.current) clearTimeout(shareLinkCopyTimer.current);
+      shareLinkCopyTimer.current = setTimeout(() => setShareLinkCopied(false), 2000);
+    } catch {
+      /* ignore clipboard failures */
+    }
   };
 
   const confirmShareConversation = async (e: React.FormEvent) => {
@@ -773,6 +837,47 @@ export const App: React.FC = () => {
   useEffect(() => {
     fetchSharedWithMe();
   }, [fetchSharedWithMe]);
+
+  // Resolve a /shared/:token URL into a current conversation. Runs whenever the
+  // path matches and we have a token; redirects to /user-chat once loaded so
+  // the URL stays clean and the view sticks until the user navigates away.
+  useEffect(() => {
+    if (!token) return;
+    const match = location.pathname.match(/^\/shared\/([A-Za-z0-9_-]+)/);
+    if (!match) return;
+    const shareToken = match[1];
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await axios.get(
+          `/api/v1/conversations/share-link/${shareToken}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        if (cancelled) return;
+        setCurrentConversation({
+          _id: data.conversation._id,
+          title: data.conversation.title,
+          messages: data.conversation.messages,
+          createdAt: data.conversation.createdAt,
+          updatedAt: data.conversation.updatedAt,
+          isShared: true,
+          sharedBy: data.sharedBy,
+          redactedMessageCount: data.redactedMessageCount
+        });
+        navigate("/user-chat", { replace: true });
+      } catch (err: any) {
+        if (cancelled) return;
+        const msg =
+          err?.response?.data?.error ||
+          "This share link is invalid or you don't have permission to view it.";
+        alert(msg);
+        navigate("/user-chat", { replace: true });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [location.pathname, token, navigate]);
 
   const openSharedConversation = (s: SharedConversation) => {
     // Map shared payload onto the existing Conversation shape so the message
@@ -1209,6 +1314,24 @@ export const App: React.FC = () => {
     // Authenticated — render chat shell below
   }
 
+  // /shared/:token — public-ish share link viewer. Requires auth (so the
+  // backend can apply per-source redaction tied to the viewer's identity).
+  // The actual fetch + currentConversation hydration runs in an effect below;
+  // here we just require auth and fall through to the chat shell.
+  if (location.pathname.startsWith("/shared/")) {
+    if (!isAuthenticated) {
+      // Stash the intended path so we can return after login
+      try {
+        sessionStorage.setItem("post-login-redirect", location.pathname);
+      } catch {
+        /* ignore */
+      }
+      window.history.replaceState(null, "", "/login");
+      return <Login onLoginSuccess={handleLogin} />;
+    }
+    // Authenticated — render chat shell below; the effect below loads the share.
+  }
+
   // Any other unmatched route for unauthenticated users → landing page
   if (!isAuthenticated) {
     return <NewLandingPage />;
@@ -1549,6 +1672,19 @@ export const App: React.FC = () => {
               ) : null}
             </div>
             <div className="header-actions-v2">
+              {/* Share this conversation — header-level entry point. Only shown when there's
+                  a real conversation loaded and it's the user's own (not a shared-with-me view). */}
+              {currentConversation?._id && !currentConversation?.isShared && (currentConversation.messages?.length ?? 0) > 0 ? (
+                <button
+                  type="button"
+                  className="header-action-btn-v2"
+                  aria-label="Share conversation"
+                  onClick={() => handleOpenShareModal(currentConversation._id!, { stopPropagation: () => {} } as React.MouseEvent)}
+                >
+                  <BiShareAlt size={18} />
+                  <span className="header-action-label-v2">Share</span>
+                </button>
+              ) : null}
               <DropdownMenu modal={false}>
                 <DropdownMenuTrigger asChild>
                   <button type="button" className="header-action-btn-v2" aria-label="Help and frequently asked questions">
@@ -1905,12 +2041,12 @@ export const App: React.FC = () => {
                         <div className="message-copy-stack-v2">
                           <button
                             type="button"
-                            className="message-copy-btn-v2"
-                            title="Copy message"
-                            aria-label="Copy message"
+                            className={`message-copy-btn-v2${copiedMessageIndex === idx ? " copied" : ""}`}
+                            title={copiedMessageIndex === idx ? "Copied" : "Copy message"}
+                            aria-label={copiedMessageIndex === idx ? "Copied" : "Copy message"}
                             onClick={() => void copyMessageText(m.content, idx)}
                           >
-                            <BiCopy size={16} />
+                            {copiedMessageIndex === idx ? <BiCheck size={16} /> : <BiCopy size={16} />}
                           </button>
                           {/* Share single AI response. Only render on assistant messages, in your
                               own conversations (not on a shared-with-me view), and not on redacted
@@ -1925,11 +2061,6 @@ export const App: React.FC = () => {
                             >
                               <BiShareAlt size={16} />
                             </button>
-                          ) : null}
-                          {copiedMessageIndex === idx ? (
-                            <span className="message-copied-label-v2" role="status">
-                              Copied
-                            </span>
                           ) : null}
                         </div>
                       </div>
@@ -2057,10 +2188,34 @@ export const App: React.FC = () => {
                 <h3>{shareMessageIndex !== null ? "Share AI response" : "Share conversation"}</h3>
                 <p>
                   {shareMessageIndex !== null
-                    ? "Share this single AI reply with a teammate in your business unit. They'll see your question and the AI's answer — but if the response cited documents they don't have permission to view, it'll be hidden from them automatically."
-                    : "Share this chat with a teammate in your business unit. They'll see your messages and the AI's responses, except where the AI cited documents they don't have permission to view — those replies are hidden from them automatically."}
+                    ? "Anyone in your business unit can open this — but if the response cited documents they don't have permission to view, it'll be hidden from them."
+                    : "Anyone in your business unit can open this — but messages that cited documents they don't have permission to view will be hidden from them."}
                 </p>
               </div>
+
+              {/* Copy link — primary path */}
+              <div className="share-link-row">
+                <input
+                  type="text"
+                  className="share-link-input"
+                  value={shareLinkLoading ? "Generating link…" : shareLinkUrl}
+                  readOnly
+                  onFocus={(e) => e.target.select()}
+                />
+                <button
+                  type="button"
+                  className="share-link-copy-btn"
+                  onClick={copyShareLink}
+                  disabled={!shareLinkUrl || shareLinkLoading}
+                  aria-label="Copy share link"
+                >
+                  {shareLinkCopied ? <BiCheck size={16} /> : <BiCopy size={16} />}
+                  <span>{shareLinkCopied ? "Copied" : "Copy link"}</span>
+                </button>
+              </div>
+
+              <div className="share-divider"><span>or send by email</span></div>
+
               <form onSubmit={confirmShareConversation}>
                 <input
                   className="modal-input-v2"
@@ -2068,7 +2223,6 @@ export const App: React.FC = () => {
                   placeholder="teammate@company.com"
                   value={shareRecipientEmail}
                   onChange={(e) => setShareRecipientEmail(e.target.value)}
-                  autoFocus
                   required
                   disabled={shareSubmitting}
                 />
@@ -2085,17 +2239,19 @@ export const App: React.FC = () => {
                       setShareMessageIndex(null);
                       setShareError("");
                       setShareRecipientEmail("");
+                      setShareLinkUrl("");
+                      setShareLinkCopied(false);
                     }}
                     disabled={shareSubmitting}
                   >
-                    Cancel
+                    Close
                   </button>
                   <button
                     type="submit"
                     className="modal-btn-v2 primary"
                     disabled={shareSubmitting || !shareRecipientEmail.trim()}
                   >
-                    {shareSubmitting ? "Sharing…" : "Send"}
+                    {shareSubmitting ? "Sending…" : "Send invite"}
                   </button>
                 </div>
               </form>
@@ -2526,6 +2682,94 @@ export const App: React.FC = () => {
           color: #b91c1c;
           font-size: 12px;
           font-weight: 600;
+        }
+
+        /* Share-link row: read-only URL field + Copy link action */
+        .share-link-row {
+          display: flex;
+          gap: 8px;
+          margin-top: 16px;
+        }
+        .share-link-input {
+          flex: 1;
+          height: 44px;
+          padding: 0 14px;
+          border: 1px solid #e5e7eb;
+          border-radius: 12px;
+          font-size: 13px;
+          font-weight: 500;
+          color: #1a1a1a;
+          background: #fafafa;
+          font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+          outline: none;
+          cursor: text;
+        }
+        .dark-theme .share-link-input {
+          background: #161616;
+          color: #f3f4f6;
+          border-color: #333;
+        }
+        .share-link-copy-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          height: 44px;
+          padding: 0 16px;
+          border: 0;
+          border-radius: 12px;
+          background: #1a1a1a;
+          color: #fff;
+          font-size: 13px;
+          font-weight: 700;
+          cursor: pointer;
+          transition: background 0.15s ease, opacity 0.15s ease;
+          flex-shrink: 0;
+        }
+        .share-link-copy-btn:hover:not(:disabled) {
+          background: #000;
+        }
+        .share-link-copy-btn:disabled {
+          opacity: 0.55;
+          cursor: not-allowed;
+        }
+        .share-link-copy-btn svg { display: block; }
+        .dark-theme .share-link-copy-btn {
+          background: #f3f4f6;
+          color: #0f172a;
+        }
+        .dark-theme .share-link-copy-btn:hover:not(:disabled) {
+          background: #fff;
+        }
+
+        /* "or send by email" divider */
+        .share-divider {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          margin: 18px 0 4px;
+          font-size: 11px;
+          font-weight: 700;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          color: #9ca3af;
+        }
+        .share-divider::before,
+        .share-divider::after {
+          content: "";
+          flex: 1;
+          height: 1px;
+          background: #e5e7eb;
+        }
+        .dark-theme .share-divider::before,
+        .dark-theme .share-divider::after { background: #333; }
+
+        /* Copy-message button: when in copied state, swap to a black check mark */
+        .message-copy-btn-v2.copied {
+          color: #0f172a !important;
+          opacity: 1 !important;
+        }
+        .dark-theme .message-copy-btn-v2.copied {
+          color: #f3f4f6 !important;
         }
 
         .conv-icon {

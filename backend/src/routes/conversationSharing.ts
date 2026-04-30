@@ -3,7 +3,9 @@ import { authMiddleware, AuthenticatedRequest } from "../middleware/auth";
 import {
   shareConversation,
   getConversationsSharedWithMe,
-  revokeShare
+  revokeShare,
+  createShareLink,
+  getConversationByShareLink
 } from "../services/sharingService";
 
 export const conversationSharingRouter = express.Router();
@@ -140,5 +142,59 @@ conversationSharingRouter.delete(
     }
 
     return res.json({ message: "Share revoked successfully" });
+  }
+);
+
+/**
+ * POST /api/v1/conversations/:groupId/share-link
+ *
+ * Generate (or return existing) a tokenised share link for a whole conversation.
+ * Body: { messageIndex?: number } — set to scope to a single AI response.
+ * Response: { token, shareUrl }
+ */
+conversationSharingRouter.post(
+  "/:groupId/share-link",
+  authMiddleware,
+  async (req: AuthenticatedRequest, res: Response) => {
+    const { groupId } = req.params;
+    const { messageIndex } = (req.body || {}) as { messageIndex?: number };
+
+    const result = await createShareLink(
+      req.userId!,
+      req.businessUnit!,
+      groupId,
+      messageIndex
+    ).catch(() => ({ success: false as const, status: 500, error: "Internal server error" }));
+
+    if (!result.success) {
+      return res.status(result.status).json({ error: result.error });
+    }
+
+    // The frontend will compose the user-visible URL. We just hand back the token.
+    return res.status(201).json({ token: result.token });
+  }
+);
+
+/**
+ * GET /api/v1/conversations/share-link/:token
+ *
+ * Resolve a share-link token. Authenticated user must be in the same business
+ * unit as the original sharer; per-source redaction is applied based on the
+ * viewer's group memberships.
+ */
+conversationSharingRouter.get(
+  "/share-link/:token",
+  authMiddleware,
+  async (req: AuthenticatedRequest, res: Response) => {
+    const { token } = req.params;
+    const result = await getConversationByShareLink(token, req.userId!).catch(() => ({
+      success: false as const,
+      status: 500,
+      error: "Internal server error"
+    }));
+    if (!result.success) {
+      return res.status(result.status).json({ error: result.error });
+    }
+    return res.json(result);
   }
 );
