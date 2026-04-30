@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import axios from "axios";
 import {
@@ -59,6 +59,8 @@ interface Message {
   sources?: MessageSource[];
   generatedDocument?: GeneratedDocument;
   timestamp: Date;
+  /** Set on shared-with-me view when the recipient lacks access to the cited sources. */
+  redacted?: boolean;
 }
 
 interface Conversation {
@@ -67,6 +69,26 @@ interface Conversation {
   messages: Message[];
   createdAt: string;
   updatedAt: string;
+  /** True when viewing a conversation shared with this user — input is hidden and edits are disabled. */
+  isShared?: boolean;
+  /** When isShared, who shared it. */
+  sharedBy?: { fullName?: string; email?: string };
+  /** Number of messages hidden from this recipient by the access redactor. */
+  redactedMessageCount?: number;
+}
+
+interface SharedConversation {
+  shareId: string;
+  sharedAt: string;
+  sharedBy: { userId?: string; fullName?: string; email?: string };
+  conversation: {
+    _id: string;
+    title: string;
+    messages: Message[];
+    createdAt: string;
+    updatedAt: string;
+  };
+  redactedMessageCount?: number;
 }
 
 interface User {
@@ -194,6 +216,14 @@ export const App: React.FC = () => {
   const [contextMenuConversation, setContextMenuConversation] = useState<string | null>(null);
   const [renamingConversationId, setRenamingConversationId] = useState<string | null>(null);
   const [renamingTitle, setRenamingTitle] = useState("");
+
+  // Conversation sharing
+  const [shareModalConvId, setShareModalConvId] = useState<string | null>(null);
+  const [shareRecipientEmail, setShareRecipientEmail] = useState("");
+  const [shareSubmitting, setShareSubmitting] = useState(false);
+  const [shareError, setShareError] = useState("");
+  const [sharedConversations, setSharedConversations] = useState<SharedConversation[]>([]);
+  const [isSharedSectionCollapsed, setIsSharedSectionCollapsed] = useState(false);
   const [suggestions, setSuggestions] = useState<{ title: string; category: string; prompt: string }[]>([]);
   const [isSuggestionsLoading, setIsSuggestionsLoading] = useState(false);
   const [pinnedConversations, setPinnedConversations] = useState<Set<string>>(() => {
@@ -673,6 +703,72 @@ export const App: React.FC = () => {
     setPinnedConversations(newPinned);
     setContextMenuOpen(false);
     setContextMenuConversation(null);
+  };
+
+  const handleOpenShareModal = (convId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setShareModalConvId(convId);
+    setShareRecipientEmail("");
+    setShareError("");
+    setActiveMenuId(null);
+  };
+
+  const confirmShareConversation = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!shareModalConvId || !shareRecipientEmail.trim() || !token) return;
+    try {
+      setShareSubmitting(true);
+      setShareError("");
+      const { data } = await axios.post(
+        `/api/v1/conversations/${shareModalConvId}/share`,
+        { recipientEmail: shareRecipientEmail.trim() },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setShareModalConvId(null);
+      setShareRecipientEmail("");
+      // Toast — reuse the alert path that exists in this file
+      alert(`Shared with ${data.sharedWithEmail || shareRecipientEmail.trim()}.`);
+    } catch (err: any) {
+      setShareError(err.response?.data?.error || "Could not share conversation.");
+    } finally {
+      setShareSubmitting(false);
+    }
+  };
+
+  const fetchSharedWithMe = useCallback(async () => {
+    if (!token) return;
+    try {
+      const { data } = await axios.get<{ sharedConversations: SharedConversation[] }>(
+        "/api/v1/conversations/shared-with-me",
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setSharedConversations(data.sharedConversations || []);
+    } catch (err) {
+      // Best-effort — never block the chat if shares can't load
+      console.warn("Could not load shared conversations", err);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    fetchSharedWithMe();
+  }, [fetchSharedWithMe]);
+
+  const openSharedConversation = (s: SharedConversation) => {
+    // Map shared payload onto the existing Conversation shape so the message
+    // renderer can read it without a separate code path. The isShared flag is
+    // what suppresses the input footer + edit affordances downstream.
+    setCurrentConversation({
+      _id: s.conversation._id,
+      title: s.conversation.title,
+      messages: s.conversation.messages,
+      createdAt: s.conversation.createdAt,
+      updatedAt: s.conversation.updatedAt,
+      isShared: true,
+      sharedBy: s.sharedBy,
+      redactedMessageCount: s.redactedMessageCount
+    });
+    if (location.pathname !== "/user-chat") navigate("/user-chat");
+    if (window.innerWidth <= 768) setSidebarOpen(false);
   };
 
   const handleEditMessage = (index: number, content: string) => {
@@ -1205,6 +1301,37 @@ export const App: React.FC = () => {
           </div>
 
           <div className="sidebar-conversations-v2">
+            {sharedConversations.length > 0 ? (
+              <>
+                <div
+                  className="sidebar-section-label retractable"
+                  onClick={() => setIsSharedSectionCollapsed(!isSharedSectionCollapsed)}
+                >
+                  <span>Shared with me</span>
+                  <BiChevronDown style={{ transform: isSharedSectionCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }} />
+                </div>
+                {!isSharedSectionCollapsed ? (
+                  <div className="shared-with-me-list">
+                    {sharedConversations.map((s) => (
+                      <button
+                        key={s.shareId}
+                        type="button"
+                        className={`conversation-item-v2 shared ${currentConversation?._id === s.conversation._id && currentConversation?.isShared ? 'active' : ''}`}
+                        onClick={() => openSharedConversation(s)}
+                      >
+                        <div className="conv-title-v2 shared-conv-title">
+                          {s.conversation.title}
+                        </div>
+                        <div className="shared-meta">
+                          {s.sharedBy?.fullName || s.sharedBy?.email || "Someone"}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </>
+            ) : null}
+
             <div
               className="sidebar-section-label retractable"
               onClick={() => setIsHistoryCollapsed(!isHistoryCollapsed)}
@@ -1265,6 +1392,11 @@ export const App: React.FC = () => {
                                   setActiveMenuId(null);
                                 }}>
                                   {pinnedConversations.has(conv._id) ? "Unpin" : "Pin"}
+                                </button>
+                                <button onClick={(e) => {
+                                  handleOpenShareModal(conv._id, e as any);
+                                }}>
+                                  Share
                                 </button>
                                 <button onClick={(e) => {
                                   handleContextMenuDelete(conv._id, e as any);
@@ -1667,8 +1799,22 @@ export const App: React.FC = () => {
             ) : (
               <div className="messages-container-v2" ref={messagesContainerRef}>
                 <div className="messages-thread-center-v2">
+                  {currentConversation?.isShared ? (
+                    <div className="shared-banner">
+                      <span className="shared-banner-icon">🔒</span>
+                      <div className="shared-banner-text">
+                        <div className="shared-banner-title">Read-only — shared with you</div>
+                        <div className="shared-banner-meta">
+                          From {currentConversation.sharedBy?.fullName || currentConversation.sharedBy?.email || "another user"}
+                          {currentConversation.redactedMessageCount && currentConversation.redactedMessageCount > 0
+                            ? ` · ${currentConversation.redactedMessageCount} message${currentConversation.redactedMessageCount === 1 ? "" : "s"} hidden by access controls`
+                            : ""}
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
                   {(currentConversation?.messages ?? []).map((m, idx) => (
-                    <div key={idx} className={`message-row-v2 ${m.role}`}>
+                    <div key={idx} className={`message-row-v2 ${m.role}${m.redacted ? ' redacted' : ''}`}>
                       {m.role === 'assistant' && (
                         <div className="message-avatar-v2">
                           <img src={selectedAvatar || "/avatar-1.png"} alt="Nexa" className="bot-avatar-img" />
@@ -1774,7 +1920,7 @@ export const App: React.FC = () => {
             )}
           </section>
 
-          {((currentConversation?.messages?.length ?? 0) > 0 || loading) && (
+          {((currentConversation?.messages?.length ?? 0) > 0 || loading) && !currentConversation?.isShared && (
             <footer className="footer-input-v2" onClick={(e) => e.stopPropagation()}>
               {attachedFiles.length > 0 && (
                 <div className="footer-attached-preview">
@@ -1865,6 +2011,58 @@ export const App: React.FC = () => {
                 <button className="modal-btn-v2 secondary" onClick={() => setDeleteConfirmOpen(false)}>Cancel</button>
                 <button className="modal-btn-v2 primary danger" onClick={confirmDeleteConversation}>Delete</button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {shareModalConvId && (
+          <div className="modal-overlay-v2">
+            <div className="modal-card-v2">
+              <div className="modal-header-v2">
+                <h3>Share conversation</h3>
+                <p>
+                  Share this chat with a teammate in your business unit. They'll see your messages and the AI's
+                  responses, except where the AI cited documents they don't have permission to view — those replies
+                  are hidden from them automatically.
+                </p>
+              </div>
+              <form onSubmit={confirmShareConversation}>
+                <input
+                  className="modal-input-v2"
+                  type="email"
+                  placeholder="teammate@company.com"
+                  value={shareRecipientEmail}
+                  onChange={(e) => setShareRecipientEmail(e.target.value)}
+                  autoFocus
+                  required
+                  disabled={shareSubmitting}
+                />
+                {shareError ? (
+                  <div className="modal-error-v2">{shareError}</div>
+                ) : null}
+                <div className="modal-footer-v2">
+                  <button
+                    type="button"
+                    className="modal-btn-v2 secondary"
+                    onClick={() => {
+                      if (shareSubmitting) return;
+                      setShareModalConvId(null);
+                      setShareError("");
+                      setShareRecipientEmail("");
+                    }}
+                    disabled={shareSubmitting}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="modal-btn-v2 primary"
+                    disabled={shareSubmitting || !shareRecipientEmail.trim()}
+                  >
+                    {shareSubmitting ? "Sharing…" : "Send"}
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         )}
@@ -2153,6 +2351,145 @@ export const App: React.FC = () => {
         .conv-dropdown button:hover {
           background: #f3f4f6;
           color: var(--brand-color, #ed0000);
+        }
+
+        /* Shared-with-me sidebar list */
+        .shared-with-me-list {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+          padding: 0 8px 8px;
+        }
+        .shared-with-me-list .conversation-item-v2 {
+          display: flex;
+          flex-direction: column;
+          align-items: flex-start;
+          gap: 2px;
+          padding: 8px 12px;
+          width: 100%;
+          background: transparent;
+          border: 0;
+          border-radius: 10px;
+          cursor: pointer;
+          text-align: left;
+          color: inherit;
+          transition: background 0.15s ease;
+        }
+        .shared-with-me-list .conversation-item-v2:hover {
+          background: rgba(0,0,0,0.04);
+        }
+        .shared-with-me-list .conversation-item-v2.active {
+          background: rgba(237, 0, 0, 0.06);
+        }
+        .dark-theme .shared-with-me-list .conversation-item-v2:hover {
+          background: rgba(255,255,255,0.05);
+        }
+        .shared-conv-title {
+          font-size: 14px;
+          font-weight: 600;
+          color: inherit;
+          line-height: 1.3;
+          width: 100%;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .shared-meta {
+          font-size: 11px;
+          font-weight: 500;
+          color: #9ca3af;
+        }
+
+        /* Read-only banner above the message thread */
+        .shared-banner {
+          display: flex;
+          align-items: flex-start;
+          gap: 12px;
+          padding: 14px 18px;
+          margin-bottom: 16px;
+          background: rgba(237, 0, 0, 0.04);
+          border: 1px solid rgba(237, 0, 0, 0.18);
+          border-radius: 14px;
+        }
+        .shared-banner-icon {
+          font-size: 18px;
+          line-height: 1;
+        }
+        .shared-banner-text { display: flex; flex-direction: column; gap: 2px; }
+        .shared-banner-title {
+          font-size: 13px;
+          font-weight: 700;
+          color: #1a1a1a;
+          letter-spacing: 0.01em;
+        }
+        .dark-theme .shared-banner-title { color: #f3f4f6; }
+        .shared-banner-meta {
+          font-size: 12px;
+          font-weight: 500;
+          color: #6b7280;
+        }
+        .dark-theme .shared-banner-meta { color: #9ca3af; }
+
+        /* Redacted message style — kept subtle so the conversation reads naturally */
+        .message-row-v2.redacted .message-bubble-v2 {
+          background: repeating-linear-gradient(
+            45deg,
+            rgba(15, 23, 42, 0.025),
+            rgba(15, 23, 42, 0.025) 10px,
+            rgba(15, 23, 42, 0.05) 10px,
+            rgba(15, 23, 42, 0.05) 20px
+          );
+          color: #6b7280;
+          font-style: italic;
+        }
+        .dark-theme .message-row-v2.redacted .message-bubble-v2 {
+          background: repeating-linear-gradient(
+            45deg,
+            rgba(255,255,255,0.04),
+            rgba(255,255,255,0.04) 10px,
+            rgba(255,255,255,0.06) 10px,
+            rgba(255,255,255,0.06) 20px
+          );
+          color: #9ca3af;
+        }
+
+        /* Share modal input + error */
+        .modal-input-v2 {
+          width: 100%;
+          height: 44px;
+          padding: 0 14px;
+          border: 1px solid #e5e7eb;
+          border-radius: 12px;
+          font-size: 14px;
+          font-weight: 500;
+          color: #1a1a1a;
+          margin-top: 8px;
+          background: #fff;
+          outline: none;
+          transition: border-color 0.15s ease, box-shadow 0.15s ease;
+        }
+        .modal-input-v2:focus {
+          border-color: var(--brand-color, #ed0000);
+          box-shadow: 0 0 0 3px rgba(237, 0, 0, 0.08);
+        }
+        .modal-input-v2:disabled {
+          opacity: 0.6;
+          cursor: not-allowed;
+        }
+        .dark-theme .modal-input-v2 {
+          background: #1a1a1a;
+          color: #f3f4f6;
+          border-color: #333;
+        }
+        .modal-error-v2 {
+          margin-top: 10px;
+          padding: 10px 12px;
+          background: rgba(239, 68, 68, 0.08);
+          border: 1px solid rgba(239, 68, 68, 0.25);
+          border-radius: 10px;
+          color: #b91c1c;
+          font-size: 12px;
+          font-weight: 600;
         }
 
         .conv-icon {

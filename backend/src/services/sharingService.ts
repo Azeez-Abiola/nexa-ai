@@ -1,8 +1,86 @@
 import mongoose from "mongoose";
 import { User } from "../models/User";
-import { Conversation } from "../models/Conversation";
+import { Conversation, ChatMessage } from "../models/Conversation";
 import { SharedConversation } from "../models/SharedConversation";
+import { RagDocument } from "../models/RagDocument";
+import { KnowledgeGroup } from "../models/KnowledgeGroup";
 import { logEvent } from "./auditService";
+
+/** Placeholder shown to a recipient on assistant messages whose cited sources they aren't authorised to see. */
+const REDACTION_PLACEHOLDER =
+  "🔒 This response cited documents you don't have permission to view, so it has been hidden.";
+
+interface RedactedMessage extends ChatMessage {
+  /** Set on messages whose body was hidden from the recipient. Frontend can render a different style. */
+  redacted?: boolean;
+}
+
+/**
+ * For each assistant message in the group, check whether the recipient has access to
+ * every cited source document. If ANY source is restricted to a group the recipient
+ * isn't part of (or the source doc has been deleted / lives in another BU), the
+ * message body, sources, and any generated-document attachment are stripped and
+ * replaced with a placeholder. The user's own questions are never redacted.
+ */
+async function redactMessagesForRecipient(
+  messages: ChatMessage[],
+  recipient: { _id: mongoose.Types.ObjectId; businessUnit: string }
+): Promise<RedactedMessage[]> {
+  // Collect every source documentId referenced across the conversation in one pass.
+  const docIds = new Set<string>();
+  for (const m of messages) {
+    if (m.role !== "assistant" || !m.sources) continue;
+    for (const s of m.sources) {
+      if (s.documentId) docIds.add(s.documentId);
+    }
+  }
+  if (docIds.size === 0) return messages;
+
+  // Resolve each cited doc's allowed groups (and BU) and the recipient's group memberships
+  // in two batched queries.
+  const validIds = Array.from(docIds).filter((id) => mongoose.Types.ObjectId.isValid(id));
+  const [docs, recipientGroups] = await Promise.all([
+    RagDocument.find({ _id: { $in: validIds } })
+      .select("_id businessUnit allowedGroupIds")
+      .lean(),
+    KnowledgeGroup.find({ businessUnit: recipient.businessUnit, memberUserIds: recipient._id })
+      .select("_id")
+      .lean()
+  ]);
+
+  const docMeta = new Map<
+    string,
+    { businessUnit: string; allowedGroupIds: string[] }
+  >();
+  for (const d of docs) {
+    docMeta.set(String(d._id), {
+      businessUnit: d.businessUnit,
+      allowedGroupIds: (d.allowedGroupIds || []).map((g) => String(g))
+    });
+  }
+  const recipientGroupIds = new Set(recipientGroups.map((g) => String(g._id)));
+
+  const recipientCanSeeDoc = (docId: string): boolean => {
+    const meta = docMeta.get(docId);
+    if (!meta) return false; // deleted or never existed → treat as inaccessible
+    if (meta.businessUnit !== recipient.businessUnit) return false; // cross-BU citation
+    if (meta.allowedGroupIds.length === 0) return true; // open to every employee in the BU
+    return meta.allowedGroupIds.some((gid) => recipientGroupIds.has(gid));
+  };
+
+  return messages.map((m) => {
+    if (m.role !== "assistant" || !m.sources || m.sources.length === 0) return m;
+    const allAccessible = m.sources.every((s) => recipientCanSeeDoc(s.documentId));
+    if (allAccessible) return m;
+    return {
+      ...m,
+      content: REDACTION_PLACEHOLDER,
+      sources: undefined,
+      generatedDocument: undefined,
+      redacted: true
+    };
+  });
+}
 
 export interface ShareResult {
   success: true;
@@ -136,11 +214,20 @@ export async function shareConversation(
 
 /**
  * List all conversations shared with the given user.
- * Returns enriched objects including the conversation content.
+ * Each conversation's messages are filtered through the recipient's group access —
+ * assistant messages citing documents the recipient can't see are replaced with a
+ * redaction placeholder. The user's own questions are never redacted.
  */
 export async function getConversationsSharedWithMe(recipientUserId: string) {
+  if (!mongoose.Types.ObjectId.isValid(recipientUserId)) return [];
+
+  const recipient = await User.findById(recipientUserId)
+    .select("_id businessUnit")
+    .lean();
+  if (!recipient) return [];
+
   const shares = await SharedConversation.find({
-    sharedWithUserId: new mongoose.Types.ObjectId(recipientUserId)
+    sharedWithUserId: recipient._id
   })
     .sort({ createdAt: -1 })
     .lean();
@@ -165,6 +252,9 @@ export async function getConversationsSharedWithMe(recipientUserId: string) {
         .select("fullName email")
         .lean();
 
+      const visibleMessages = await redactMessagesForRecipient(group.messages, recipient);
+      const redactedCount = visibleMessages.filter((m) => (m as RedactedMessage).redacted).length;
+
       return {
         shareId: share._id,
         sharedAt: share.createdAt,
@@ -174,10 +264,12 @@ export async function getConversationsSharedWithMe(recipientUserId: string) {
         conversation: {
           _id: group._id,
           title: group.title,
-          messages: group.messages,
+          messages: visibleMessages,
           createdAt: group.createdAt,
           updatedAt: group.updatedAt
-        }
+        },
+        /** Number of assistant messages hidden from this recipient — useful for showing "X messages hidden" UI hints. */
+        redactedMessageCount: redactedCount
       };
     })
   );
