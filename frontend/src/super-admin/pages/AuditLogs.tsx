@@ -10,7 +10,6 @@ import {
   Clock,
   ChevronLeft,
   ChevronRight,
-  Info,
   LogIn,
   LogOut,
   CalendarDays,
@@ -510,12 +509,6 @@ const AuditLogs: React.FC = () => {
         )}
       </div>
 
-      <div className="flex items-center gap-3 p-6 bg-blue-50/50 rounded-2xl border border-blue-100/50">
-        <Info className="text-blue-500 shrink-0" size={18} />
-        <p className="text-xs font-medium text-blue-700/80 leading-relaxed">
-          <strong>Security Protocol:</strong> All audit records are immutable and preserved for 90 days per enterprise governance standards. Login and logout sessions are tracked automatically for all admin and user accounts.
-        </p>
-      </div>
     </div>
   );
 };
