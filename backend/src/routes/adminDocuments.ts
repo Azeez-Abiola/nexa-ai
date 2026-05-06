@@ -9,6 +9,8 @@ import { adminAuthMiddleware, AuthenticatedRequest } from "../middleware/auth";
 import { uploadDocument, deleteDocument } from "../services/cloudinaryService";
 import { cleanupDocumentChunks } from "../services/documentProcessingService";
 import { documentQueue } from "../queue/documentQueue";
+import { notifyDocumentAdded } from "../services/notificationService";
+import { DocumentCategory, BUILTIN_NAMES } from "../models/DocumentCategory";
 import { logDocumentUpload } from "../services/auditService";
 import logger from "../utils/logger";
 
@@ -128,7 +130,7 @@ adminDocumentsRouter.get("/:id", async (req: AuthenticatedRequest, res) => {
 // ─── Upload new document ───────────────────────────────────────────────────────
 adminDocumentsRouter.post("/", upload.single("file"), async (req: AuthenticatedRequest, res) => {
   try {
-    const { title, documentType, sensitivityLevel, content } = req.body;
+    const { title, documentType, sensitivityLevel, content, department } = req.body;
     const file = req.file;
     const { businessUnit: tokenBU, adminId, email: adminEmail, fullName: adminName, isSuperAdmin } = req;
 
@@ -140,14 +142,20 @@ adminDocumentsRouter.post("/", upload.single("file"), async (req: AuthenticatedR
     if (!sensitivityLevel) return res.status(400).json({ error: "sensitivityLevel is required" });
 
     const docType = (documentType || "policy").toLowerCase();
-    const allowedTypes = ["policy", "procedure", "handbook", "contract", "report", "other"];
-    if (!allowedTypes.includes(docType)) {
-      return res.status(400).json({ error: "Invalid documentType" });
-    }
 
     const targetBU = isSuperAdmin ? (req.body.businessUnit || tokenBU) : tokenBU;
     if (isSuperAdmin && !req.body.businessUnit) {
       return res.status(400).json({ error: "SUPERADMIN must specify a businessUnit" });
+    }
+
+    // Validate documentType against the universal built-ins or this BU's custom categories.
+    if (!BUILTIN_NAMES.has(docType)) {
+      const exists = await DocumentCategory.exists({ businessUnit: targetBU, name: docType });
+      if (!exists) {
+        return res.status(400).json({
+          error: `Unknown document category "${docType}". Create it from Admin → Categories first.`
+        });
+      }
     }
 
     let replaceIdRaw =
@@ -276,9 +284,11 @@ adminDocumentsRouter.post("/", upload.single("file"), async (req: AuthenticatedR
     );
 
     // Create RagDocument record
+    const trimmedDepartment = typeof department === "string" ? department.trim() : "";
     const doc = await RagDocument.create({
       title,
       businessUnit: targetBU,
+      department: trimmedDepartment || undefined,
       documentType: docType,
       sensitivityLevel,
       documentSeriesId,
@@ -333,6 +343,30 @@ adminDocumentsRouter.post("/", upload.single("file"), async (req: AuthenticatedR
       jobId: job.id,
       businessUnit: targetBU
     });
+
+    // In-app notifications. Group-restricted docs fan out to those groups' members,
+    // otherwise we notify every active user in the BU. Fire-and-forget on failure.
+    (async () => {
+      let userIds: string[] | undefined;
+      if (parsedGroupObjectIds.length > 0) {
+        const groups = await KnowledgeGroup.find({ _id: { $in: parsedGroupObjectIds } })
+          .select("memberUserIds")
+          .lean();
+        const ids = new Set<string>();
+        for (const g of groups) {
+          for (const uid of g.memberUserIds || []) ids.add(String(uid));
+        }
+        userIds = Array.from(ids);
+      }
+      await notifyDocumentAdded({
+        businessUnit: targetBU!,
+        title: doc.title,
+        documentId: String(doc._id),
+        uploadedBy: adminName || adminEmail || "your admin",
+        userIds,
+        department: doc.department || undefined
+      });
+    })().catch((err) => logger.error("[AdminDocuments] notification fanout failed", { err: (err as Error).message }));
 
     res.status(201).json({
       document: {

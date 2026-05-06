@@ -1,6 +1,7 @@
 import mongoose, { Schema, Document, Types } from "mongoose";
 
-export type DocumentType = "policy" | "procedure" | "handbook" | "contract" | "report" | "other";
+/** Free-form string — see DocumentCategory model for built-ins + admin-created entries. */
+export type DocumentType = string;
 export type SensitivityLevel = "public" | "internal" | "confidential" | "restricted";
 export type ProcessingStatus =
   | "pending"
@@ -14,6 +15,8 @@ export type ProcessingStatus =
 export interface RagDocumentDocument extends Document {
   title: string;
   businessUnit: string;
+  /** Optional department within the BU that this document is tagged to. */
+  department?: string;
   documentType: DocumentType;
   sensitivityLevel: SensitivityLevel;
   /** Stable id for all versions of the same logical document */
@@ -45,10 +48,11 @@ const RagDocumentSchema = new Schema<RagDocumentDocument>(
   {
     title: { type: String, required: true },
     businessUnit: { type: String, required: true, index: true, trim: true },
+    department: { type: String, trim: true, index: true },
     documentType: {
       type: String,
-      enum: ["policy", "procedure", "handbook", "contract", "report", "other"],
-      required: true
+      required: true,
+      trim: true
     },
     sensitivityLevel: {
       type: String,

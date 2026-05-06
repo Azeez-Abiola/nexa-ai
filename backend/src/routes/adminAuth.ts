@@ -20,12 +20,19 @@ import {
 import { AdminInvite } from "../models/AdminInvite";
 import { EmployeeInvite } from "../models/EmployeeInvite";
 import { Department } from "../models/Department";
+import { RagDocument } from "../models/RagDocument";
+import {
+  DocumentCategory,
+  BUILTIN_DOCUMENT_CATEGORIES,
+  BUILTIN_NAMES
+} from "../models/DocumentCategory";
 import { hashInviteToken } from "../utils/inviteToken";
 import {
   adminAuthMiddleware,
   superAdminMiddleware,
   AuthenticatedRequest
 } from "../middleware/auth";
+import { logEvent } from "../services/auditService";
 import { normalizeHexToRrggbb } from "../utils/hexColor";
 import {
   escapeBuRegexFragment,
@@ -46,7 +53,7 @@ const logoUpload = multer({
       cb(null, `${Date.now()}${ext}`);
     }
   }),
-  limits: { fileSize: 2 * 1024 * 1024 }, // 2MB
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
   fileFilter: (_req, file, cb) => {
     if (file.mimetype.startsWith("image/")) cb(null, true);
     else cb(new Error("Only image files are allowed for logo"));
@@ -240,6 +247,15 @@ adminAuthRouter.post("/login", async (req: Request<{}, {}, AdminAuthRequest>, re
       }
     }
 
+    logEvent("admin_login", {
+      adminId: admin._id.toString(),
+      adminEmail: admin.email,
+      businessUnit: admin.businessUnit || "SUPERADMIN",
+      action: "Admin Login",
+      details: `Admin signed in`,
+      metadata: { ip: (req.headers["x-forwarded-for"] as string) || req.socket?.remoteAddress }
+    });
+
     res.json({
       token,
       admin: {
@@ -253,11 +269,51 @@ adminAuthRouter.post("/login", async (req: Request<{}, {}, AdminAuthRequest>, re
         tenantLogo,
         tenantColor,
         tenantLabel,
-        emailVerified: admin.emailVerified
+        emailVerified: admin.emailVerified,
+        mustChangePassword: admin.mustChangePassword === true
       }
     });
   } catch (error) {
     console.error("Admin login error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+adminAuthRouter.post("/logout", adminAuthMiddleware, (req: AuthenticatedRequest, res: Response) => {
+  logEvent("admin_logout", {
+    adminId: req.adminId,
+    adminEmail: req.email,
+    businessUnit: req.businessUnit || "SUPERADMIN",
+    action: "Admin Logout",
+    details: `Admin signed out`,
+    metadata: { ip: (req.headers["x-forwarded-for"] as string) || req.socket?.remoteAddress }
+  });
+  res.json({ message: "Logged out" });
+});
+
+// First-login forced password change.
+// Admins provisioned with auto-generated passwords land here on first sign-in.
+// The auth middleware accepts the token issued at login; the body provides the new password.
+adminAuthRouter.post("/change-password-first-login", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { newPassword } = req.body as { newPassword?: string };
+    if (!newPassword || typeof newPassword !== "string" || newPassword.length < 8) {
+      return res.status(400).json({ error: "newPassword is required and must be at least 8 characters." });
+    }
+    if (!req.adminId) {
+      return res.status(401).json({ error: "Authenticated admin context missing." });
+    }
+
+    const admin = await AdminUser.findById(req.adminId);
+    if (!admin) return res.status(404).json({ error: "Admin not found" });
+
+    admin.password = await bcryptjs.hash(newPassword, 10);
+    admin.mustChangePassword = false;
+    await admin.save();
+
+    res.json({ message: "Password updated. You can keep using the platform." });
+  } catch (error) {
+    console.error("Change password (first login) error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -440,11 +496,23 @@ adminAuthRouter.get("/users", adminAuthMiddleware, async (req: AuthenticatedRequ
 // Create User — BU admins can create users for their BU
 adminAuthRouter.post("/users", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { email, password, fullName, department } = req.body;
+    const { email, password, firstName, lastName, fullName: fullNameLegacy, department } = req.body;
     const { businessUnit } = req;
 
-    if (!email || !password || !fullName || !businessUnit) {
-      return res.status(400).json({ error: "Email, password, and fullName are required" });
+    // Prefer firstName + lastName (matches the rest of the platform); fall back to a
+    // legacy single fullName only if neither was provided.
+    const resolvedFullName = (() => {
+      const f = typeof firstName === "string" ? firstName.trim() : "";
+      const l = typeof lastName === "string" ? lastName.trim() : "";
+      if (f && l) return `${f} ${l}`;
+      if (typeof fullNameLegacy === "string" && fullNameLegacy.trim()) return fullNameLegacy.trim();
+      return "";
+    })();
+
+    if (!email || !password || !resolvedFullName || !businessUnit) {
+      return res.status(400).json({
+        error: "email, password, firstName and lastName are required"
+      });
     }
 
     const existingUser = await User.findOne({ email: email.toLowerCase() });
@@ -456,7 +524,7 @@ adminAuthRouter.post("/users", adminAuthMiddleware, async (req: AuthenticatedReq
     const user = new User({
       email: email.toLowerCase(),
       password: hashedPassword,
-      fullName,
+      fullName: resolvedFullName,
       businessUnit,
       department: department ? String(department).trim() : undefined,
       emailVerified: true
@@ -482,6 +550,70 @@ adminAuthRouter.post("/users", adminAuthMiddleware, async (req: AuthenticatedReq
     res.status(201).json({ message: "User created successfully", user: { id: user._id, email: user.email, fullName: user.fullName } });
   } catch (error) {
     console.error("Create user error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Single-user fetch — for the user detail page.
+adminAuthRouter.get("/users/:id", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { businessUnit, isSuperAdmin } = req;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ error: "Invalid user id" });
+    }
+    const user = await User.findById(id, { password: 0, resetToken: 0, resetTokenExpiry: 0 }).lean();
+    if (!user) return res.status(404).json({ error: "User not found" });
+    if (!isSuperAdmin && user.businessUnit !== businessUnit) {
+      return res.status(403).json({ error: "Access denied: user belongs to another business unit" });
+    }
+
+    res.json({ user });
+  } catch (error) {
+    console.error("Get user error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Update user — BU admin can change a user's department (and other safe fields).
+// Email + password + businessUnit aren't editable here on purpose; those need their
+// own dedicated flows (re-invite, password reset, tenant move).
+adminAuthRouter.patch("/users/:id", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { businessUnit, isSuperAdmin } = req;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ error: "Invalid user id" });
+    }
+    const user = await User.findById(id);
+    if (!user) return res.status(404).json({ error: "User not found" });
+    if (!isSuperAdmin && user.businessUnit !== businessUnit) {
+      return res.status(403).json({ error: "Access denied: user belongs to another business unit" });
+    }
+
+    const { department, fullName } = req.body as { department?: string | null; fullName?: string };
+
+    if (typeof fullName === "string") {
+      const trimmed = fullName.trim();
+      if (!trimmed) return res.status(400).json({ error: "fullName cannot be empty" });
+      user.fullName = trimmed;
+    }
+    if (department !== undefined) {
+      // null or "" clears the department; otherwise store the trimmed value
+      const cleaned =
+        department === null || (typeof department === "string" && !department.trim())
+          ? undefined
+          : String(department).trim();
+      user.department = cleaned;
+    }
+
+    await user.save();
+    const safe = await User.findById(id, { password: 0, resetToken: 0, resetTokenExpiry: 0 }).lean();
+    res.json({ message: "User updated", user: safe });
+  } catch (error) {
+    console.error("Update user error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -745,6 +877,44 @@ adminAuthRouter.delete("/users/:id", adminAuthMiddleware, async (req: Authentica
   }
 });
 
+// Toggle user active/inactive — BU admins can deactivate users in their BU.
+// Deactivated users keep their data and group memberships; their license slot
+// frees up and they cannot sign in until reactivated.
+adminAuthRouter.patch("/users/:id/toggle-status", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { businessUnit, isSuperAdmin } = req;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ error: "Invalid user id" });
+    }
+
+    const user = await User.findById(id);
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    if (!isSuperAdmin && user.businessUnit !== businessUnit) {
+      return res.status(403).json({ error: "Access denied: user belongs to another business unit" });
+    }
+
+    user.isActive = user.isActive === false ? true : false;
+    await user.save();
+
+    const activeUserCount = await User.countDocuments({
+      businessUnit: user.businessUnit,
+      isActive: { $ne: false }
+    });
+
+    res.json({
+      message: `User ${user.isActive ? "activated" : "deactivated"} successfully`,
+      user: { _id: user._id, isActive: user.isActive },
+      activeUserCount
+    });
+  } catch (error) {
+    console.error("Toggle user status error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // Update Profile — BU admins can update their BU logo, label, or color
 adminAuthRouter.put(
   "/profile",
@@ -924,7 +1094,8 @@ adminAuthRouter.put("/change-password", adminAuthMiddleware, async (req: Authent
   }
 });
 
-// Invite / provision another administrator for the same business unit (BU admins only)
+// Invite / provision another administrator for the same business unit (BU admins only).
+// All admins of a BU share the same scope and powers — there is no "primary" vs "peer".
 adminAuthRouter.post("/invite-peer-admin", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const bu = req.businessUnit;
@@ -960,7 +1131,8 @@ adminAuthRouter.post("/invite-peer-admin", adminAuthMiddleware, async (req: Auth
       fullName,
       businessUnit: bu,
       password: hashedPassword,
-      emailVerified: true
+      emailVerified: true,
+      mustChangePassword: true
     });
 
     await AdminInvite.create({
@@ -979,7 +1151,6 @@ adminAuthRouter.post("/invite-peer-admin", adminAuthMiddleware, async (req: Auth
         email.toLowerCase(),
         fullName,
         bu,
-        tenant.slug,
         autoPassword
       );
     } catch (emailError) {
@@ -1133,6 +1304,119 @@ adminAuthRouter.delete("/email-domains/:id", superAdminMiddleware, async (req: A
   }
 });
 
+// ─── Document categories (BU admins only) ────────────────────────────────────
+// Each BU gets the universal built-ins (policy, report, etc.) plus any custom
+// categories admins have created. Built-ins live as a constant so the universal
+// set can evolve without per-tenant migrations; custom ones persist in
+// DocumentCategory.
+
+adminAuthRouter.get("/categories", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { businessUnit, isSuperAdmin } = req;
+    const filter = isSuperAdmin ? {} : { businessUnit };
+    const custom = await DocumentCategory.find(filter).sort({ label: 1 }).lean();
+
+    const merged = [
+      ...BUILTIN_DOCUMENT_CATEGORIES.map((c) => ({
+        _id: `builtin:${c.name}`,
+        name: c.name,
+        label: c.label,
+        builtin: true as const
+      })),
+      ...custom.map((c) => ({
+        _id: String(c._id),
+        name: c.name,
+        label: c.label,
+        builtin: false as const,
+        createdAt: c.createdAt
+      }))
+    ];
+
+    res.json({ categories: merged });
+  } catch (error) {
+    console.error("List categories error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+adminAuthRouter.post("/categories", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { businessUnit, tenantId, isSuperAdmin } = req;
+    if (isSuperAdmin) {
+      return res.status(403).json({ error: "Super admins must specify a business unit — use tenant provisioning." });
+    }
+    if (!businessUnit) return res.status(400).json({ error: "Business unit not found in token" });
+
+    const rawLabel = typeof req.body.label === "string" ? req.body.label.trim() : "";
+    if (!rawLabel || rawLabel.length < 1 || rawLabel.length > 60) {
+      return res.status(400).json({ error: "label is required (1–60 characters)" });
+    }
+    // Derive a stable slug from the label (lowercase, snake_case).
+    const name = rawLabel.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+    if (!name) return res.status(400).json({ error: "label must contain at least one alphanumeric character" });
+    if (BUILTIN_NAMES.has(name)) {
+      return res.status(409).json({
+        error: `"${rawLabel}" matches a built-in category — pick a different label.`
+      });
+    }
+
+    const tenant = await BusinessUnitModel.findOne({ name: businessUnit });
+    const resolvedTenantId = tenantId || tenant?.tenantId || "";
+
+    try {
+      const cat = await DocumentCategory.create({
+        name,
+        label: rawLabel,
+        businessUnit,
+        tenantId: resolvedTenantId
+      });
+      return res.status(201).json({ category: { _id: cat._id, name: cat.name, label: cat.label, builtin: false } });
+    } catch (err: any) {
+      if (err?.code === 11000) {
+        return res.status(409).json({ error: "A category with this label already exists in your organization." });
+      }
+      throw err;
+    }
+  } catch (error) {
+    console.error("Create category error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+adminAuthRouter.delete("/categories/:id", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { businessUnit, isSuperAdmin } = req;
+    const { id } = req.params;
+
+    if (id.startsWith("builtin:")) {
+      return res.status(403).json({ error: "Built-in categories can't be deleted." });
+    }
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ error: "Invalid category id" });
+    }
+
+    const cat = await DocumentCategory.findById(id);
+    if (!cat) return res.status(404).json({ error: "Category not found" });
+    if (!isSuperAdmin && cat.businessUnit !== businessUnit) {
+      return res.status(403).json({ error: "Access denied" });
+    }
+
+    // Refuse delete if any document in the BU still uses this category.
+    const inUse = await RagDocument.countDocuments({ businessUnit: cat.businessUnit, documentType: cat.name });
+    if (inUse > 0) {
+      return res.status(409).json({
+        error: `${cat.label} is still tagged on ${inUse} document${inUse === 1 ? "" : "s"}. Re-tag those before deleting.`
+      });
+    }
+
+    await DocumentCategory.findByIdAndDelete(id);
+    res.json({ message: "Category deleted" });
+  } catch (error) {
+    console.error("Delete category error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // ─── Department management (BU admins only) ───────────────────────────────────
 
 adminAuthRouter.get("/departments", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
@@ -1140,9 +1424,129 @@ adminAuthRouter.get("/departments", adminAuthMiddleware, async (req: Authenticat
     const { businessUnit, isSuperAdmin } = req;
     const filter = isSuperAdmin ? {} : { businessUnit };
     const departments = await Department.find(filter).sort({ name: 1 }).lean();
-    res.json({ departments });
+
+    // Stack one count query per dimension (employees + documents) so the cards on the
+    // Departments page can render with no extra round-trips. Both queries scope to the
+    // BU on department name to mirror how soft-gate retrieval matches.
+    const enriched = await Promise.all(
+      departments.map(async (d) => {
+        const [employeeCount, documentCount] = await Promise.all([
+          User.countDocuments({ businessUnit: d.businessUnit, department: d.name, isActive: { $ne: false } }),
+          RagDocument.countDocuments({ businessUnit: d.businessUnit, department: d.name })
+        ]);
+        return { ...d, employeeCount, documentCount };
+      })
+    );
+
+    res.json({ departments: enriched });
   } catch (error) {
     console.error("List departments error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Single-department detail — includes the active employees in the dept and the
+// RagDocuments tagged with it. Powers the Department detail page.
+adminAuthRouter.get("/departments/:id", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { businessUnit, isSuperAdmin } = req;
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ error: "Invalid department id" });
+    }
+    const dept = await Department.findById(id).lean();
+    if (!dept) return res.status(404).json({ error: "Department not found" });
+    if (!isSuperAdmin && dept.businessUnit !== businessUnit) {
+      return res.status(403).json({ error: "Access denied" });
+    }
+
+    const [employees, documents] = await Promise.all([
+      User.find(
+        { businessUnit: dept.businessUnit, department: dept.name, isActive: { $ne: false } },
+        { password: 0, resetToken: 0, resetTokenExpiry: 0 }
+      )
+        .sort({ fullName: 1 })
+        .lean(),
+      RagDocument.find({ businessUnit: dept.businessUnit, department: dept.name })
+        .select("_id title documentType version createdAt processingStatus allowedGroupIds")
+        .sort({ createdAt: -1 })
+        .lean()
+    ]);
+
+    res.json({ department: dept, employees, documents });
+  } catch (error) {
+    console.error("Get department detail error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Bulk-assign users to a department. Sets User.department = dept.name on each id
+// passed in. Users outside the admin's BU are silently skipped via the filter.
+adminAuthRouter.patch("/departments/:id/users", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { businessUnit, isSuperAdmin } = req;
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ error: "Invalid department id" });
+    }
+    const dept = await Department.findById(id).lean();
+    if (!dept) return res.status(404).json({ error: "Department not found" });
+    if (!isSuperAdmin && dept.businessUnit !== businessUnit) {
+      return res.status(403).json({ error: "Access denied" });
+    }
+
+    const userIds = Array.isArray(req.body.userIds) ? req.body.userIds : [];
+    const validIds = userIds.filter((u: unknown): u is string =>
+      typeof u === "string" && mongoose.Types.ObjectId.isValid(u)
+    );
+
+    const result = await User.updateMany(
+      { _id: { $in: validIds }, businessUnit: dept.businessUnit },
+      { $set: { department: dept.name } }
+    );
+
+    res.json({
+      message: `Assigned ${result.modifiedCount} user${result.modifiedCount === 1 ? "" : "s"} to ${dept.name}.`,
+      modifiedCount: result.modifiedCount
+    });
+  } catch (error) {
+    console.error("Assign users to department error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Bulk-assign documents to a department. Sets RagDocument.department = dept.name on
+// each id passed in. Documents not in the admin's BU are silently skipped (the BU
+// scope is enforced via the filter, not a per-doc 403).
+adminAuthRouter.patch("/departments/:id/documents", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { businessUnit, isSuperAdmin } = req;
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ error: "Invalid department id" });
+    }
+    const dept = await Department.findById(id).lean();
+    if (!dept) return res.status(404).json({ error: "Department not found" });
+    if (!isSuperAdmin && dept.businessUnit !== businessUnit) {
+      return res.status(403).json({ error: "Access denied" });
+    }
+
+    const documentIds = Array.isArray(req.body.documentIds) ? req.body.documentIds : [];
+    const validIds = documentIds.filter((id: unknown): id is string =>
+      typeof id === "string" && mongoose.Types.ObjectId.isValid(id)
+    );
+
+    const result = await RagDocument.updateMany(
+      { _id: { $in: validIds }, businessUnit: dept.businessUnit },
+      { $set: { department: dept.name } }
+    );
+
+    res.json({
+      message: `Tagged ${result.modifiedCount} document${result.modifiedCount === 1 ? "" : "s"} with ${dept.name}.`,
+      modifiedCount: result.modifiedCount
+    });
+  } catch (error) {
+    console.error("Assign documents to department error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });

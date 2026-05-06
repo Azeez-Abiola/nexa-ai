@@ -9,6 +9,7 @@ export interface UserDocument extends Document {
   department?: string;
   password: string;
   emailVerified: boolean;
+  isActive: boolean;
   emailVerificationOTP?: string;
   emailVerificationOTPExpiry?: Date;
   resetToken?: string;
@@ -25,6 +26,7 @@ const UserSchema = new Schema<UserDocument>(
     department: { type: String, trim: true },
     password: { type: String, required: true },
     emailVerified: { type: Boolean, default: false },
+    isActive: { type: Boolean, default: true, index: true },
     emailVerificationOTP: { type: String, default: null },
     emailVerificationOTPExpiry: { type: Date, default: null },
     resetToken: { type: String, default: null },

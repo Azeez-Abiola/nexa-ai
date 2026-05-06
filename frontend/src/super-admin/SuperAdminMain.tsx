@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import axios from 'axios';
 import { cn } from '@/lib/utils';
 import { Routes, Route, useNavigate, Navigate, useLocation } from "react-router-dom";
 import {
@@ -6,11 +7,14 @@ import {
   Users,
   ShieldCheck,
   Globe,
+  Inbox,
+  Layers,
   LayoutDashboard,
   LogOut,
   UserCircle,
   ChevronRight,
   BookOpen,
+  FolderTree,
   Network,
   BarChart3,
   HelpCircle,
@@ -36,8 +40,15 @@ import Dashboard from './pages/Dashboard';
 import Tenants from './pages/Tenants';
 import KnowledgeBase from './pages/KnowledgeBase';
 import Administration from './pages/Administration';
-import EmailDomains from './pages/EmailDomains';
+import AccessRequests from './pages/AccessRequests';
+import Departments from './pages/Departments';
+import DepartmentDetail from './pages/DepartmentDetail';
+import UserDetail from './pages/UserDetail';
+import Categories from './pages/Categories';
 import AuditLogs from './pages/AuditLogs';
+import ForceChangePasswordModal from './components/ForceChangePasswordModal';
+import NotificationsBell from './components/NotificationsBell';
+import EmailDomains from './pages/EmailDomains';
 import HelpSupport from './pages/HelpSupport';
 import UsersManagement from './pages/UsersManagement';
 import BusinessProfile from './pages/BusinessProfile';
@@ -110,7 +121,14 @@ const SuperAdminMain: React.FC<SuperAdminMainProps> = ({ theme, toggleTheme }) =
   }, [location.pathname]);
 
   const handleLogout = () => {
-    if (location.pathname.startsWith('/super-admin')) {
+    const isSuper = location.pathname.startsWith('/super-admin');
+    const tok = isSuper
+      ? (localStorage.getItem('cpanelToken') || localStorage.getItem('nexa-token'))
+      : localStorage.getItem('nexa-token');
+    if (tok) {
+      axios.post('/api/v1/admin/auth/logout', {}, { headers: { Authorization: `Bearer ${tok}` } }).catch(() => {});
+    }
+    if (isSuper) {
       localStorage.removeItem('cpanelToken');
       localStorage.removeItem('cpanelUser');
       window.location.href = '/super-admin/login';
@@ -130,6 +148,7 @@ const SuperAdminMain: React.FC<SuperAdminMainProps> = ({ theme, toggleTheme }) =
   const menuItems = isSuperAdminContext ? [
     { name: 'Dashboard', path: '/super-admin/dashboard', icon: LayoutDashboard },
     { name: 'Tenants', path: '/super-admin/tenants', icon: Building2 },
+    { name: 'Access requests', path: '/super-admin/access-requests', icon: Inbox },
     { name: 'Analytics', path: '/super-admin/analytics', icon: BarChart3 },
     { name: 'Administration', path: '/super-admin/management', icon: ShieldCheck },
     { name: 'Email domains', path: '/super-admin/domains', icon: Globe },
@@ -137,6 +156,8 @@ const SuperAdminMain: React.FC<SuperAdminMainProps> = ({ theme, toggleTheme }) =
     { name: 'Dashboard', path: '/admin/dashboard', icon: LayoutDashboard },
     { name: 'Knowledge Base', path: '/admin/knowledge', icon: BookOpen },
     { name: 'Users', path: '/admin/users', icon: Users },
+    { name: 'Departments', path: '/admin/departments', icon: Layers },
+    { name: 'Categories', path: '/admin/categories', icon: FolderTree },
     { name: 'User groups', path: '/admin/user-groups', icon: Network },
     { name: 'Analytics', path: '/admin/analytics', icon: BarChart3 },
     { name: 'Audit Logs', path: '/admin/audit', icon: Shield },
@@ -306,6 +327,7 @@ const SuperAdminMain: React.FC<SuperAdminMainProps> = ({ theme, toggleTheme }) =
                 {isSuperAdminContext ? "Nexa AI" : (user?.tenantLabel || user?.businessUnit || "Admin")}
               </p>
             </div>
+            <NotificationsBell isDark={theme === 'dark'} />
             <div
               className={cn(
                 "flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border transition-colors",
@@ -355,6 +377,7 @@ const SuperAdminMain: React.FC<SuperAdminMainProps> = ({ theme, toggleTheme }) =
                 )}
                 <p className={cn("text-sm font-bold leading-none", theme === 'dark' ? "text-white" : "text-slate-900")}>{user?.fullName || user?.email}</p>
               </div>
+              <NotificationsBell isDark={theme === 'dark'} />
               <div
                 className={cn(
                   "flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border transition-colors",
@@ -382,11 +405,17 @@ const SuperAdminMain: React.FC<SuperAdminMainProps> = ({ theme, toggleTheme }) =
               {!isSuperAdminContext ? (
                 <>
                   <Route path="/admin/dashboard" element={<Dashboard />} />
+                  <Route path="/admin/access-requests" element={<Navigate to="/super-admin/access-requests" replace />} />
                   <Route path="/admin/analytics" element={<Analytics />} />
                   <Route path="/admin/knowledge" element={<KnowledgeBase />} />
                   <Route path="/admin/user-groups" element={<AdminUserGroupsPage />} />
                   <Route path="/admin/knowledge-groups" element={<Navigate to="/admin/user-groups" replace />} />
                   <Route path="/admin/users" element={<UsersManagement />} />
+                  <Route path="/admin/users/:id" element={<UserDetail />} />
+                  <Route path="/admin/departments" element={<Departments />} />
+                  <Route path="/admin/departments/:id" element={<DepartmentDetail />} />
+                  <Route path="/admin/categories" element={<Categories />} />
+
                   <Route path="/admin/audit" element={<AuditLogs />} />
                   <Route path="/admin/help" element={<HelpSupport />} />
                   <Route path="/admin/profile" element={<BusinessProfile />} />
@@ -397,6 +426,7 @@ const SuperAdminMain: React.FC<SuperAdminMainProps> = ({ theme, toggleTheme }) =
                   <Route path="/super-admin/dashboard" element={<Dashboard />} />
                   <Route path="/super-admin/analytics" element={<Analytics />} />
                   <Route path="/super-admin/tenants" element={<Tenants />} />
+                  <Route path="/super-admin/access-requests" element={<AccessRequests />} />
                   <Route path="/super-admin/knowledge" element={<Navigate to="/super-admin/dashboard" replace />} />
                   <Route path="/super-admin/user-groups" element={<Navigate to="/super-admin/tenants" replace />} />
                   <Route path="/super-admin/knowledge-groups" element={<Navigate to="/super-admin/tenants" replace />} />
@@ -542,6 +572,13 @@ const SuperAdminMain: React.FC<SuperAdminMainProps> = ({ theme, toggleTheme }) =
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <ForceChangePasswordModal
+        open={!!user && user.mustChangePassword === true}
+        onSuccess={() => {
+          setUser((prev: any) => (prev ? { ...prev, mustChangePassword: false } : prev));
+        }}
+      />
     </div>
   );
 };

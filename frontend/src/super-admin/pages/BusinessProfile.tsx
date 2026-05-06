@@ -77,10 +77,18 @@ const BusinessProfile: React.FC = () => {
 
   const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      setLogoFile(file);
-      setLogoPreview(URL.createObjectURL(file));
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) {
+      toast({
+        title: "Logo too large",
+        description: "Logos must be 10 MB or smaller. Please choose a smaller image.",
+        variant: "destructive"
+      });
+      e.target.value = "";
+      return;
     }
+    setLogoFile(file);
+    setLogoPreview(URL.createObjectURL(file));
   };
 
   const updateProfile = async (e: React.FormEvent) => {

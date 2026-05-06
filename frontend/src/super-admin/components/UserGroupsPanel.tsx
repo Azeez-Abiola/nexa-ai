@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import axios from "axios";
 import { Plus, Trash2, Users, Loader2, Search, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -60,7 +60,11 @@ const UserGroupsPanel: React.FC<UserGroupsPanelProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   /** When set, the create/edit sheet is in edit mode — saving sends PATCH instead of POST. */
   const [editingGroup, setEditingGroup] = useState<UserGroupRow | null>(null);
-  const [memberGroup, setMemberGroup] = useState<UserGroupRow | null>(null);
+  const [memberGroupId, setMemberGroupId] = useState<string | null>(null);
+  const memberGroup = useMemo(
+    () => (memberGroupId ? groups.find((g) => g._id === memberGroupId) ?? null : null),
+    [groups, memberGroupId]
+  );
   const [userSearch, setUserSearch] = useState("");
   const { toast } = useToast();
 
@@ -169,6 +173,18 @@ const UserGroupsPanel: React.FC<UserGroupsPanelProps> = ({
   };
 
   const toggleMember = async (groupId: string, userId: string, action: "add" | "remove") => {
+    // Optimistic — flip the button instantly so the admin sees the change
+    // even before the server round-trip. Rolled back on failure.
+    const snapshot = groups;
+    setGroups((gs) =>
+      gs.map((g) => {
+        if (g._id !== groupId) return g;
+        const ids = new Set((g.memberUserIds ?? []).map(String));
+        if (action === "add") ids.add(String(userId));
+        else ids.delete(String(userId));
+        return { ...g, memberUserIds: Array.from(ids) };
+      })
+    );
     try {
       await axios.post(
         `${API}/${groupId}/members`,
@@ -177,6 +193,7 @@ const UserGroupsPanel: React.FC<UserGroupsPanelProps> = ({
       );
       fetchGroups();
     } catch (err: any) {
+      setGroups(snapshot);
       toast({
         variant: "destructive",
         title: "Update failed",
@@ -258,7 +275,7 @@ const UserGroupsPanel: React.FC<UserGroupsPanelProps> = ({
                     <span className="text-sm font-semibold text-slate-600">{g.memberUserIds?.length ?? 0}</span>
                   </TableCell>
                   <TableCell className="text-right pr-6 space-x-2">
-                    <Button variant="outline" size="sm" className="rounded-xl font-bold" onClick={() => setMemberGroup(g)}>
+                    <Button variant="outline" size="sm" className="rounded-xl font-bold" onClick={() => setMemberGroupId(g._id)}>
                       <Users size={16} className="mr-1" />
                       Members
                     </Button>
@@ -322,7 +339,7 @@ const UserGroupsPanel: React.FC<UserGroupsPanelProps> = ({
         </SheetContent>
       </Sheet>
 
-      <Sheet open={!!memberGroup} onOpenChange={(o) => !o && setMemberGroup(null)}>
+      <Sheet open={!!memberGroup} onOpenChange={(o) => !o && setMemberGroupId(null)}>
         <SheetContent className="sm:max-w-lg overflow-y-auto">
           <SheetHeader>
             <SheetTitle>Members — {memberGroup?.name}</SheetTitle>

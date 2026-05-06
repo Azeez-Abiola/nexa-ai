@@ -7,6 +7,8 @@ export interface IBusinessUnit extends Document {
   label: string;
   slug: string;
   logo?: string;
+  /** SHA-256 of the logo file bytes — prevents two tenants from sharing the same logo. */
+  logoHash?: string;
   isActive: boolean;
   contactEmail?: string;
   colorCode?: string;
@@ -43,6 +45,10 @@ const businessUnitSchema = new Schema<IBusinessUnit>(
     },
     logo: {
       type: String
+    },
+    logoHash: {
+      type: String,
+      index: true
     },
     isActive: {
       type: Boolean,

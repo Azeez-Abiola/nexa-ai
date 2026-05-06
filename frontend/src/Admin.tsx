@@ -486,8 +486,9 @@ export const Admin: React.FC = () => {
                     <option value="policy">Policy</option>
                     <option value="procedure">Procedure</option>
                     <option value="handbook">Handbook</option>
-                    <option value="contract">Contract</option>
+                    <option value="contract">Contact</option>
                     <option value="report">Report</option>
+                    <option value="operational_report">Operational reports</option>
                     <option value="other">Other</option>
                   </select>
                 </div>

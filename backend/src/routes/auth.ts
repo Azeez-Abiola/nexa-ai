@@ -7,6 +7,7 @@ import { AdminUser } from "../models/AdminUser";
 import { BusinessUnit as BusinessUnitModel } from "../models/BusinessUnit";
 import { sendVerificationEmail, sendPasswordResetEmail, sendWelcomeEmail } from "../services/emailService";
 import { authMiddleware, AuthenticatedRequest } from "../middleware/auth";
+import { logEvent } from "../services/auditService";
 
 export const authRouter = express.Router();
 
@@ -250,6 +251,14 @@ authRouter.post("/login", async (req: Request<{}, {}, AuthRequest>, res: Respons
       return res.status(401).json({ error: "Invalid email or password" });
     }
 
+    // Reject deactivated user accounts before any password check.
+    // Admins are gated separately by the AdminUser.isActive flag in their own login route.
+    if (!isAdminAccount && user.isActive === false) {
+      return res.status(403).json({
+        error: "Your account has been deactivated. Please contact your administrator."
+      });
+    }
+
     // Check if email is verified
     if (!user.emailVerified && user.businessUnit !== "SUPERADMIN") {
       return res.status(403).json({ 
@@ -291,6 +300,16 @@ authRouter.post("/login", async (req: Request<{}, {}, AuthRequest>, res: Respons
 
     const token = jwt.sign(payload, JWT_SECRET, { expiresIn: "7d" });
 
+    logEvent(isAdminAccount ? "admin_login" : "user_login", {
+      adminId: isAdminAccount ? user._id.toString() : undefined,
+      userId: !isAdminAccount ? user._id.toString() : undefined,
+      adminEmail: user.email,
+      businessUnit: user.businessUnit,
+      action: isAdminAccount ? "Admin Login" : "User Login",
+      details: `${isAdminAccount ? "Admin" : "User"} signed in`,
+      metadata: { ip: (req.headers["x-forwarded-for"] as string) || req.socket?.remoteAddress }
+    });
+
     res.json({
       token,
       user: {
@@ -308,6 +327,19 @@ authRouter.post("/login", async (req: Request<{}, {}, AuthRequest>, res: Respons
     console.error("Unified login error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
+});
+
+authRouter.post("/logout", authMiddleware, (req: AuthenticatedRequest, res: Response) => {
+  logEvent(req.isAdmin ? "admin_logout" : "user_logout", {
+    adminId: req.isAdmin ? req.userId : undefined,
+    userId: !req.isAdmin ? req.userId : undefined,
+    adminEmail: req.email,
+    businessUnit: req.businessUnit || "UNKNOWN",
+    action: req.isAdmin ? "Admin Logout" : "User Logout",
+    details: `${req.isAdmin ? "Admin" : "User"} signed out`,
+    metadata: { ip: (req.headers["x-forwarded-for"] as string) || req.socket?.remoteAddress }
+  });
+  res.json({ message: "Logged out" });
 });
 
 // Forgot Password endpoint

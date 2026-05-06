@@ -19,6 +19,11 @@ adminAuditLogsRouter.get("/", async (req: AuthenticatedRequest, res) => {
     if (req.query.eventType) filter.eventType = req.query.eventType;
     if (req.query.documentId) filter.documentId = req.query.documentId;
 
+    if (req.query.search) {
+      const re = new RegExp(req.query.search as string, "i");
+      filter.$or = [{ adminEmail: re }, { action: re }, { details: re }];
+    }
+
     if (req.query.from || req.query.to) {
       filter.createdAt = {};
       if (req.query.from) filter.createdAt.$gte = new Date(req.query.from as string);

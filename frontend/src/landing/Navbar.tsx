@@ -61,7 +61,7 @@ const Navbar = () => {
                       const userStr = localStorage.getItem('nexa-user');
                       if (userStr) {
                         const user = JSON.parse(userStr);
-                        if (user.businessUnit === 'SUPERADMIN' || user.grade === 'ADMIN' || user.isAdmin) {
+                        if (user.businessUnit === 'SUPERADMIN' || user.isAdmin) {
                           window.location.href = "/admin/dashboard";
                         } else {
                           navigate("/user-chat");
@@ -80,7 +80,7 @@ const Navbar = () => {
               </>
             ) : (
               <>
-                <Button variant="ghost" className="font-bold text-[#1A1A1A]" onClick={() => navigate("/login")}>
+                <Button variant="ghost" className="rounded-full px-6 font-bold text-[#1A1A1A]" onClick={() => navigate("/login")}>
                   Sign In
                 </Button>
                 <Button
@@ -135,7 +135,7 @@ const Navbar = () => {
                         const userStr = localStorage.getItem("nexa-user");
                         if (userStr) {
                           const user = JSON.parse(userStr);
-                          if (user.businessUnit === "SUPERADMIN" || user.grade === "ADMIN" || user.isAdmin) {
+                          if (user.businessUnit === "SUPERADMIN" || user.isAdmin) {
                             window.location.href = "/admin/dashboard";
                           } else {
                             navigate("/user-chat");
