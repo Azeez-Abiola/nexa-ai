@@ -573,6 +573,10 @@ export const App: React.FC = () => {
   };
 
   const confirmLogout = () => {
+    const tok = localStorage.getItem("nexa-token");
+    if (tok) {
+      axios.post("/api/v1/auth/logout", {}, { headers: { Authorization: `Bearer ${tok}` } }).catch(() => {});
+    }
     localStorage.removeItem("nexa-token");
     localStorage.removeItem("nexa-user");
     setIsAuthenticated(false);

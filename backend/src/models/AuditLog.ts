@@ -14,6 +14,8 @@ export type AuditEventType =
   | "conversation_share_revoked"
   | "admin_login"
   | "admin_logout"
+  | "user_login"
+  | "user_logout"
   | "user_created"
   | "user_deleted"
   | "policy_updated"
@@ -51,6 +53,8 @@ const AuditLogSchema = new Schema<AuditLogDocument>(
         "conversation_share_revoked",
         "admin_login",
         "admin_logout",
+        "user_login",
+        "user_logout",
         "user_created",
         "user_deleted",
         "policy_updated",

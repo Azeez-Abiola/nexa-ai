@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import axios from 'axios';
 import { cn } from '@/lib/utils';
 import { Routes, Route, useNavigate, Navigate, useLocation } from "react-router-dom";
 import {
@@ -44,10 +45,10 @@ import Departments from './pages/Departments';
 import DepartmentDetail from './pages/DepartmentDetail';
 import UserDetail from './pages/UserDetail';
 import Categories from './pages/Categories';
+import AuditLogs from './pages/AuditLogs';
 import ForceChangePasswordModal from './components/ForceChangePasswordModal';
 import NotificationsBell from './components/NotificationsBell';
 import EmailDomains from './pages/EmailDomains';
-import AuditLogs from './pages/AuditLogs';
 import HelpSupport from './pages/HelpSupport';
 import UsersManagement from './pages/UsersManagement';
 import BusinessProfile from './pages/BusinessProfile';
@@ -120,7 +121,14 @@ const SuperAdminMain: React.FC<SuperAdminMainProps> = ({ theme, toggleTheme }) =
   }, [location.pathname]);
 
   const handleLogout = () => {
-    if (location.pathname.startsWith('/super-admin')) {
+    const isSuper = location.pathname.startsWith('/super-admin');
+    const tok = isSuper
+      ? (localStorage.getItem('cpanelToken') || localStorage.getItem('nexa-token'))
+      : localStorage.getItem('nexa-token');
+    if (tok) {
+      axios.post('/api/v1/admin/auth/logout', {}, { headers: { Authorization: `Bearer ${tok}` } }).catch(() => {});
+    }
+    if (isSuper) {
       localStorage.removeItem('cpanelToken');
       localStorage.removeItem('cpanelUser');
       window.location.href = '/super-admin/login';
@@ -407,6 +415,7 @@ const SuperAdminMain: React.FC<SuperAdminMainProps> = ({ theme, toggleTheme }) =
                   <Route path="/admin/departments" element={<Departments />} />
                   <Route path="/admin/departments/:id" element={<DepartmentDetail />} />
                   <Route path="/admin/categories" element={<Categories />} />
+
                   <Route path="/admin/audit" element={<AuditLogs />} />
                   <Route path="/admin/help" element={<HelpSupport />} />
                   <Route path="/admin/profile" element={<BusinessProfile />} />

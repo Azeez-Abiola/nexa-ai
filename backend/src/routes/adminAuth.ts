@@ -32,6 +32,7 @@ import {
   superAdminMiddleware,
   AuthenticatedRequest
 } from "../middleware/auth";
+import { logEvent } from "../services/auditService";
 import { normalizeHexToRrggbb } from "../utils/hexColor";
 import {
   escapeBuRegexFragment,
@@ -246,6 +247,15 @@ adminAuthRouter.post("/login", async (req: Request<{}, {}, AdminAuthRequest>, re
       }
     }
 
+    logEvent("admin_login", {
+      adminId: admin._id.toString(),
+      adminEmail: admin.email,
+      businessUnit: admin.businessUnit || "SUPERADMIN",
+      action: "Admin Login",
+      details: `Admin signed in`,
+      metadata: { ip: (req.headers["x-forwarded-for"] as string) || req.socket?.remoteAddress }
+    });
+
     res.json({
       token,
       admin: {
@@ -267,6 +277,18 @@ adminAuthRouter.post("/login", async (req: Request<{}, {}, AdminAuthRequest>, re
     console.error("Admin login error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
+});
+
+adminAuthRouter.post("/logout", adminAuthMiddleware, (req: AuthenticatedRequest, res: Response) => {
+  logEvent("admin_logout", {
+    adminId: req.adminId,
+    adminEmail: req.email,
+    businessUnit: req.businessUnit || "SUPERADMIN",
+    action: "Admin Logout",
+    details: `Admin signed out`,
+    metadata: { ip: (req.headers["x-forwarded-for"] as string) || req.socket?.remoteAddress }
+  });
+  res.json({ message: "Logged out" });
 });
 
 // First-login forced password change.
@@ -1129,7 +1151,6 @@ adminAuthRouter.post("/invite-peer-admin", adminAuthMiddleware, async (req: Auth
         email.toLowerCase(),
         fullName,
         bu,
-        tenant.slug,
         autoPassword
       );
     } catch (emailError) {

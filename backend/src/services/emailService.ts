@@ -6,8 +6,9 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const resend = new Resend(process.env.RESEND_API_KEY);
-const FRONTEND_URL = process.env.FRONTEND_URL || "http://0.0.0.0:3000";
-const FROM_EMAIL = process.env.FROM_EMAIL || "noreply@nexa.ai";
+const FRONTEND_URL = (process.env.FRONTEND_URL || "http://0.0.0.0:3000").replace(/\/$/, "");
+const FROM_EMAIL = process.env.FROM_EMAIL || "noreply@1879techhub.com";
+const NOTIFICATION_INBOX = process.env.SUPERADMIN_NOTIFICATION_EMAIL || process.env.CONTACT_INBOX_EMAIL || FROM_EMAIL;
 
 const TEMPLATES_DIR = path.join(__dirname, "..", "templates", "emails");
 
@@ -75,11 +76,10 @@ export async function sendAdminInviteEmail(
   email: string,
   fullName: string,
   businessUnit: string,
-  slug: string,
   rawToken: string
 ): Promise<void> {
   const acceptLink = `${FRONTEND_URL}/accept-invite?token=${rawToken}`;
-  const subdomain = `${slug}.nexa.ai`;
+  const subdomain = `${FRONTEND_URL}/login`;
   try {
     const html = await renderTemplate("admin-invite", { fullName, businessUnit, subdomain, acceptLink });
     await sendEmail(email, `You're invited to manage ${businessUnit} on Nexa AI`, html);
@@ -107,7 +107,7 @@ export async function sendContactFormInquiry(payload: {
   message: string;
   intent?: string;
 }): Promise<void> {
-  const inbox = process.env.CONTACT_INBOX_EMAIL || "info@1879techub.com";
+  const inbox = process.env.CONTACT_INBOX_EMAIL || NOTIFICATION_INBOX;
   const prefix = payload.intent === "demo" ? "[Demo request] " : "[Contact] ";
   const html = `
     <p><strong>Name:</strong> ${escapeHtml(payload.name)}</p>
@@ -220,9 +220,7 @@ export async function sendAccessRequestNotification(payload: {
   reviewUrl: string;
 }): Promise<void> {
   const inbox =
-    process.env.SUPERADMIN_NOTIFICATION_EMAIL ||
-    process.env.CONTACT_INBOX_EMAIL ||
-    "hi@nexa.ai";
+    NOTIFICATION_INBOX;
   try {
     const html = await renderTemplate("access-request-notification", payload);
     await sendEmail(inbox, `[Access Request] ${payload.companyName} — Nexa AI`, html);
@@ -277,11 +275,10 @@ export async function sendTenantCredentialsEmail(
   email: string,
   fullName: string,
   businessUnit: string,
-  slug: string,
   password: string
 ): Promise<void> {
   const loginUrl = `${FRONTEND_URL}/login`;
-  const subdomain = `${slug}.nexa.ai`;
+  const subdomain = loginUrl;
   try {
     const html = await renderTemplate("tenant-credentials", { 
       fullName, 

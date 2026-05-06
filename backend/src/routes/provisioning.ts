@@ -163,7 +163,6 @@ provisioningRouter.post(
               contactEmail.toLowerCase(),
               label + " Administrator",
               name,
-              tenant.slug,
               autoPassword
             );
             autoAdmin = { email: contactEmail.toLowerCase(), passwordGenerated: true };
@@ -302,7 +301,6 @@ provisioningRouter.post("/invite", superAdminMiddleware, async (req: Authenticat
         email.toLowerCase(),
         fullName,
         businessUnit,
-        tenant.slug,
         autoPassword
       );
     } catch (emailError) {
@@ -589,7 +587,6 @@ provisioningRouter.post("/access-requests/:id/provision", superAdminMiddleware, 
         request.workEmail,
         adminFullName,
         tenant.name,
-        tenant.slug,
         autoPassword
       );
     } catch (emailError) {
