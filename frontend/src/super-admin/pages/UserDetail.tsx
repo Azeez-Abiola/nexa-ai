@@ -1,13 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { useNavigate, useParams } from "react-router-dom";
-import { format } from "date-fns";
+import { format, formatDistanceToNow } from "date-fns";
 import {
   ArrowLeft,
   Calendar,
   Layers,
   Loader2,
   Mail,
+  MessageSquare,
   Network,
   Save,
   Users
@@ -57,6 +58,13 @@ interface GroupRow {
   name: string;
   memberUserIds?: string[];
 }
+interface SessionRow {
+  _id: string;
+  title: string;
+  messageCount: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
 
 const NO_DEPT = "__none__";
 
@@ -68,6 +76,7 @@ const UserDetail: React.FC = () => {
   const [user, setUser] = useState<UserRow | null>(null);
   const [departments, setDepartments] = useState<DepartmentRow[]>([]);
   const [groups, setGroups] = useState<GroupRow[]>([]);
+  const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Department draft — separate from `user.department` so we know whether the form is dirty
@@ -85,15 +94,17 @@ const UserDetail: React.FC = () => {
     if (!id || !token) return;
     try {
       setLoading(true);
-      const [userRes, deptRes, groupRes] = await Promise.all([
+      const [userRes, deptRes, groupRes, sessionRes] = await Promise.all([
         axios.get(`/api/v1/admin/auth/users/${id}`, { headers }),
         axios.get("/api/v1/admin/auth/departments", { headers }),
-        axios.get("/api/v1/admin/user-groups", { headers }).catch(() => ({ data: { groups: [] } }))
+        axios.get("/api/v1/admin/user-groups", { headers }).catch(() => ({ data: { groups: [] } })),
+        axios.get(`/api/v1/admin/auth/users/${id}/conversations`, { headers }).catch(() => ({ data: { sessions: [] } }))
       ]);
       const fetchedUser: UserRow = userRes.data.user;
       setUser(fetchedUser);
       setDepartments(deptRes.data.departments || []);
       setGroups(groupRes.data.groups || []);
+      setSessions(sessionRes.data.sessions || []);
       setDeptDraft(fetchedUser.department || NO_DEPT);
     } catch (err: any) {
       if (err.response?.status === 404) {
@@ -353,6 +364,56 @@ const UserDetail: React.FC = () => {
                 >
                   {g.name}
                 </Badge>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card className="border-none shadow-xl shadow-slate-200/50 rounded-2xl bg-white">
+        <CardContent className="p-6 space-y-4">
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="font-black font-['Sen'] text-slate-900">Chat sessions</p>
+              <p className="text-xs font-medium text-slate-400">
+                All AI conversations this user has started.
+              </p>
+            </div>
+            {sessions.length > 0 && (
+              <span className="text-xs font-bold text-slate-500 bg-slate-100 rounded-lg px-2.5 py-1">
+                {sessions.length} {sessions.length === 1 ? "session" : "sessions"}
+              </span>
+            )}
+          </div>
+          {sessions.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-slate-200 p-6 text-center">
+              <MessageSquare size={24} className="text-slate-300 mx-auto mb-2" />
+              <p className="text-sm font-bold text-slate-700">No chat sessions yet</p>
+              <p className="text-xs text-slate-400 font-medium mt-1">Sessions will appear here once the user starts chatting.</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-100">
+              {sessions.map((s) => (
+                <div key={s._id} className="flex items-center justify-between py-3 gap-4">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-8 h-8 rounded-lg bg-[var(--brand-color)]/10 flex items-center justify-center shrink-0">
+                      <MessageSquare size={14} className="text-[var(--brand-color)]" />
+                    </div>
+                    <p className="text-sm font-bold text-slate-800 truncate">{s.title}</p>
+                  </div>
+                  <div className="flex items-center gap-4 shrink-0 text-right">
+                    <span className="text-xs font-semibold text-slate-400">
+                      {s.messageCount} {s.messageCount === 1 ? "message" : "messages"}
+                    </span>
+                    <span className="text-xs font-medium text-slate-400 hidden sm:block">
+                      {s.updatedAt
+                        ? formatDistanceToNow(new Date(s.updatedAt), { addSuffix: true })
+                        : s.createdAt
+                          ? format(new Date(s.createdAt), "MMM d, yyyy")
+                          : "—"}
+                    </span>
+                  </div>
+                </div>
               ))}
             </div>
           )}
