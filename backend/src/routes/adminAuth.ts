@@ -21,6 +21,7 @@ import { AdminInvite } from "../models/AdminInvite";
 import { EmployeeInvite } from "../models/EmployeeInvite";
 import { Department } from "../models/Department";
 import { RagDocument } from "../models/RagDocument";
+import { Conversation } from "../models/Conversation";
 import {
   DocumentCategory,
   BUILTIN_DOCUMENT_CATEGORIES,
@@ -911,6 +912,44 @@ adminAuthRouter.patch("/users/:id/toggle-status", adminAuthMiddleware, async (re
     });
   } catch (error) {
     console.error("Toggle user status error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Chat sessions summary for a user — admins can review session activity
+adminAuthRouter.get("/users/:id/conversations", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { businessUnit, isSuperAdmin } = req;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ error: "Invalid user id" });
+    }
+
+    const user = await User.findById(id).lean();
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    if (!isSuperAdmin && user.businessUnit !== businessUnit) {
+      return res.status(403).json({ error: "Access denied" });
+    }
+
+    const convo = await Conversation.findOne({ userId: id })
+      .select("conversationGroups")
+      .lean();
+
+    const sessions = (convo?.conversationGroups ?? [])
+      .map((g: any) => ({
+        _id: String(g._id),
+        title: g.title || "Untitled chat",
+        messageCount: Array.isArray(g.messages) ? g.messages.length : 0,
+        createdAt: g.createdAt,
+        updatedAt: g.updatedAt
+      }))
+      .sort((a: any, b: any) => new Date(b.updatedAt ?? b.createdAt ?? 0).getTime() - new Date(a.updatedAt ?? a.createdAt ?? 0).getTime());
+
+    res.json({ sessions, total: sessions.length });
+  } catch (error) {
+    console.error("User conversations error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });
