@@ -705,11 +705,12 @@ adminAuthRouter.post("/invite-employee", adminAuthMiddleware, async (req: Authen
         rawToken,
         7
       );
-    } catch (emailError) {
+    } catch (emailError: any) {
       await EmployeeInvite.deleteOne({ token: tokenHash, status: "pending" });
-      console.error("Employee invite email failed:", emailError);
+      const detail = emailError?.message || String(emailError);
+      console.error("Employee invite email failed:", detail);
       return res.status(500).json({
-        error: "Could not send the invitation email. Check email configuration or try again."
+        error: `Could not send the invitation email: ${detail}`
       });
     }
 
