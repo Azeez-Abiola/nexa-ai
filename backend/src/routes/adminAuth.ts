@@ -705,11 +705,12 @@ adminAuthRouter.post("/invite-employee", adminAuthMiddleware, async (req: Authen
         rawToken,
         7
       );
-    } catch (emailError) {
+    } catch (emailError: any) {
       await EmployeeInvite.deleteOne({ token: tokenHash, status: "pending" });
-      console.error("Employee invite email failed:", emailError);
+      const detail = emailError?.message || String(emailError);
+      console.error("Employee invite email failed:", detail);
       return res.status(500).json({
-        error: "Could not send the invitation email. Check email configuration or try again."
+        error: `Could not send the invitation email: ${detail}`
       });
     }
 
@@ -719,6 +720,98 @@ adminAuthRouter.post("/invite-employee", adminAuthMiddleware, async (req: Authen
     });
   } catch (error) {
     console.error("Invite employee error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Bulk invite employees — BU admins only; processes up to 200 rows, returns per-row results
+adminAuthRouter.post("/invite-employees-bulk", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { businessUnit, isSuperAdmin, email: inviterEmail, fullName: inviterName } = req;
+    if (!businessUnit || businessUnit === "SUPERADMIN" || isSuperAdmin) {
+      return res.status(403).json({ error: "Only business unit administrators can bulk-invite employees." });
+    }
+
+    const employees: { firstName: string; lastName: string; email: string; department?: string }[] = req.body.employees;
+    if (!Array.isArray(employees) || employees.length === 0) {
+      return res.status(400).json({ error: "employees array is required and must not be empty." });
+    }
+    if (employees.length > 200) {
+      return res.status(400).json({ error: "Maximum 200 employees per bulk invite." });
+    }
+
+    const tenant = await BusinessUnitModel.findOne({ name: businessUnit });
+    if (!tenant) return res.status(404).json({ error: "Your business unit is not registered as a tenant." });
+    if (tenant.isActive === false) return res.status(403).json({ error: "This organization is not active." });
+
+    const emailDomainMapping = await BusinessUnitEmailMapping.findOne({ businessUnit });
+    const inviterLabel = inviterName || inviterEmail || "Your administrator";
+
+    const sent: string[] = [];
+    const failed: { email: string; reason: string }[] = [];
+
+    for (const row of employees) {
+      const { firstName, lastName, department } = row;
+      const rawEmail = (row.email || "").toLowerCase().trim();
+      if (!rawEmail || !firstName || !lastName) {
+        failed.push({ email: rawEmail || "(missing)", reason: "Missing first name, last name, or email." });
+        continue;
+      }
+
+      if (emailDomainMapping) {
+        const emailDomain = rawEmail.split("@")[1];
+        if (!emailDomain || emailDomain !== emailDomainMapping.emailDomain.toLowerCase()) {
+          failed.push({ email: rawEmail, reason: `Email must end with @${emailDomainMapping.emailDomain}.` });
+          continue;
+        }
+      }
+
+      const existing = await User.findOne({ email: rawEmail });
+      if (existing) {
+        failed.push({ email: rawEmail, reason: "User already exists." });
+        continue;
+      }
+
+      const alreadyPending = await EmployeeInvite.findOne({
+        email: rawEmail,
+        businessUnit,
+        status: "pending",
+        expiresAt: { $gt: new Date() }
+      });
+      if (alreadyPending) {
+        failed.push({ email: rawEmail, reason: "Invite already pending." });
+        continue;
+      }
+
+      const rawToken = crypto.randomBytes(32).toString("hex");
+      const tokenHash = hashInviteToken(rawToken);
+      const fullName = `${String(firstName).trim()} ${String(lastName).trim()}`;
+      const normalizedDept = department ? String(department).trim() : undefined;
+
+      await EmployeeInvite.create({
+        email: rawEmail,
+        fullName: fullName.trim(),
+        businessUnit,
+        tenantId: tenant.tenantId,
+        department: normalizedDept,
+        token: tokenHash,
+        status: "pending",
+        invitedBy: inviterEmail || "unknown",
+        expiresAt: new Date(Date.now() + EMPLOYEE_INVITE_EXPIRY_MS)
+      });
+
+      try {
+        await sendEmployeeInviteEmail(rawEmail, fullName.trim(), tenant.label, inviterLabel, rawToken, 7);
+        sent.push(rawEmail);
+      } catch (emailError: any) {
+        await EmployeeInvite.deleteOne({ token: tokenHash, status: "pending" });
+        failed.push({ email: rawEmail, reason: emailError?.message || "Email send failed." });
+      }
+    }
+
+    res.json({ sent, failed, total: employees.length });
+  } catch (error) {
+    console.error("Bulk invite error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });
