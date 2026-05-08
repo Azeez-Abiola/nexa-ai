@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import axios from 'axios';
+import Papa from 'papaparse';
 import { useSearchParams, useNavigate, Link, useLocation } from 'react-router-dom';
 import {
   Users as UsersIcon,
@@ -11,7 +12,12 @@ import {
   ChevronRight,
   Briefcase,
   ShieldCheck,
-  User as UserIcon
+  User as UserIcon,
+  Upload,
+  Download,
+  CheckCircle2,
+  XCircle,
+  Trash2
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
@@ -87,12 +93,18 @@ const UsersManagement: React.FC = () => {
   const [toggleTarget, setToggleTarget] = useState<{ id: string; fullName: string; isActive: boolean } | null>(null);
   const [inviteEmployeeOpen, setInviteEmployeeOpen] = useState(false);
   const [inviteAdminOpen, setInviteAdminOpen] = useState(false);
+  const [employeeInviteTab, setEmployeeInviteTab] = useState<'single' | 'bulk'>('single');
   const [employeeInviteForm, setEmployeeInviteForm] = useState({ firstName: '', lastName: '', email: '', department: '' });
   const [adminInviteForm, setAdminInviteForm] = useState({ firstName: '', lastName: '', email: '' });
   const [adminInviteSubmitting, setAdminInviteSubmitting] = useState(false);
   const [adminInviteError, setAdminInviteError] = useState('');
   const [employeeInviteSubmitting, setEmployeeInviteSubmitting] = useState(false);
   const [employeeInviteError, setEmployeeInviteError] = useState('');
+  const [bulkRows, setBulkRows] = useState<{ firstName: string; lastName: string; email: string; department: string }[]>([]);
+  const [bulkParseError, setBulkParseError] = useState('');
+  const [bulkSubmitting, setBulkSubmitting] = useState(false);
+  const [bulkResults, setBulkResults] = useState<{ sent: string[]; failed: { email: string; reason: string }[] } | null>(null);
+  const csvInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
   const [departments, setDepartments] = useState<{ _id: string; name: string }[]>([]);
@@ -217,6 +229,67 @@ const UsersManagement: React.FC = () => {
       setEmployeeInviteError(err.response?.data?.error || err.response?.data?.message || 'Could not send employee invite.');
     } finally {
       setEmployeeInviteSubmitting(false);
+    }
+  };
+
+  const downloadBulkTemplate = () => {
+    const csv = 'First Name,Last Name,Email,Department\nJane,Doe,jane.doe@company.com,Engineering\nJohn,Smith,john.smith@company.com,Marketing';
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'employee-invite-template.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleBulkFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!e.target.files) return;
+    e.target.value = '';
+    if (!file) return;
+    setBulkParseError('');
+    setBulkResults(null);
+    Papa.parse<Record<string, string>>(file, {
+      header: true,
+      skipEmptyLines: true,
+      transformHeader: (h) => h.trim(),
+      complete: (result) => {
+        const rows = result.data.map((row) => ({
+          firstName: (row['First Name'] || row['first name'] || row['firstName'] || '').trim(),
+          lastName: (row['Last Name'] || row['last name'] || row['lastName'] || '').trim(),
+          email: (row['Email'] || row['email'] || '').trim().toLowerCase(),
+          department: (row['Department'] || row['department'] || '').trim(),
+        })).filter((r) => r.email);
+        if (rows.length === 0) {
+          setBulkParseError('No valid rows found. Make sure the file has First Name, Last Name, and Email columns.');
+          return;
+        }
+        if (rows.length > 200) {
+          setBulkParseError('Maximum 200 employees per upload. Please split into smaller files.');
+          return;
+        }
+        setBulkRows(rows);
+      },
+      error: () => setBulkParseError('Could not parse the file. Please use the CSV template.'),
+    });
+  };
+
+  const handleBulkSubmit = async () => {
+    if (bulkRows.length === 0) return;
+    setBulkSubmitting(true);
+    setBulkResults(null);
+    try {
+      const { data } = await axios.post('/api/v1/admin/auth/invite-employees-bulk', { employees: bulkRows }, { headers });
+      setBulkResults({ sent: data.sent, failed: data.failed });
+      if (data.sent.length > 0) {
+        toast({ title: `${data.sent.length} invite${data.sent.length === 1 ? '' : 's'} sent`, description: data.failed.length > 0 ? `${data.failed.length} row${data.failed.length === 1 ? '' : 's'} had errors — see details below.` : 'All invitations sent successfully.' });
+      }
+      if (data.failed.length === 0) setBulkRows([]);
+    } catch (err: any) {
+      setBulkParseError(err.response?.data?.error || 'Bulk invite failed. Please try again.');
+    } finally {
+      setBulkSubmitting(false);
     }
   };
 
@@ -481,52 +554,168 @@ const UsersManagement: React.FC = () => {
       </div>
 
       {/* Invite employee sheet */}
-      <Sheet open={inviteEmployeeOpen} onOpenChange={setInviteEmployeeOpen}>
-        <SheetContent side="right" className="sm:max-w-md flex flex-col">
+      <Sheet open={inviteEmployeeOpen} onOpenChange={(o) => { setInviteEmployeeOpen(o); if (!o) { setEmployeeInviteTab('single'); setBulkRows([]); setBulkResults(null); setBulkParseError(''); } }}>
+        <SheetContent side="right" className="sm:max-w-lg flex flex-col overflow-y-auto">
           <SheetHeader className="text-left space-y-2">
             <SheetTitle className="text-2xl font-black font-['Sen']">Invite employee</SheetTitle>
             <SheetDescription className="text-slate-500 font-medium text-sm leading-relaxed">
-              Sends a signed link to create a Nexa account for <span className="font-bold text-slate-800">{directoryBuLabel}</span>. Access to documents is controlled by user groups after they join.
+              Sends a signed link to create a Nexa account for <span className="font-bold text-slate-800">{directoryBuLabel}</span>.
             </SheetDescription>
           </SheetHeader>
-          <form onSubmit={handleInviteEmployee} className="mt-6 flex flex-col gap-5 flex-1">
-            {employeeInviteError && (
-              <div className="p-4 bg-red-50 border border-red-100 text-red-600 rounded-xl text-xs font-bold">{employeeInviteError}</div>
-            )}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <Label className="text-sm font-bold text-slate-700">First name</Label>
-                <Input value={employeeInviteForm.firstName} onChange={(e) => setEmployeeInviteForm({ ...employeeInviteForm, firstName: e.target.value })} className={inputBu} required placeholder="Jane" />
+
+          {/* Tab switcher */}
+          <div className="mt-5 flex rounded-xl bg-slate-100 p-1 gap-1">
+            <button
+              type="button"
+              onClick={() => { setEmployeeInviteTab('single'); setEmployeeInviteError(''); }}
+              className={cn('flex-1 text-xs font-bold py-2 rounded-lg transition-all', employeeInviteTab === 'single' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700')}
+            >
+              Single invite
+            </button>
+            <button
+              type="button"
+              onClick={() => { setEmployeeInviteTab('bulk'); setBulkParseError(''); }}
+              className={cn('flex-1 text-xs font-bold py-2 rounded-lg transition-all', employeeInviteTab === 'bulk' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700')}
+            >
+              Bulk invite
+            </button>
+          </div>
+
+          {/* Single invite */}
+          {employeeInviteTab === 'single' && (
+            <form onSubmit={handleInviteEmployee} className="mt-5 flex flex-col gap-5 flex-1">
+              {employeeInviteError && (
+                <div className="p-4 bg-red-50 border border-red-100 text-red-600 rounded-xl text-xs font-bold">{employeeInviteError}</div>
+              )}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label className="text-sm font-bold text-slate-700">First name</Label>
+                  <Input value={employeeInviteForm.firstName} onChange={(e) => setEmployeeInviteForm({ ...employeeInviteForm, firstName: e.target.value })} className={inputBu} required placeholder="Jane" />
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-sm font-bold text-slate-700">Last name</Label>
+                  <Input value={employeeInviteForm.lastName} onChange={(e) => setEmployeeInviteForm({ ...employeeInviteForm, lastName: e.target.value })} className={inputBu} required placeholder="Doe" />
+                </div>
               </div>
               <div className="space-y-2">
-                <Label className="text-sm font-bold text-slate-700">Last name</Label>
-                <Input value={employeeInviteForm.lastName} onChange={(e) => setEmployeeInviteForm({ ...employeeInviteForm, lastName: e.target.value })} className={inputBu} required placeholder="Doe" />
+                <Label className="text-sm font-bold text-slate-700">Work email</Label>
+                <Input type="email" value={employeeInviteForm.email} onChange={(e) => setEmployeeInviteForm({ ...employeeInviteForm, email: e.target.value })} className={inputBu} required placeholder="colleague@company.com" />
               </div>
+              <div className="space-y-2">
+                <Label className="text-sm font-bold text-slate-700">Department <span className="font-normal text-slate-400">(optional)</span></Label>
+                <Select
+                  value={employeeInviteForm.department || '__none__'}
+                  onValueChange={(v) => setEmployeeInviteForm({ ...employeeInviteForm, department: v === '__none__' ? '' : v })}
+                >
+                  <SelectTrigger className={inputBu}><SelectValue placeholder="Select a department" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">No department</SelectItem>
+                    {departments.map((d) => <SelectItem key={d._id} value={d.name}>{d.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <SheetFooter className="mt-auto px-0 flex-row gap-3 sm:gap-3">
+                <Button type="button" variant="ghost" className="flex-1 rounded-xl font-bold" onClick={() => setInviteEmployeeOpen(false)}>Cancel</Button>
+                <Button type="submit" disabled={employeeInviteSubmitting} className="flex-[2] rounded-xl font-bold text-white h-11" style={{ backgroundColor: 'var(--brand-color)' }}>
+                  {employeeInviteSubmitting ? <Loader2 className="animate-spin" size={18} /> : 'Send invite'}
+                </Button>
+              </SheetFooter>
+            </form>
+          )}
+
+          {/* Bulk invite */}
+          {employeeInviteTab === 'bulk' && (
+            <div className="mt-5 flex flex-col gap-5 flex-1">
+              {/* Download template */}
+              <div className="rounded-xl border border-dashed border-slate-200 p-4 flex items-center justify-between gap-4 bg-slate-50/50">
+                <div>
+                  <p className="text-sm font-bold text-slate-800">Download template</p>
+                  <p className="text-xs text-slate-400 font-medium mt-0.5">CSV with required columns: First Name, Last Name, Email, Department</p>
+                </div>
+                <Button type="button" variant="outline" size="sm" onClick={downloadBulkTemplate} className="rounded-lg font-bold shrink-0 gap-2 border-slate-200">
+                  <Download size={14} />
+                  Template
+                </Button>
+              </div>
+
+              {/* Upload area */}
+              <div>
+                <Label className="text-sm font-bold text-slate-700 mb-2 block">Upload spreadsheet <span className="font-normal text-slate-400">(CSV)</span></Label>
+                <label className="flex flex-col items-center justify-center gap-2 h-28 rounded-xl border-2 border-dashed border-slate-200 bg-slate-50/50 cursor-pointer hover:border-[var(--brand-color)]/40 hover:bg-[var(--brand-color)]/5 transition-colors">
+                  <Upload size={20} className="text-slate-300" />
+                  <span className="text-xs font-bold text-slate-500">Click to browse or drag & drop</span>
+                  <span className="text-[10px] text-slate-400 font-medium">CSV · max 200 rows</span>
+                  <input ref={csvInputRef} type="file" accept=".csv" className="hidden" onChange={handleBulkFileChange} />
+                </label>
+              </div>
+
+              {bulkParseError && (
+                <div className="p-3 bg-red-50 border border-red-100 text-red-600 rounded-xl text-xs font-bold">{bulkParseError}</div>
+              )}
+
+              {/* Results summary */}
+              {bulkResults && (
+                <div className="space-y-2">
+                  {bulkResults.sent.length > 0 && (
+                    <div className="flex items-center gap-2 p-3 bg-emerald-50 rounded-xl text-xs font-bold text-emerald-700">
+                      <CheckCircle2 size={14} className="shrink-0" />
+                      {bulkResults.sent.length} invite{bulkResults.sent.length === 1 ? '' : 's'} sent successfully
+                    </div>
+                  )}
+                  {bulkResults.failed.length > 0 && (
+                    <div className="rounded-xl border border-red-100 overflow-hidden">
+                      <div className="flex items-center gap-2 p-3 bg-red-50 text-xs font-bold text-red-700">
+                        <XCircle size={14} className="shrink-0" />
+                        {bulkResults.failed.length} row{bulkResults.failed.length === 1 ? '' : 's'} failed
+                      </div>
+                      <div className="divide-y divide-red-50 max-h-40 overflow-y-auto">
+                        {bulkResults.failed.map((f, i) => (
+                          <div key={i} className="px-3 py-2 text-xs">
+                            <span className="font-bold text-slate-700">{f.email}</span>
+                            <span className="text-slate-400 ml-2">{f.reason}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Preview table */}
+              {bulkRows.length > 0 && !bulkResults && (
+                <div className="rounded-xl border border-slate-100 overflow-hidden">
+                  <div className="flex items-center justify-between px-4 py-2.5 bg-slate-50 border-b border-slate-100">
+                    <span className="text-xs font-bold text-slate-700">{bulkRows.length} row{bulkRows.length === 1 ? '' : 's'} ready</span>
+                    <button type="button" onClick={() => setBulkRows([])} className="text-slate-400 hover:text-red-500 transition-colors">
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                  <div className="max-h-48 overflow-y-auto divide-y divide-slate-50">
+                    {bulkRows.map((r, i) => (
+                      <div key={i} className="px-4 py-2.5 flex items-center justify-between gap-3 text-xs">
+                        <span className="font-bold text-slate-800 truncate">{r.firstName} {r.lastName}</span>
+                        <span className="text-slate-400 truncate flex-1 text-right">{r.email}</span>
+                        {r.department && <span className="text-[10px] font-semibold bg-slate-100 text-slate-500 rounded px-1.5 py-0.5 shrink-0">{r.department}</span>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <SheetFooter className="mt-auto px-0 flex-row gap-3 sm:gap-3">
+                <Button type="button" variant="ghost" className="flex-1 rounded-xl font-bold" onClick={() => setInviteEmployeeOpen(false)}>Cancel</Button>
+                <Button
+                  type="button"
+                  disabled={bulkRows.length === 0 || bulkSubmitting}
+                  onClick={handleBulkSubmit}
+                  className="flex-[2] rounded-xl font-bold text-white h-11"
+                  style={{ backgroundColor: 'var(--brand-color)' }}
+                >
+                  {bulkSubmitting ? <Loader2 className="animate-spin" size={18} /> : `Send ${bulkRows.length > 0 ? bulkRows.length : ''} invite${bulkRows.length === 1 ? '' : 's'}`}
+                </Button>
+              </SheetFooter>
             </div>
-            <div className="space-y-2">
-              <Label className="text-sm font-bold text-slate-700">Work email</Label>
-              <Input type="email" value={employeeInviteForm.email} onChange={(e) => setEmployeeInviteForm({ ...employeeInviteForm, email: e.target.value })} className={inputBu} required placeholder="colleague@company.com" />
-            </div>
-            <div className="space-y-2">
-              <Label className="text-sm font-bold text-slate-700">Department <span className="font-normal text-slate-400">(optional)</span></Label>
-              <Select
-                value={employeeInviteForm.department || '__none__'}
-                onValueChange={(v) => setEmployeeInviteForm({ ...employeeInviteForm, department: v === '__none__' ? '' : v })}
-              >
-                <SelectTrigger className={inputBu}><SelectValue placeholder="Select a department" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">No department</SelectItem>
-                  {departments.map((d) => <SelectItem key={d._id} value={d.name}>{d.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            <SheetFooter className="mt-auto px-0 flex-row gap-3 sm:gap-3">
-              <Button type="button" variant="ghost" className="flex-1 rounded-xl font-bold" onClick={() => setInviteEmployeeOpen(false)}>Cancel</Button>
-              <Button type="submit" disabled={employeeInviteSubmitting} className="flex-[2] rounded-xl font-bold text-white h-11" style={{ backgroundColor: 'var(--brand-color)' }}>
-                {employeeInviteSubmitting ? <Loader2 className="animate-spin" size={18} /> : 'Send invite'}
-              </Button>
-            </SheetFooter>
-          </form>
+          )}
         </SheetContent>
       </Sheet>
 
