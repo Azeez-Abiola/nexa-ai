@@ -175,27 +175,31 @@ export async function retrieveRelevantChunks(query: RAGQuery): Promise<RAGResult
   // Step 2b: Atlas Vector Search with pre-filter
   const retrievalStart = Date.now();
 
-  // Group restriction: chunks without a group restriction are open to all BU users;
-  // chunks restricted to specific groups are only allowed when the user is a member.
-  const groupOr: Record<string, unknown>[] = [
-    { allowedGroupIds: { $exists: false } }
-  ];
+  // Atlas $vectorSearch pre-filter only supports scalar comparisons — array operators like
+  // $size and $eq:[] are not allowed. Group access control is applied as a $match stage
+  // after $vectorSearch instead. businessUnit stays in the pre-filter (it's a string).
   const ids = groups.map((g) => g._id as Types.ObjectId);
+
+  // Post-filter: open chunks (no groups or empty array) are visible to everyone;
+  // restricted chunks require the user to be a member of at least one group.
+  const groupMatch: Record<string, unknown>[] = [
+    { allowedGroupIds: { $exists: false } },
+    { allowedGroupIds: { $size: 0 } }
+  ];
   if (ids.length > 0) {
-    groupOr.push({ allowedGroupIds: { $in: ids } });
+    groupMatch.push({ allowedGroupIds: { $in: ids } });
   }
 
   const pipeline: any[] = [
     {
       $vectorSearch: {
-        index: "document_chunks_vector_index",
+        index: "vector_index",
         path: "embedding",
         queryVector: queryEmbedding,
         numCandidates: Math.min(Math.max(topK * 10, 30), 100),
         limit: Math.min(Math.max(topK * 4, 15), 40), // over-fetch; then threshold + version filter
         filter: {
-          businessUnit: { $eq: query.businessUnit },
-          $or: groupOr
+          businessUnit: { $eq: query.businessUnit }
         }
       }
     },
@@ -205,6 +209,7 @@ export async function retrieveRelevantChunks(query: RAGQuery): Promise<RAGResult
         chunkIndex: 1,
         documentId: 1,
         createdAt: 1,
+        allowedGroupIds: 1,
         "metadata.documentTitle": 1,
         "metadata.documentType": 1,
         "metadata.documentSeriesId": 1,
@@ -212,12 +217,14 @@ export async function retrieveRelevantChunks(query: RAGQuery): Promise<RAGResult
         "metadata.isLatestVersion": 1,
         score: { $meta: "vectorSearchScore" }
       }
-    }
+    },
+    { $match: { $or: groupMatch } }
   ];
 
   const rawResults = await DocumentChunk.aggregate(pipeline);
   const retrievalLatencyMs = Date.now() - retrievalStart;
   const totalLatencyMs = Date.now() - totalStart;
+
 
   const mapped = rawResults
     .filter((r: any) => r.score >= SCORE_THRESHOLD)
