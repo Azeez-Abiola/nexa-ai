@@ -254,7 +254,7 @@ const UsersManagement: React.FC = () => {
       header: true,
       skipEmptyLines: true,
       transformHeader: (h) => h.trim(),
-      complete: (result) => {
+      complete: (result: Papa.ParseResult<Record<string, string>>) => {
         const rows = result.data.map((row) => ({
           firstName: (row['First Name'] || row['first name'] || row['firstName'] || '').trim(),
           lastName: (row['Last Name'] || row['last name'] || row['lastName'] || '').trim(),
