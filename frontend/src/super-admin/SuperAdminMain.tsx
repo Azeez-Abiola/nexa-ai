@@ -359,15 +359,18 @@ const SuperAdminMain: React.FC<SuperAdminMainProps> = ({ theme, toggleTheme }) =
                     Nexa.Ai
                   </span>
                 </>
-              ) : user?.tenantLogo ? (
+              ) : (
                 <img
-                  src={user.tenantLogo.startsWith('http') ? user.tenantLogo : `${import.meta.env.VITE_API_URL || ''}/logos/${user.tenantLogo.replace(/^\/logos\//, '')}`}
+                  src={user?.tenantLogo
+                    ? (user.tenantLogo.startsWith('http') ? user.tenantLogo : `${import.meta.env.VITE_API_URL || ''}/logos/${user.tenantLogo.replace(/^\/logos\//, '')}`)
+                    : '/1879-22.png'}
                   alt={user?.tenantLabel || user?.businessUnit || ''}
                   className="h-10 w-10 object-contain"
                   width={40}
                   height={40}
+                  onError={(e) => { (e.target as HTMLImageElement).src = '/1879-22.png'; }}
                 />
-              ) : null}
+              )}
             </div>
 
             <div className="flex min-w-0 flex-1 items-center justify-end gap-4">
