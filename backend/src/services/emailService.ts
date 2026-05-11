@@ -13,7 +13,11 @@ const NOTIFICATION_INBOX = process.env.SUPERADMIN_NOTIFICATION_EMAIL || process.
 const TEMPLATES_DIR = path.join(__dirname, "..", "templates", "emails");
 
 async function renderTemplate(name: string, data: Record<string, unknown>): Promise<string> {
-  return ejs.renderFile(path.join(TEMPLATES_DIR, `${name}.ejs`), data, { async: false });
+  const commonData = {
+    nexaLogoUrl: `${FRONTEND_URL}/1879-22.png`,
+    ...data
+  };
+  return ejs.renderFile(path.join(TEMPLATES_DIR, `${name}.ejs`), commonData, { async: false });
 }
 
 async function sendEmail(to: string, subject: string, html: string): Promise<void> {
