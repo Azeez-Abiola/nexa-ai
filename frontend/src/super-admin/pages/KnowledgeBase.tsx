@@ -390,11 +390,11 @@ const KnowledgeBase: React.FC = () => {
       const docTitle = data?.document?.title ?? title.trim();
       const autoLinked = !!data?.autoLinked;
       const description = autoLinked
-        ? `Uploaded as v${version} of “${docTitle}”. The previous version is now superseded.`
+        ? `”${docTitle}” uploaded as v${version}. The previous version has been superseded.`
         : version > 1
-        ? `Uploaded as v${version} of “${docTitle}”. Processing runs in the background.`
-        : "New document uploaded. Processing runs in the background (chunking & embeddings).";
-      toast({ title: "Upload queued", description });
+        ? `”${docTitle}” uploaded successfully as v${version}.`
+        : `”${docTitle}” uploaded successfully.`;
+      toast({ title: "Document uploaded", description });
       resetForm();
       setIsDrawerOpen(false);
       fetchDocuments();
@@ -1016,7 +1016,7 @@ const KnowledgeBase: React.FC = () => {
                         <span>Uploading…</span>
                       </div>
                     ) : (
-                      <span>Upload &amp; queue processing</span>
+                      <span>Upload Document</span>
                     )}
                   </Button>
                 </SheetFooter>
