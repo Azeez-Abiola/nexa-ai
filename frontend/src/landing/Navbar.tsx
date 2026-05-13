@@ -40,7 +40,7 @@ const Navbar = () => {
             <div className="flex items-center justify-center">
               <img src="/1879-22.png" alt="Nexa AI Logo" className="w-8 h-8 sm:w-10 sm:h-10 object-contain" />
             </div>
-            <span className="font-bold text-lg sm:text-xl text-[#1A1A1A] tracking-tight">nexa.ai</span>
+            <span className="font-bold text-lg sm:text-xl text-[#1A1A1A] tracking-tight">Nexa.ai</span>
           </Link>
 
           <div className="hidden md:flex items-center gap-10">
