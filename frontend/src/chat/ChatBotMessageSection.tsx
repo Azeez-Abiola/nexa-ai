@@ -125,7 +125,8 @@ const ChatBotMessageSection = () => {
                 role: msg.role,
                 content: msg.message
               }))
-              .concat({ role: "user", content: message })
+              .concat({ role: "user", content: message }),
+            model: "gpt"
           })
         });
 

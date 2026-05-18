@@ -7,11 +7,10 @@ import { UserDocument } from "../models/UserDocument";
 import { RagDocument } from "../models/RagDocument";
 import { authMiddleware, AuthenticatedRequest } from "../middleware/auth";
 import {
-  generateAIResponse,
   generateConversationTitle,
-  streamAIResponse,
   ImageAttachment
 } from "../services/openaiService";
+import { parseModel, getStreamAIResponse, getGenerateAIResponse, AIModel } from "../services/aiRouter";
 import { buildContextForQuery } from "../utils/contextBuilder";
 import { KNOWLEDGE_BASE_VERSIONING_RULES } from "../prompts/knowledgeBaseBehavior";
 import { uploadDocument, uploadChatImage } from "../services/cloudinaryService";
@@ -96,7 +95,9 @@ function detectDocumentRequest(message: string): { type: DocumentType; label: st
   if (
     /(?:create|generate|make|give|build|write|produce|prepare|save\s+as?)\s+(?:a\s+|an\s+|me\s+(?:a\s+|an\s+)?)?pdf/.test(m) ||
     /\bpdf\s+(?:document|report|file|format)\b/.test(m) ||
-    /(?:document|report|file)\s+(?:in|as)\s+pdf/.test(m) ||
+    /(?:document|report|file|letter|it)\s+(?:in|as)\s+(?:a\s+)?pdf/.test(m) ||
+    /in\s+(?:a\s+)?pdf\b/.test(m) ||
+    /as\s+(?:a\s+)?pdf\b/.test(m) ||
     /in\s+pdf\s+(?:form|format)/.test(m)
   ) {
     return { type: "pdf", label: DOC_LABELS.pdf };
@@ -129,9 +130,10 @@ interface GeneratedDocResult {
 
 async function generateAndCacheDocument(
   prompt: string,
-  docType: DocumentType
+  docType: DocumentType,
+  model: AIModel = "gpt"
 ): Promise<GeneratedDocResult> {
-  const content = await generateDocumentContent(prompt, docType);
+  const content = await generateDocumentContent(prompt, docType, model);
 
   let buffer: Buffer;
   if (docType === "docx") {
@@ -585,6 +587,7 @@ conversationRouter.post("/:id/message", authMiddleware, async (req: Authenticate
 
     // Support both multipart (message field) and JSON (content field) for backward compat
     const content: string = (req.body.message || req.body.content || "").trim();
+    const model = parseModel(req.body.model);
     const uploadedFiles = (req.files as Express.Multer.File[]) || [];
 
     if (!content && uploadedFiles.length === 0) {
@@ -734,7 +737,7 @@ conversationRouter.post("/:id/message", authMiddleware, async (req: Authenticate
     // ── Generate AI response ──────────────────────────────────────────────────
     let aiResponse = "";
     try {
-      aiResponse = await generateAIResponse(
+      aiResponse = await getGenerateAIResponse(model)(
         content,
         globalContext.policies.map((p: any) => ({
           title: p.title,
@@ -831,6 +834,7 @@ conversationRouter.post("/:id/message/:index/edit", authMiddleware, async (req: 
     const businessUnit = req.businessUnit!;
     const userId = req.userId!;
     const chatSessionId = id;
+    const model = parseModel(req.body.model);
 
     const [sessionStatus, hasSessionChunks, globalContext] = await Promise.all([
       getSessionDocumentStatus(userId, chatSessionId),
@@ -881,7 +885,7 @@ conversationRouter.post("/:id/message/:index/edit", authMiddleware, async (req: 
 
     let aiResponse = "";
     try {
-      aiResponse = await generateAIResponse(
+      aiResponse = await getGenerateAIResponse(model)(
         content,
         globalContext.policies.map((p: any) => ({
           title: p.title,
@@ -948,6 +952,7 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
     }
 
     const content: string = (req.body.message || req.body.content || "").trim();
+    const model = parseModel(req.body.model);
     const uploadedFiles = (req.files as Express.Multer.File[]) || [];
 
     if (!content && uploadedFiles.length === 0) {
@@ -958,7 +963,7 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
     const docRequest = content ? detectDocumentRequest(content) : null;
     let documentGenPromise: Promise<GeneratedDocResult | null> | null = null;
     if (docRequest) {
-      documentGenPromise = generateAndCacheDocument(content, docRequest.type)
+      documentGenPromise = generateAndCacheDocument(content, docRequest.type, model)
         .catch((err) => {
           const msg = err instanceof Error ? err.message : JSON.stringify(err);
           logger.error("[DocumentGen] Generation failed", { userId, documentType: docRequest.type, error: msg });
@@ -1208,7 +1213,7 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
 
     let fullResponse = "";
     try {
-      const generator = streamAIResponse(
+      const generator = getStreamAIResponse(model)(
         aiUserMessage,
         policyContext,
         group.messages.slice(0, -1).map((m) => ({

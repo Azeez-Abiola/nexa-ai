@@ -259,6 +259,7 @@ export const App: React.FC = () => {
   const [isHomeRecentCollapsed, setIsHomeRecentCollapsed] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
+  const [selectedModel, setSelectedModel] = useState<"gpt" | "claude">("gpt");
   const [webcamOpen, setWebcamOpen] = useState(false);
   const [copiedMessageIndex, setCopiedMessageIndex] = useState<number | null>(null);
   const [isRecording, setIsRecording] = useState(false);
@@ -944,7 +945,7 @@ export const App: React.FC = () => {
   };
 
   // Helper function to stream AI response
-  const streamResponse = async (conversationId: string, userContent: string, files?: File[]): Promise<Conversation | null> => {
+  const streamResponse = async (conversationId: string, userContent: string, files?: File[], model: "gpt" | "claude" = "gpt"): Promise<Conversation | null> => {
     const apiBase = import.meta.env.VITE_API_URL || '';
     const hasFiles = files && files.length > 0;
 
@@ -956,11 +957,12 @@ export const App: React.FC = () => {
     if (hasFiles) {
       const formData = new FormData();
       formData.append("message", userContent);
+      formData.append("model", model);
       files.forEach((f) => formData.append("files", f));
       body = formData;
     } else {
       headers["Content-Type"] = "application/json";
-      body = JSON.stringify({ content: userContent });
+      body = JSON.stringify({ content: userContent, model });
     }
 
     const response = await fetch(
@@ -1177,7 +1179,7 @@ export const App: React.FC = () => {
 
       // Stream AI response
       try {
-        const finalConversation = await streamResponse(createData.data.conversation._id, trimmed, filesToSend);
+        const finalConversation = await streamResponse(createData.data.conversation._id, trimmed, filesToSend, selectedModel);
 
         // Use the final conversation data from the stream response
         if (finalConversation) {
@@ -1203,7 +1205,7 @@ export const App: React.FC = () => {
 
     // Stream AI response
     try {
-      const finalConversation = await streamResponse(currentConversation._id, trimmed, filesToSend);
+      const finalConversation = await streamResponse(currentConversation._id, trimmed, filesToSend, selectedModel);
 
       // Use the final conversation data from the stream response
       if (finalConversation) {
@@ -1343,6 +1345,18 @@ export const App: React.FC = () => {
 
   const toggleSidebar = () => setSidebarOpen(!sidebarOpen);
   const chatHeaderTenantLogoUrl = resolveTenantLogoUrl(user?.tenantLogo);
+
+  const ModelToggle = () => (
+    <select
+      className="model-select"
+      value={selectedModel}
+      onChange={(e) => setSelectedModel(e.target.value as "gpt" | "claude")}
+      aria-label="AI Model"
+    >
+      <option value="gpt">GPT-5</option>
+      <option value="claude">Claude</option>
+    </select>
+  );
 
   const renderAttachPicker = (buttonClass: string) => (
     <div className="attach-menu-wrap" ref={attachMenuWrapRef}>
@@ -1909,6 +1923,7 @@ export const App: React.FC = () => {
                   />
                   <div className="input-footer-v2">
                     <div className="input-toolbar-icons">
+                      <ModelToggle />
                       {renderAttachPicker("input-tool-btn")}
                       <div className={`voice-mic-frame-v2${isRecording ? " voice-mic-frame-v2--active" : ""}`}>
                         <button
@@ -2106,6 +2121,7 @@ export const App: React.FC = () => {
                 </div>
               )}
               <div className="footer-input-container-v2">
+                <ModelToggle />
                 {renderAttachPicker("footer-tool-btn")}
                 <div className={`voice-mic-frame-v2${isRecording ? " voice-mic-frame-v2--active" : ""}`}>
                   <button
@@ -3605,6 +3621,29 @@ export const App: React.FC = () => {
         .send-btn-v2:not(:disabled) {
           background: var(--brand-color, #ed0000);
           color: white;
+        }
+
+        .model-select {
+          padding: 4px 24px 4px 10px;
+          font-size: 11px;
+          font-weight: 500;
+          border: 1px solid rgba(0,0,0,0.15);
+          border-radius: 8px;
+          background: white;
+          color: var(--brand-color, #ed0000);
+          cursor: pointer;
+          outline: none;
+          appearance: none;
+          -webkit-appearance: none;
+          background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23999'/%3E%3C/svg%3E");
+          background-repeat: no-repeat;
+          background-position: right 8px center;
+          flex-shrink: 0;
+        }
+        .dark-theme .model-select {
+          background-color: #2a2a2a;
+          border-color: rgba(255,255,255,0.15);
+          color: var(--brand-color, #ed0000);
         }
 
         .input-tool-btn, .footer-tool-btn {
