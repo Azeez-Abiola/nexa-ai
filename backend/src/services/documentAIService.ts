@@ -1,5 +1,7 @@
 import OpenAI from "openai";
 import { DocxContent, XlsxContent, PptxContent } from "./documentGeneratorService";
+import { generateJsonContent as claudeGenerateJsonContent } from "./claudeService";
+import { AIModel } from "./aiRouter";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -64,7 +66,10 @@ Rules:
 - notes is optional but helpful for complex slides
 - The first slide content will be used as an agenda or overview`;
 
-async function callJsonModel(system: string, userPrompt: string): Promise<string> {
+async function callJsonModel(system: string, userPrompt: string, model: AIModel = "gpt"): Promise<string> {
+  if (model === "claude") {
+    return claudeGenerateJsonContent(system, userPrompt);
+  }
   // Use gpt-4o specifically — JSON mode requires Chat Completions API which gpt-5 does not support
   const response = await openai.chat.completions.create({
     model: "gpt-4o",
@@ -81,10 +86,11 @@ async function callJsonModel(system: string, userPrompt: string): Promise<string
 
 export async function generateDocumentContent(
   prompt: string,
-  documentType: DocumentType
+  documentType: DocumentType,
+  model: AIModel = "gpt"
 ): Promise<DocxContent | XlsxContent | PptxContent> {
   if (documentType === "xlsx") {
-    const raw = await callJsonModel(XLSX_SYSTEM, prompt);
+    const raw = await callJsonModel(XLSX_SYSTEM, prompt, model);
     const parsed = JSON.parse(raw) as XlsxContent;
     if (!parsed.sheets || !Array.isArray(parsed.sheets) || parsed.sheets.length === 0) {
       throw new Error("AI returned invalid spreadsheet structure");
@@ -93,7 +99,7 @@ export async function generateDocumentContent(
   }
 
   if (documentType === "pptx") {
-    const raw = await callJsonModel(PPTX_SYSTEM, prompt);
+    const raw = await callJsonModel(PPTX_SYSTEM, prompt, model);
     const parsed = JSON.parse(raw) as PptxContent;
     if (!parsed.slides || !Array.isArray(parsed.slides) || parsed.slides.length === 0) {
       throw new Error("AI returned invalid presentation structure");
@@ -102,7 +108,7 @@ export async function generateDocumentContent(
   }
 
   // docx and pdf share the same structure
-  const raw = await callJsonModel(DOCX_SYSTEM, prompt);
+  const raw = await callJsonModel(DOCX_SYSTEM, prompt, model);
   const parsed = JSON.parse(raw) as DocxContent;
   if (!parsed.sections || !Array.isArray(parsed.sections) || parsed.sections.length === 0) {
     throw new Error("AI returned invalid document structure");

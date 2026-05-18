@@ -137,7 +137,7 @@ function extractErrorMeta(err: unknown): Record<string, unknown> {
 
 // ─── Prompt Utilities ─────────────────────────────────────────────────────────
 
-function buildSystemPrompt(correctBUName: string, policyContext: string, hasPolicies: boolean): string {
+export function buildSystemPrompt(correctBUName: string, policyContext: string, hasPolicies: boolean): string {
   const basePrompt      = `You are ${correctBUName}'s Policy Assistant.`;
   const formattingGuide = `Format responses with: **bold** for key terms, *italics* for emphasis, ### headers, numbered/bullet lists, --- separators, and code blocks for examples.`;
 
