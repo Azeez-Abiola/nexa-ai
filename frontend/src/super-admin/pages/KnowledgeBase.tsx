@@ -394,7 +394,7 @@ const KnowledgeBase: React.FC = () => {
         : version > 1
         ? `”${docTitle}” uploaded successfully as v${version}.`
         : `”${docTitle}” uploaded successfully.`;
-      toast({ title: "Document uploaded", description });
+      toast({ title: "Document uploaded", description, variant: "success" });
       resetForm();
       setIsDrawerOpen(false);
       fetchDocuments();

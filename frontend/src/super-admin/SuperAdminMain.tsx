@@ -450,7 +450,6 @@ const SuperAdminMain: React.FC<SuperAdminMainProps> = ({ theme, toggleTheme }) =
             <img src="/1879-22.png" alt="" className="w-5 h-5 object-contain opacity-90" width={20} height={20} />
             <span>Powered by 1879 Tech Hub</span>
           </div>
-          <Toaster />
         </div>
       </main>
 
@@ -582,6 +581,7 @@ const SuperAdminMain: React.FC<SuperAdminMainProps> = ({ theme, toggleTheme }) =
           setUser((prev: any) => (prev ? { ...prev, mustChangePassword: false } : prev));
         }}
       />
+      <Toaster />
     </div>
   );
 };
