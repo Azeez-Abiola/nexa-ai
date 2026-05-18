@@ -309,25 +309,42 @@ adminDocumentsRouter.post("/", upload.single("file"), async (req: AuthenticatedR
       processingStatus: "pending"
     });
 
-    // Enqueue processing job
-    const job = await documentQueue.add(
-      "process-document",
-      {
-        documentId: doc._id.toString(),
-        cloudinaryPublicId: publicId,
-        cloudinaryUrl: secureUrl,
-        mimeType,
-        businessUnit: targetBU!,
-        allowedGroupIds: parsedGroupObjectIds.map((g) => g.toString()),
-        sensitivityLevel,
-        uploadedBy: {
-          adminId: adminId || "unknown",
-          adminEmail: adminEmail || "unknown",
-          adminName: adminName || "Unknown"
-        }
-      },
-      { jobId: `doc-${doc._id}` }
-    );
+    // Enqueue processing job — if this fails, roll back the document and Cloudinary upload
+    let job;
+    try {
+      job = await documentQueue.add(
+        "process-document",
+        {
+          documentId: doc._id.toString(),
+          cloudinaryPublicId: publicId,
+          cloudinaryUrl: secureUrl,
+          mimeType,
+          businessUnit: targetBU!,
+          allowedGroupIds: parsedGroupObjectIds.map((g) => g.toString()),
+          sensitivityLevel,
+          uploadedBy: {
+            adminId: adminId || "unknown",
+            adminEmail: adminEmail || "unknown",
+            adminName: adminName || "Unknown"
+          }
+        },
+        { jobId: `doc-${doc._id}` }
+      );
+    } catch (queueErr) {
+      logger.error("[AdminDocuments] Queue error — rolling back", { error: (queueErr as Error).message });
+      // Delete the document record so it doesn't appear as a ghost "pending" entry
+      await RagDocument.findByIdAndDelete(doc._id).catch(() => {});
+      // Delete the file from Cloudinary
+      await deleteDocument(publicId).catch(() => {});
+      // Restore superseded document if this was a replacement
+      if (supersedesId) {
+        await RagDocument.findByIdAndUpdate(supersedesId, {
+          processingStatus: "completed",
+          isLatestVersion: true
+        }).catch(() => {});
+      }
+      return res.status(500).json({ error: "Upload failed: processing queue unavailable. Please try again." });
+    }
 
     await RagDocument.findByIdAndUpdate(doc._id, { processingJobId: job.id });
 
