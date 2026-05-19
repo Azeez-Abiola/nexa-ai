@@ -3,6 +3,7 @@ import { User } from "../models/User";
 import { AdminUser } from "../models/AdminUser";
 import { Conversation } from "../models/Conversation";
 import { Policy } from "../models/Policy";
+import { RagDocument } from "../models/RagDocument";
 import { BusinessUnit } from "../models/BusinessUnit";
 import { BusinessUnitEmailMapping } from "../models/BusinessUnitEmailMapping";
 import {
@@ -96,7 +97,7 @@ analyticsRouter.get("/business-units", adminAuthMiddleware, async (req: Authenti
         const [userCount, adminCount, policyCount, conversationCount] = await Promise.all([
           User.countDocuments({ businessUnit: bu }),
           AdminUser.countDocuments({ businessUnit: bu }),
-          Policy.countDocuments({ businessUnit: bu }),
+          RagDocument.countDocuments({ businessUnit: bu, processingStatus: { $ne: "superseded" } }),
           Conversation.countDocuments({ businessUnit: bu }),
         ]);
         return { name: bu, users: userCount, admins: adminCount, policies: policyCount, conversations: conversationCount };
