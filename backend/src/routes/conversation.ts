@@ -308,11 +308,13 @@ function buildSystemPrompt(
   globalContextString: string,
   pendingFileNames: string[],
   hasGlobalContext: boolean,
-  contextSource: "rag" | "keyword" | "google_only" | "none" = "none"
+  contextSource: "rag" | "keyword" | "google_only" | "none" = "none",
+  activeModel: "gpt" | "claude" = "gpt"
 ): string {
   const today = new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+  const modelLabel = activeModel === "claude" ? "Claude Opus 4.7" : "GPT-5";
   const sections: string[] = [
-    `You are a helpful AI assistant for ${businessUnit}, a business unit of UACN. Today's date is ${today}.`
+    `You are Nexa AI, a helpful AI assistant for ${businessUnit}, a business unit of UACN, powered by ${modelLabel}. Today's date is ${today}. If asked which model or AI you use, say you are Nexa AI powered by ${modelLabel}. Users can switch between models at any time — if the model differs from a previous message, do not apologize or treat it as an error; simply state the current model naturally.`
   ];
 
   if (pendingFileNames.length > 0) {
@@ -731,7 +733,8 @@ conversationRouter.post("/:id/message", authMiddleware, async (req: Authenticate
       globalContext.hybridContextString,
       sessionStatus.pendingOrProcessing,
       hasGlobalContext,
-      globalContext.source
+      globalContext.source,
+      model
     );
 
     // ── Generate AI response ──────────────────────────────────────────────────
@@ -880,7 +883,8 @@ conversationRouter.post("/:id/message/:index/edit", authMiddleware, async (req: 
       globalContext.hybridContextString,
       sessionStatus.pendingOrProcessing,
       hasGlobalContext,
-      globalContext.source
+      globalContext.source,
+      model
     );
 
     let aiResponse = "";
@@ -1193,7 +1197,8 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
       globalContext.hybridContextString,
       sessionStatus.pendingOrProcessing,
       hasGlobalContext,
-      globalContext.source
+      globalContext.source,
+      model
     );
     if (docRequest) {
       systemPrompt += `\n\n📎 DOCUMENT GENERATION: The user has requested a ${docRequest.label}. Confirm you are generating it and briefly describe (1–2 sentences) what the file will contain. Do NOT mention a download link — the system will attach it automatically below your message.`;

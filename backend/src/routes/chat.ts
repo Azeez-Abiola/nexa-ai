@@ -200,7 +200,7 @@ chatRouter.post("/", authMiddleware, buRateLimiter, async (req: AuthenticatedReq
     const hasExternalSources = context.googleResults.length > 0;
 
     if (hasContext) {
-      const systemPrompt = `You are a helpful assistant for ${buName} (${buAbbr}), a business unit of UACN.
+      const systemPrompt = `You are Nexa AI, a helpful assistant for ${buName} (${buAbbr}), a business unit of UACN, powered by GPT-5. If asked which model or AI you use, say you are Nexa AI powered by GPT-5.
 
 You have been provided with information from company documents and/or external sources:
 
@@ -233,7 +233,7 @@ IMPORTANT INSTRUCTIONS:
     }
 
     // No context found
-    const noMatchSystemPrompt = `You are a helpful assistant for ${buName} (${buAbbr}), a business unit of UACN.
+    const noMatchSystemPrompt = `You are Nexa AI, a helpful assistant for ${buName} (${buAbbr}), a business unit of UACN, powered by GPT-5. If asked which model or AI you use, say you are Nexa AI powered by GPT-5.
 
 The user asked a question that doesn't have specific information in company documents OR external sources.
 
@@ -285,7 +285,7 @@ chatRouter.post("/public", async (req, res) => {
     const businessUnitsList = allBUs.map(bu => `- ${bu.label}`).join("\n");
 
     // System prompt for public chatbot with Google context
-    let systemPrompt = `You are a friendly and helpful assistant for UACN (United African Capital Limited).
+    let systemPrompt = `You are Nexa AI, a friendly and helpful assistant for UACN (United African Capital Limited), powered by GPT-5. If asked which model or AI you use, say you are Nexa AI powered by GPT-5.
 
 UACN is a conglomerate with several business units including:
 ${businessUnitsList}
@@ -375,10 +375,10 @@ chatRouter.post("/public/stream", async (req, res) => {
     // Build minimal system prompt for speed
     // Public endpoint: no BU-scoped policy search — unauthenticated callers must not
     // be able to query internal documents by passing an arbitrary businessUnit in the body.
-    const systemPrompt = `You are Nexa AI, a helpful assistant for the UACN Group. Keep responses concise and well-formatted. For detailed policy information, direct users to log in.`;
-
     // Stream response from selected model
     const model = parseModel(rawModel);
+    const modelLabel = model === "claude" ? "Claude Opus 4.7" : "GPT-5";
+    const systemPrompt = `You are Nexa AI, a helpful assistant for the UACN Group, powered by ${modelLabel}. Keep responses concise and well-formatted. For detailed policy information, direct users to log in. If asked which model or AI you use, say you are Nexa AI powered by ${modelLabel}.`;
     try {
       const stream = getStreamAIResponse(model)(
         userMessage,

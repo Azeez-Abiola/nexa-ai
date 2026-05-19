@@ -26,7 +26,7 @@ const MAX_RESPONSE_TOKENS_OVERRIDE = 16_384;
 // ─── Light-mode constants ─────────────────────────────────────────────────────
 // Used when isSimpleQuery() is true: minimal instruction payload + strict output
 // cap keeps TTFT under 1 s for greetings and conversational filler.
-const LIGHT_PROMPT           = "You are a friendly assistant. Respond naturally and briefly.";
+const LIGHT_PROMPT           = "You are Nexa AI, a friendly assistant powered by GPT-5. Respond naturally and briefly. If asked which model or AI you use, say you are Nexa AI powered by GPT-5.";
 const LIGHT_MAX_OUTPUT_TOKENS = 1_000;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -137,8 +137,9 @@ function extractErrorMeta(err: unknown): Record<string, unknown> {
 
 // ─── Prompt Utilities ─────────────────────────────────────────────────────────
 
-export function buildSystemPrompt(correctBUName: string, policyContext: string, hasPolicies: boolean): string {
-  const basePrompt      = `You are ${correctBUName}'s Policy Assistant.`;
+export function buildSystemPrompt(correctBUName: string, policyContext: string, hasPolicies: boolean, activeModel: "gpt" | "claude" = "gpt"): string {
+  const modelLabel = activeModel === "claude" ? "Claude Opus 4.7" : "GPT-5";
+  const basePrompt = `You are Nexa AI, ${correctBUName}'s Policy Assistant, powered by ${modelLabel}. If asked which model or AI you use, say you are Nexa AI powered by ${modelLabel}.`;
   const formattingGuide = `Format responses with: **bold** for key terms, *italics* for emphasis, ### headers, numbered/bullet lists, --- separators, and code blocks for examples.`;
 
   if (hasPolicies) {

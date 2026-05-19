@@ -105,14 +105,14 @@ function buildSystem(
   const topPolicies = policies.sort((a, b) => (b.score ?? 0) - (a.score ?? 0)).slice(0, 3);
 
   if (topPolicies.length === 0) {
-    return buildSystemPrompt(name, "", false);
+    return buildSystemPrompt(name, "", false, "claude");
   }
 
   let policyContext = "\n### Relevant Policies:\n";
   topPolicies.forEach((p, i) => {
     policyContext += `\n**${i + 1}. ${p.title}** *(${p.category})*\n${p.content}\n`;
   });
-  return buildSystemPrompt(name, policyContext, true);
+  return buildSystemPrompt(name, policyContext, true, "claude");
 }
 
 // ─── generateAIResponse ───────────────────────────────────────────────────────
