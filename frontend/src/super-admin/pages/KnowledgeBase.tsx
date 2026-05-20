@@ -1027,16 +1027,16 @@ const KnowledgeBase: React.FC = () => {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-        <StatsCard icon={BookOpen} label="Total policies" value={String(totalCount)} color="rose" />
+        <StatsCard icon={BookOpen} label="Total knowledge base" value={String(totalCount)} color="rose" />
         <StatsCard
           icon={Tags}
-          label="Policy types"
+          label="Types of knowledge base"
           value={String(new Set(documents.map((d) => d.documentType)).size)}
           color="blue"
         />
         <StatsCard
           icon={Network}
-          label="Policies in user groups"
+          label="Knowledge base in user groups"
           value={String(policiesInGroupsCount)}
           color="violet"
         />

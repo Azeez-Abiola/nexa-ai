@@ -21,7 +21,8 @@ import {
   Shield,
   Settings,
   Moon,
-  Sun
+  Sun,
+  Search
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
@@ -343,11 +344,24 @@ const SuperAdminMain: React.FC<SuperAdminMainProps> = ({ theme, toggleTheme }) =
 
           {/* Desktop */}
           <div className="relative hidden min-h-[5rem] items-center justify-between px-6 py-3 lg:px-10 md:flex">
-            <div className="flex min-w-0 flex-1 items-center gap-6">
-              <div className="flex min-w-0 items-center gap-3 text-xs font-semibold">
+            <div className="flex min-w-0 flex-1 items-center gap-4">
+              <div className="flex min-w-0 items-center gap-3 text-xs font-semibold shrink-0">
                 <span className={theme === 'dark' ? "text-gray-500" : "text-slate-400"}>Pages</span>
                 <ChevronRight size={12} className={cn("shrink-0", theme === 'dark' ? "text-gray-600" : "text-slate-300")} />
                 <span className={cn("truncate font-bold", theme === 'dark' ? "text-white" : "text-slate-900")}>{pageTitle}</span>
+              </div>
+              <div className="relative w-[220px]">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300 pointer-events-none" />
+                <input
+                  type="text"
+                  placeholder="Search..."
+                  className={cn(
+                    "h-9 w-full rounded-xl pl-9 pr-3 text-xs font-medium outline-none transition-all",
+                    theme === 'dark'
+                      ? "bg-[#2a2a2a] text-gray-200 placeholder:text-gray-600 focus:ring-1 focus:ring-[#444]"
+                      : "bg-slate-50 text-slate-700 placeholder:text-slate-300 focus:bg-white focus:ring-1 focus:ring-[var(--brand-color)]/20"
+                  )}
+                />
               </div>
             </div>
 

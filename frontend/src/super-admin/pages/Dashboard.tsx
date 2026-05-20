@@ -5,15 +5,12 @@ import {
   Users,
   MessageSquare,
   Building,
-  Files,
+  FileText,
   ShieldAlert,
-  ArrowUpRight,
   UserPlus,
   Calendar as CalendarIcon,
-  Filter,
   ChevronLeft,
   ChevronRight,
-  Search,
   Download
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -67,7 +64,7 @@ const Loader2 = ({ className, size }: { className?: string; size?: number }) => 
   </svg>
 );
 
-const StatCard = ({ title, value, icon, trend, isLoading, footer }: any) => {
+const StatCard = ({ title, value, icon, isLoading, footer }: any) => {
   const num = typeof value === "number" ? value : Number(value) || 0;
   return (
     <Card className="border-none shadow-xl shadow-slate-200/50 rounded-2xl bg-white flex flex-col items-center justify-center p-6 sm:p-8 gap-4 text-center group hover:-translate-y-1 transition-transform cursor-pointer border border-slate-50 min-w-0">
@@ -76,15 +73,7 @@ const StatCard = ({ title, value, icon, trend, isLoading, footer }: any) => {
           <div className="w-10 h-10 rounded-xl bg-white border border-slate-100 flex items-center justify-center text-slate-400 group-hover:bg-[var(--brand-color)] group-hover:text-white transition-all duration-500 shadow-sm">
             {icon}
           </div>
-          {isLoading ? <Skeleton className="h-6 w-12 rounded-full" /> : (
-            <div className={cn(
-              "flex items-center gap-1 text-[10px] font-bold px-3 py-1.5 rounded-full",
-              trend === "Stable" ? "bg-slate-50 text-slate-400" : "bg-emerald-50 text-emerald-600"
-            )}>
-              {trend !== "Stable" && <ArrowUpRight size={10} />}
-              {trend}
-            </div>
-          )}
+          {isLoading && <Skeleton className="h-6 w-12 rounded-full" />}
         </div>
         <div className="mt-8">
           {isLoading ? (
@@ -229,14 +218,6 @@ const Dashboard: React.FC = () => {
             <Download size={14} />
             Export CSV
           </button>
-          <div className="relative w-full min-w-0 sm:w-[250px]">
-            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-300" />
-            <input
-              type="text"
-              placeholder="Search metrics..."
-              className="h-11 w-full min-w-0 rounded-xl border-none bg-slate-50 pl-10 text-xs font-bold transition-all focus:bg-white focus:shadow-sm focus:ring-2 focus:ring-[var(--brand-color)]/10"
-            />
-          </div>
         </div>
       </div>
 
@@ -262,27 +243,24 @@ const Dashboard: React.FC = () => {
             title={isSuperAdminContext ? "Platform users" : "Users"}
             value={stats?.totalUsers || 0}
             icon={<Users size={20} />}
-            trend="+12.5%"
             isLoading={false}
           />
           <StatCard
             title="Active users"
             value={stats?.usersWhoChatted ?? 0}
             icon={<MessageSquare size={20} />}
-            trend="Stable"
             isLoading={false}
           />
           <StatCard
             title="Knowledge"
             value={stats?.totalDocs || 0}
-            icon={<Files size={20} />}
-            trend="+89"
+            icon={<FileText size={20} />}
             isLoading={false}
           />
           {isSuperAdminContext ? (
-            <StatCard title="Business units" value={stats?.totalTenants || 0} icon={<Building size={20} />} trend="Stable" isLoading={false} />
+            <StatCard title="Business units" value={stats?.totalTenants || 0} icon={<Building size={20} />} isLoading={false} />
           ) : (
-            <StatCard title="Policy" value={stats?.totalPolicies || 0} icon={<ShieldAlert size={20} />} trend="Stable" isLoading={false} />
+            <StatCard title="Policy" value={stats?.totalPolicies || 0} icon={<ShieldAlert size={20} />} isLoading={false} />
           )}
           <StatCard
             title={
@@ -304,7 +282,6 @@ const Dashboard: React.FC = () => {
                 : stats?.totalAdmins || 0
             }
             icon={<UserPlus size={20} />}
-            trend="Stable"
             isLoading={false}
             footer={
               isSuperAdminContext ? (
