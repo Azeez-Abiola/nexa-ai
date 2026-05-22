@@ -600,14 +600,16 @@ const UsersManagement: React.FC = () => {
                                 View profile
                               </DropdownMenuItem>
                             )}
-                            <DropdownMenuItem
-                              onClick={(e) => { e.stopPropagation(); handleReinvite(user.email); }}
-                              disabled={reinviting === user.email}
-                              className="gap-2 font-semibold text-slate-700 cursor-pointer"
-                            >
-                              <RefreshCw size={14} className="text-slate-400" />
-                              Re-invite
-                            </DropdownMenuItem>
+                            {isPending && (
+                              <DropdownMenuItem
+                                onClick={(e) => { e.stopPropagation(); handleReinvite(user.email); }}
+                                disabled={reinviting === user.email}
+                                className="gap-2 font-semibold text-slate-700 cursor-pointer"
+                              >
+                                <RefreshCw size={14} className="text-slate-400" />
+                                Re-invite
+                              </DropdownMenuItem>
+                            )}
                             {!isPending && (
                               <>
                                 <DropdownMenuSeparator />
