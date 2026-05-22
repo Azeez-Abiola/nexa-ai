@@ -494,6 +494,77 @@ adminAuthRouter.get("/users", adminAuthMiddleware, async (req: AuthenticatedRequ
   }
 });
 
+// Get pending employee invites for the BU
+adminAuthRouter.get("/pending-invites", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const requestedBU = req.query.businessUnit as string | undefined;
+    const targetBU = await resolveUserDirectoryBusinessUnit(req, requestedBU);
+    if (!targetBU) return res.status(400).json({ error: "Could not resolve business unit." });
+
+    const invites = await EmployeeInvite.find(
+      { businessUnit: targetBU, status: "pending", expiresAt: { $gt: new Date() } },
+      { token: 0 }
+    ).sort({ createdAt: -1 });
+
+    res.json({ invites });
+  } catch (error) {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Re-invite employee — expire old pending invite and send a fresh one
+adminAuthRouter.post("/reinvite-employee", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { businessUnit, isSuperAdmin, email: inviterEmail, fullName: inviterName } = req;
+    if (!businessUnit || businessUnit === "SUPERADMIN" || isSuperAdmin) {
+      return res.status(403).json({ error: "Only business unit administrators can re-invite employees." });
+    }
+
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: "email is required" });
+    const normalizedEmail = email.toLowerCase().trim();
+
+    const existing = await EmployeeInvite.findOne({
+      email: normalizedEmail,
+      businessUnit,
+      status: "pending",
+    });
+    if (!existing) {
+      return res.status(404).json({ error: "No pending invite found for this email." });
+    }
+
+    const tenant = await BusinessUnitModel.findOne({ name: businessUnit });
+    if (!tenant) return res.status(404).json({ error: "Business unit not found." });
+
+    // Expire the old invite and issue a fresh one
+    existing.status = "expired";
+    await existing.save();
+
+    const rawToken = crypto.randomBytes(32).toString("hex");
+    const tokenHash = hashInviteToken(rawToken);
+
+    await EmployeeInvite.create({
+      email: normalizedEmail,
+      fullName: existing.fullName,
+      businessUnit,
+      tenantId: tenant.tenantId,
+      department: existing.department,
+      token: tokenHash,
+      status: "pending",
+      invitedBy: inviterEmail || "unknown",
+      expiresAt: new Date(Date.now() + EMPLOYEE_INVITE_EXPIRY_MS),
+    });
+
+    const inviterLabel = inviterName || inviterEmail || "Your administrator";
+    await sendEmployeeInviteEmail(normalizedEmail, existing.fullName, tenant.label, inviterLabel, rawToken, 7);
+
+    res.json({ message: `Invitation resent to ${normalizedEmail}` });
+  } catch (error) {
+    console.error("Reinvite employee error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // Create User — BU admins can create users for their BU
 adminAuthRouter.post("/users", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {

@@ -9,7 +9,9 @@ import {
   Network,
   Send,
   Mail,
-  ChevronRight,
+  MoreHorizontal,
+  RefreshCw,
+  Eye,
   Briefcase,
   ShieldCheck,
   User as UserIcon,
@@ -19,6 +21,13 @@ import {
   XCircle,
   Trash2
 } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import {
   AlertDialog,
@@ -108,6 +117,8 @@ const UsersManagement: React.FC = () => {
   const { toast } = useToast();
 
   const [departments, setDepartments] = useState<{ _id: string; name: string }[]>([]);
+  const [pendingInvites, setPendingInvites] = useState<any[]>([]);
+  const [reinviting, setReinviting] = useState<string | null>(null);
 
   const isSuperPath = location.pathname.startsWith('/super-admin');
   const token = useMemo(
@@ -170,12 +181,14 @@ const UsersManagement: React.FC = () => {
         if (!bu) { setUsers([]); return; }
       }
       const q = `?businessUnit=${encodeURIComponent(bu)}`;
-      const [usersResp, groupsResp] = await Promise.all([
+      const [usersResp, groupsResp, invitesResp] = await Promise.all([
         axios.get(`/api/v1/admin/auth/users${q}`, { headers }),
-        axios.get(`/api/v1/admin/user-groups${isSuper ? q : ''}`, { headers }).catch(() => ({ data: { groups: [] } }))
+        axios.get(`/api/v1/admin/user-groups${isSuper ? q : ''}`, { headers }).catch(() => ({ data: { groups: [] } })),
+        axios.get(`/api/v1/admin/auth/pending-invites${q}`, { headers }).catch(() => ({ data: { invites: [] } }))
       ]);
       setUsers(usersResp.data.users || []);
       setUserGroups(groupsResp.data.groups || []);
+      setPendingInvites(invitesResp.data.invites || []);
     } catch (error) {
       console.error('Failed to fetch users', error);
       toast({ title: 'Error', description: 'Failed to load users for your business unit.', variant: 'destructive' });
@@ -321,7 +334,31 @@ const UsersManagement: React.FC = () => {
     }
   };
 
-  const filteredUsers = users.filter(u =>
+  const handleReinvite = async (email: string) => {
+    setReinviting(email);
+    try {
+      await axios.post('/api/v1/admin/auth/reinvite-employee', { email }, { headers });
+      toast({ title: 'Invitation resent', description: `A fresh invite link was sent to ${email}.` });
+      fetchUsers();
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.response?.data?.error || 'Could not resend invite.', variant: 'destructive' });
+    } finally {
+      setReinviting(null);
+    }
+  };
+
+  const combinedList = [
+    ...users,
+    ...pendingInvites.map((inv) => ({
+      ...inv,
+      _id: inv._id,
+      fullName: inv.fullName,
+      email: inv.email,
+      department: inv.department,
+      isActive: true,
+      _isPending: true,
+    })),
+  ].filter((u) =>
     u.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
     u.email.toLowerCase().includes(searchTerm.toLowerCase())
   );
@@ -371,7 +408,7 @@ const UsersManagement: React.FC = () => {
             <div className="flex flex-wrap items-center gap-4">
               <h2 className="text-xl font-bold font-['Sen']">Registered users</h2>
               <Badge className="bg-[var(--brand-color)]/10 text-[var(--brand-color)] border-none font-bold text-[10px] tracking-widest uppercase py-1">
-                {filteredUsers.length} total
+                {combinedList.length} total
               </Badge>
             </div>
             <div className="flex flex-wrap items-center gap-3">
@@ -425,7 +462,7 @@ const UsersManagement: React.FC = () => {
               </div>
             ))}
           </div>
-        ) : filteredUsers.length === 0 ? (
+        ) : combinedList.length === 0 ? (
           <div className="py-24 flex flex-col items-center justify-center text-center px-10">
             <div className="w-16 h-16 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-200 mb-6">
               <UsersIcon size={32} />
@@ -448,20 +485,29 @@ const UsersManagement: React.FC = () => {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredUsers.map((user) => {
+                {combinedList.map((user) => {
+                  const isPending = !!user._isPending;
                   const isAdmin = user.isAdmin === true;
-                  const groupsForUser = userGroups.filter((g) =>
+                  const groupsForUser = isPending ? [] : userGroups.filter((g) =>
                     (g.memberUserIds ?? []).some((id) => String(id) === String(user._id))
                   );
                   return (
                     <TableRow
                       key={user._id}
-                      onClick={() => navigate(`/admin/users/${user._id}`)}
-                      className="group border-slate-50 hover:bg-slate-50/50 transition-colors cursor-pointer"
+                      onClick={() => !isPending && navigate(`/admin/users/${user._id}`)}
+                      className={cn(
+                        'group border-slate-50 transition-colors',
+                        isPending ? 'opacity-70' : 'hover:bg-slate-50/50 cursor-pointer'
+                      )}
                     >
                       <TableCell className="pl-8 py-5">
                         <div className="flex items-center gap-4">
-                          <div className="w-10 h-10 rounded-xl bg-[var(--brand-color)]/10 text-[var(--brand-color)] flex items-center justify-center font-bold shrink-0">
+                          <div className={cn(
+                            'w-10 h-10 rounded-xl flex items-center justify-center font-bold shrink-0',
+                            isPending
+                              ? 'bg-amber-50 text-amber-500'
+                              : 'bg-[var(--brand-color)]/10 text-[var(--brand-color)]'
+                          )}>
                             {user.fullName.charAt(0)}
                           </div>
                           <span className="font-bold text-slate-900">{user.fullName}</span>
@@ -479,7 +525,9 @@ const UsersManagement: React.FC = () => {
                         )}
                       </TableCell>
                       <TableCell>
-                        {isAdmin ? (
+                        {isPending ? (
+                          <span className="text-xs font-semibold text-slate-400">—</span>
+                        ) : isAdmin ? (
                           <Badge variant="outline" className="rounded-lg bg-violet-50 text-violet-600 border-none font-bold text-[10px] px-3 gap-1 inline-flex items-center">
                             <ShieldCheck size={11} />
                             Admin
@@ -492,7 +540,9 @@ const UsersManagement: React.FC = () => {
                         )}
                       </TableCell>
                       <TableCell>
-                        {groupsForUser.length === 0 ? (
+                        {isPending ? (
+                          <span className="text-xs font-semibold text-slate-400">—</span>
+                        ) : groupsForUser.length === 0 ? (
                           <span className="text-xs font-semibold text-slate-400">None</span>
                         ) : (
                           <div className="flex flex-wrap gap-1 max-w-[200px]">
@@ -510,7 +560,11 @@ const UsersManagement: React.FC = () => {
                         )}
                       </TableCell>
                       <TableCell>
-                        {user.isActive === false ? (
+                        {isPending ? (
+                          <Badge variant="outline" className="rounded-lg bg-amber-50 text-amber-600 border-none font-bold text-[10px] px-3">
+                            PENDING
+                          </Badge>
+                        ) : user.isActive === false ? (
                           <Badge variant="outline" className="rounded-lg bg-slate-100 text-slate-500 border-none font-bold text-[10px] px-3">
                             DEACTIVATED
                           </Badge>
@@ -521,28 +575,56 @@ const UsersManagement: React.FC = () => {
                         )}
                       </TableCell>
                       <TableCell className="text-right pr-8">
-                        <div className="flex items-center justify-end gap-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setToggleTarget({ id: user._id, fullName: user.fullName, isActive: user.isActive !== false });
-                            }}
-                            disabled={isDeleting === user._id}
-                            className={cn(
-                              'rounded-lg font-bold h-8 px-3 text-xs',
-                              user.isActive === false
-                                ? 'border-emerald-200 text-emerald-600 hover:bg-emerald-50'
-                                : 'border-slate-200 text-slate-700 hover:text-rose-600 hover:border-rose-200 hover:bg-rose-50'
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={(e) => e.stopPropagation()}
+                              className="h-8 w-8 p-0 rounded-lg hover:bg-slate-100"
+                            >
+                              {(isDeleting === user._id || reinviting === user.email) ? (
+                                <Loader2 size={15} className="animate-spin text-slate-400" />
+                              ) : (
+                                <MoreHorizontal size={15} className="text-slate-400" />
+                              )}
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-44 rounded-xl shadow-lg border-slate-100">
+                            {!isPending && (
+                              <DropdownMenuItem
+                                onClick={(e) => { e.stopPropagation(); navigate(`/admin/users/${user._id}`); }}
+                                className="gap-2 font-semibold text-slate-700 cursor-pointer"
+                              >
+                                <Eye size={14} className="text-slate-400" />
+                                View profile
+                              </DropdownMenuItem>
                             )}
-                          >
-                            {isDeleting === user._id ? (
-                              <Loader2 size={14} className="animate-spin" />
-                            ) : user.isActive === false ? 'Activate' : 'Deactivate'}
-                          </Button>
-                          <ChevronRight size={16} className="text-slate-300 group-hover:text-[var(--brand-color)] transition-colors" />
-                        </div>
+                            <DropdownMenuItem
+                              onClick={(e) => { e.stopPropagation(); handleReinvite(user.email); }}
+                              disabled={reinviting === user.email}
+                              className="gap-2 font-semibold text-slate-700 cursor-pointer"
+                            >
+                              <RefreshCw size={14} className="text-slate-400" />
+                              Re-invite
+                            </DropdownMenuItem>
+                            {!isPending && (
+                              <>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  onClick={(e) => { e.stopPropagation(); setToggleTarget({ id: user._id, fullName: user.fullName, isActive: user.isActive !== false }); }}
+                                  disabled={isDeleting === user._id}
+                                  className={cn(
+                                    'gap-2 font-semibold cursor-pointer',
+                                    user.isActive === false ? 'text-emerald-600' : 'text-rose-600'
+                                  )}
+                                >
+                                  {user.isActive === false ? 'Activate' : 'Deactivate'}
+                                </DropdownMenuItem>
+                              </>
+                            )}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </TableCell>
                     </TableRow>
                   );
