@@ -1,24 +1,21 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
-import { ArrowRight, Play, Sparkles, Send, Brain, Shield, Zap } from "lucide-react";
+import { ArrowRight, Play, Send, Brain, Shield, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 const HeroSection = () => {
   const navigate = useNavigate();
   const [inputValue, setInputValue] = useState("");
-  const [messages, setMessages] = useState([
-    { role: "assistant", content: "How can I help you optimize your organizational knowledge today?" }
-  ]);
+  const messages = [
+    { role: "assistant", content: "How can I help you optimize your organizational knowledge today?" },
+    { role: "user", content: "hii" },
+    { role: "assistant", content: "That's a great question! Based on your internal documents, I can help you with that. Would you like me to summarize the key points?" },
+  ];
 
   const handleSend = () => {
     if (!inputValue.trim()) return;
-    setMessages([...messages, { role: "user", content: inputValue }]);
-    setInputValue("");
-    // Mock response
-    setTimeout(() => {
-      setMessages(prev => [...prev, { role: "assistant", content: "That's a great question! Based on your internal documents, I can help you with that. Would you like me to summarize the key points?" }]);
-    }, 1000);
+    navigate("/login");
   };
 
   return (
@@ -70,7 +67,7 @@ const HeroSection = () => {
             transition={{ duration: 0.8, delay: 0.2 }}
             className="text-base sm:text-lg md:text-xl text-muted-foreground max-w-2xl mx-auto mb-8 sm:mb-12 leading-relaxed px-1"
           >
-            Nexa connects your people to your knowledge. Ask questions, get instant answers from approved internal documents — securely, intelligently, instantly.
+            Nexa connects your people to your knowledge. Ask questions, get instant answers from approved internal documents, securely, intelligently, instantly.
           </motion.p>
 
           {/* CTA Buttons */}
@@ -138,8 +135,8 @@ const HeroSection = () => {
               <div className="space-y-6 text-left">
                 <div className="flex items-center justify-between border-b border-border/40 pb-4 mb-6">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-                      <Sparkles className="w-5 h-5 text-primary" />
+                    <div className="w-10 h-10 rounded-full overflow-hidden shrink-0">
+                      <img src="/avatar-1.png" alt="Nexa Assistant" className="w-full h-full object-cover" />
                     </div>
                     <div>
                       <p className="text-sm font-bold text-[#1A1A1A]">Nexa Assistant</p>
