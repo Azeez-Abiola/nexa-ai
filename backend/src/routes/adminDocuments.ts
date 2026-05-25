@@ -379,6 +379,8 @@ adminDocumentsRouter.post("/", upload.single("file"), async (req: AuthenticatedR
         businessUnit: targetBU!,
         title: doc.title,
         documentId: String(doc._id),
+        documentType: docType,
+        sensitivityLevel: doc.sensitivityLevel,
         uploadedBy: adminName || adminEmail || "your admin",
         userIds,
         department: doc.department || undefined

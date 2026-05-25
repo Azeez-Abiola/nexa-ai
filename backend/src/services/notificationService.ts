@@ -3,6 +3,7 @@ import { Notification, NotificationKind, RecipientType } from "../models/Notific
 import { User } from "../models/User";
 import { AdminUser } from "../models/AdminUser";
 import logger from "../utils/logger";
+import { sendDocumentAddedNotification } from "./emailService";
 
 interface CreateInput {
   recipientId: Types.ObjectId | string;
@@ -52,6 +53,8 @@ export async function notifyDocumentAdded(input: {
   businessUnit: string;
   title: string;
   documentId: string;
+  documentType: string;
+  sensitivityLevel: string;
   uploadedBy: string;
   userIds?: string[];
   department?: string;
@@ -69,7 +72,7 @@ export async function notifyDocumentAdded(input: {
       baseFilter.department = dept;
     }
 
-    const recipients = await User.find(baseFilter).select("_id").lean();
+    const recipients = await User.find(baseFilter).select("_id email fullName").lean();
 
     const docs = recipients.map((u) => ({
       recipientId: u._id,
@@ -84,6 +87,21 @@ export async function notifyDocumentAdded(input: {
     if (docs.length > 0) {
       await Notification.insertMany(docs);
     }
+
+    // Fire email alerts — fully fire-and-forget, errors are swallowed per-recipient
+    await Promise.allSettled(
+      recipients.map((u) =>
+        sendDocumentAddedNotification(
+          u.email,
+          u.fullName,
+          input.businessUnit,
+          input.title,
+          input.documentType,
+          input.sensitivityLevel,
+          input.uploadedBy
+        )
+      )
+    );
   } catch (err) {
     logger.error("[Notifications] notifyDocumentAdded failed", { err: (err as Error).message });
   }
