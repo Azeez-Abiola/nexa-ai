@@ -994,7 +994,6 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
     res.setHeader("Access-Control-Allow-Origin", "*");
-
     // Convert images to base64 in memory (zero latency) so the model gets them this turn.
     // Cloudinary upload is persistence-only (needed for follow-up turns) and runs in parallel
     // with conversation loading — it no longer blocks the LLM pipeline.
@@ -1135,13 +1134,23 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
         chatSessionId,
         query: content.substring(0, 40),
       });
+      res.write(`data: ${JSON.stringify({ status: "Generating response..." })}\n\n`);
     } else {
+      res.write(`data: ${JSON.stringify({ status: "Thinking..." })}\n\n`);
       [sessionStatus, hasSessionChunks, globalContext, speculativeSessionRAG] = await Promise.all([
         getSessionDocumentStatus(userId, chatSessionId),
         hasReadySessionChunks(userId, chatSessionId),
         buildContextForQuery(content, businessUnit, { userId: req.userId, userDepartment: req.department }),
         retrieveSessionChunks({ query: content, userId, chatSessionId })
       ]);
+
+      // Inform the client what context was found before AI generation starts
+      const contextStatusMsg =
+        globalContext.source === "rag" ? "Found relevant documents. Generating response..." :
+        globalContext.source === "keyword" ? "Found matching policies. Generating response..." :
+        globalContext.source === "google_only" ? "Found web results. Generating response..." :
+        "Generating response...";
+      res.write(`data: ${JSON.stringify({ status: contextStatusMsg })}\n\n`);
     }
     t.contextMs = Date.now() - contextStart;
 

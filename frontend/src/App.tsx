@@ -1011,6 +1011,28 @@ export const App: React.FC = () => {
                 throw new Error(data.error);
               }
 
+              // Status events arrive before the AI starts — show them as placeholder text
+              if (data.status) {
+                setCurrentConversation((prev) => {
+                  if (!prev) return prev;
+                  const lastMsg = prev.messages[prev.messages.length - 1];
+                  if (lastMsg?.role === "assistant" && !fullResponse) {
+                    // Update existing status placeholder
+                    const updated = { ...prev, messages: [...prev.messages] };
+                    updated.messages[updated.messages.length - 1] = { ...lastMsg, content: data.status };
+                    return updated;
+                  } else if (lastMsg?.role !== "assistant") {
+                    // No assistant message yet — add one as a status placeholder
+                    return {
+                      ...prev,
+                      messages: [...prev.messages, { role: "assistant" as const, content: data.status, timestamp: new Date() }]
+                    };
+                  }
+                  return prev;
+                });
+                continue;
+              }
+
               fullResponse = data.fullResponse || "";
 
               // Update current conversation with the streaming response
@@ -2085,7 +2107,7 @@ export const App: React.FC = () => {
                       </div>
                     </div>
                   ))}
-                  {loading && (
+                  {loading && currentConversation?.messages?.[currentConversation.messages.length - 1]?.role !== "assistant" && (
                     <div className="message-row-v2 assistant">
                       <div className="message-avatar-v2 message-avatar-thinking-v2">
                         <img src={selectedAvatar || "/avatar-1.png"} alt="Nexa" className="bot-avatar-img" />
