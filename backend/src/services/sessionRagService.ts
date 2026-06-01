@@ -87,7 +87,12 @@ export async function retrieveSessionChunks(query: SessionRAGQuery): Promise<Ses
 
   // Embed the user query
   const embeddingStart = Date.now();
-  const queryEmbedding = await generateEmbedding(query.query);
+  let queryEmbedding: number[];
+  try {
+    queryEmbedding = await generateEmbedding(query.query);
+  } catch {
+    return { chunks: [], queryEmbeddingLatencyMs: 0, retrievalLatencyMs: 0, totalLatencyMs: 0 };
+  }
   const queryEmbeddingLatencyMs = Date.now() - embeddingStart;
 
   const retrievalStart = Date.now();
