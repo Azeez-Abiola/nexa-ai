@@ -234,7 +234,7 @@ const HeroSection = () => {
                   const partners = [
                     { name: "UAC of Nigeria PLC", logo: "/uacn.png" },
                     { name: "Livestock Feeds PLC", logo: "/livestockfeeds.png" },
-                    { name: "Chemical Allied and Paint (CAP PLC)", logo: "/capplc.png" },
+                    { name: "Chemical Allied Products (CAP PLC)", logo: "/capplc.png" },
                     { name: "UAC Foods Limited", logo: "/uacfoods.png" },
                     { name: "CHI Limited", logo: "/chivita.png" },
                     { name: "Grand Cereals Limited", logo: "/grandcereal.png" },

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { Search, TrendingUp, ShieldCheck, ClipboardCheck, BookOpen, ArrowRight, BarChart3 } from "lucide-react";
+import { Search, TrendingUp, ShieldCheck, ClipboardCheck, BookOpen, ArrowRight, BarChart3, Cpu } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import {
   Dialog,
@@ -89,6 +89,18 @@ const features: Feature[] = [
       "Administrators get a clear view of usage trends — top questions, most-cited documents, and active users by department — so adoption is measurable, not assumed.",
       "Surface knowledge gaps quickly: when employees repeatedly ask questions Nexa cannot confidently answer, you know exactly which content to publish or update next.",
       "Tie usage back to ROI by understanding which teams benefit most and where to invest in expanding the knowledge base.",
+    ],
+  },
+  {
+    icon: Cpu,
+    title: "Multiple LLM Support",
+    desc: "Run different large language models side-by-side, selecting the best for each task.",
+    highlight: false,
+    detailTitle: "Multiple LLM support",
+    detailParagraphs: [
+      "Choose from a portfolio of models (e.g., Claude, GPT) to balance speed and capability.",
+      "Switch models per query or define fallback logic for robust responses.",
+      "Future‑proof your AI stack as new models become available."
     ],
   },
 ];

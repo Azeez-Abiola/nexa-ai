@@ -1,0 +1,1178 @@
+NEXA AI — PRODUCT REQUIREMENTS DOCUMENT (PRD)
+
+Version:      2.0
+Date:         May 2026
+Status:       Active Development
+Prepared by:  Nexa AI Product Team
+Audience:     Engineering Team, Auditors, Stakeholders
+
+
+TABLE OF CONTENTS
+
+1.  Executive Summary
+2.  Product Vision & Goals
+3.  System Architecture Overview
+4.  User Roles & Permissions
+5.  Authentication & Onboarding Flows
+6.  Dashboard Types
+7.  AI Chat Interface
+8.  Knowledge Base & Document Management
+9.  User & Organisation Management
+10. Analytics & Reporting
+11. Audit Logging & Compliance
+12. Notifications System
+13. Tenant Provisioning & Multi-Tenancy
+14. Email Communications
+15. Security & Access Control
+16. NEW FEATURE — AI Model Selection
+17. External Integrations
+18. Non-Functional Requirements
+19. Data Models Reference
+20. API Surface Reference
+21. Environment Configuration
+22. Glossary
+
+
+────────────────────────────────────────────────────────────────
+
+
+1. EXECUTIVE SUMMARY
+
+Nexa AI is an enterprise-grade, multi-tenant AI assistant platform that enables organisations
+to deploy a branded, document-aware AI chat experience for their employees. Each organisation
+(called a Business Unit or tenant) receives an isolated environment with its own knowledge
+base, user management, branding, and analytics.
+
+Employees interact with a conversational AI that answers questions grounded in company-specific
+documents — policies, handbooks, procedures, compliance materials — while administrators
+control what information is available, to whom, and at what sensitivity level.
+
+The platform is operated at three levels:
+
+  - Super Admins — Nexa AI operators who provision and oversee all tenants
+  - Business Unit Admins — Tenant administrators who manage users and content
+  - Employees — End users who interact with the AI chat interface
+
+
+────────────────────────────────────────────────────────────────
+
+
+2. PRODUCT VISION & GOALS
+
+VISION
+
+Empower every employee with instant, accurate, and policy-compliant answers from their
+organisation's own knowledge — without burdening HR, legal, or management teams with
+repetitive queries.
+
+PRIMARY GOALS
+
+  Knowledge Democratisation    Give every employee frictionless access to official company information
+  Admin Efficiency             Reduce repetitive internal queries via self-serve AI
+  Compliance Assurance         Ensure sensitive documents are only accessible to authorised users
+  Scalability                  Support multiple independent organisations (tenants) on a single platform
+  Auditability                 Maintain a complete, immutable 90-day audit trail of all platform activity
+
+SUCCESS METRICS
+
+  - Time-to-answer for employees reduced vs. emailing HR/management
+  - Document knowledge base adoption rate per tenant
+  - Monthly active users per business unit
+  - Audit log completeness (100% coverage of defined event types)
+  - Email delivery success rate for invitations and notifications
+
+
+────────────────────────────────────────────────────────────────
+
+
+3. SYSTEM ARCHITECTURE OVERVIEW
+
+TECHNOLOGY STACK
+
+  Layer            Technology
+  Frontend         React 18, TypeScript, Vite, Tailwind CSS, shadcn/ui, Lucide icons, Recharts
+  Backend          Node.js, Express, TypeScript
+  Database         MongoDB (Mongoose ODM) with Atlas vector search
+  Queue            Redis + Bull (document processing workers)
+  AI               OpenAI GPT (primary), Anthropic Claude (upcoming), Kimi (upcoming)
+  File Storage     Cloudinary (documents, images, logos)
+  Email            Resend (transactional email, EJS templates)
+  Search           SerpAPI (Google Search integration for external context)
+  Hosting          Vercel (frontend), Railway (backend)
+
+HIGH-LEVEL ARCHITECTURE
+
+  ┌─────────────────────────────────────────────┐
+  │               Frontend (Vercel)              │
+  │   Employee Chat | Admin Dashboard | Landing  │
+  └─────────────────────┬───────────────────────┘
+                        │ HTTPS / REST API
+  ┌─────────────────────▼───────────────────────┐
+  │              Backend API (Railway)           │
+  │   Express Router → Middleware → Controllers  │
+  │   Rate Limiting | JWT Auth | CORS            │
+  └────┬──────────┬──────────┬──────────────────┘
+       │          │          │
+  ┌────▼───┐ ┌───▼────┐ ┌───▼──────────────────┐
+  │MongoDB │ │ Redis  │ │  External Services    │
+  │Atlas   │ │ Queue  │ │  OpenAI / Claude /    │
+  │        │ │        │ │  Kimi / Cloudinary /  │
+  │        │ │ Worker │ │  Resend / SerpAPI     │
+  └────────┘ └────────┘ └──────────────────────┘
+
+MULTI-TENANCY MODEL
+
+Each tenant is fully isolated at the data layer via a businessUnit field indexed on every
+collection. There is no cross-tenant data leakage — queries are always scoped to the
+requesting user's business unit. Super admins have an elevated token that bypasses this
+scoping.
+
+
+────────────────────────────────────────────────────────────────
+
+
+4. USER ROLES & PERMISSIONS
+
+4.1 ROLE HIERARCHY
+
+  Super Admin
+      └── Business Unit Admin (per tenant)
+              └── Employee (per tenant)
+
+4.2 PERMISSION MATRIX
+
+  Capability                        Employee    BU Admin    Super Admin
+  AI Chat (company docs)            Yes         Yes         Yes
+  AI Chat (external/public)         Yes         Yes         Yes
+  View own conversations            Yes         Yes         Yes
+  Share conversations               Yes         Yes         Yes
+  Upload documents                  No          Yes         Yes
+  Manage knowledge base             No          Yes         Yes
+  Invite employees                  No          Yes         Yes
+  Bulk invite via CSV               No          Yes         Yes
+  Manage departments                No          Yes         Yes
+  Manage user groups                No          Yes         Yes
+  View BU analytics                 No          Yes         Yes
+  View audit logs (BU)              No          Yes         Yes
+  Update BU branding                No          Yes         Yes
+  Force password reset              No          Yes         Yes
+  Manage all tenants                No          No          Yes
+  Cross-tenant analytics            No          No          Yes
+  Provision new tenants             No          No          Yes
+  Manage email domains              No          No          Yes
+  Review access requests            No          No          Yes
+  View all audit logs               No          No          Yes
+
+4.3 TOKEN PAYLOADS
+
+Employee Token contains:
+  - userId
+  - email
+  - businessUnit
+  - department
+  - tenantId
+  - tenantSlug
+  - tenantLogo
+  - tenantColor
+
+Admin Token contains:
+  - adminId
+  - email
+  - businessUnit
+  - tenantId
+  - isAdmin: true
+
+Super Admin Token contains:
+  - adminId
+  - email
+  - businessUnit: SUPERADMIN
+  - isSuperAdmin: true
+
+
+────────────────────────────────────────────────────────────────
+
+
+5. AUTHENTICATION & ONBOARDING FLOWS
+
+5.1 EMPLOYEE SELF-REGISTRATION
+
+  1. Employee visits the login page and clicks Sign Up
+  2. Fills in: email, password, full name, and selects their business unit
+  3. System generates a 6-digit OTP (10-minute expiry)
+  4. Verification email sent (branded per tenant)
+  5. Employee enters OTP on the verification page
+  6. Email verified → JWT token issued → welcome email sent
+  7. Redirected to the AI chat interface
+
+  Validations: Email uniqueness, password minimum length, business unit must exist and
+  be active.
+
+
+5.2 EMPLOYEE INVITE FLOW
+
+  1. BU Admin opens the Invite Employee panel and enters first name, last name, email,
+     and department
+  2. System creates an EmployeeInvite record with a hashed token (7-day expiry)
+  3. Invite email sent with a signed acceptance link
+  4. Employee clicks the link and lands on the accept-employee-invite page
+  5. Token is verified and employee sets their password
+  6. User record created → auto-login JWT token issued
+  7. Redirected to the chat interface
+
+
+5.3 BULK EMPLOYEE INVITE (CSV)
+
+  1. BU Admin opens the Invite Employee panel and switches to the Bulk Invite tab
+  2. Downloads the CSV template (columns: First Name, Last Name, Email, Department)
+  3. Fills the template with up to 200 rows
+  4. Uploads the CSV — system parses it in the browser
+  5. A preview table is shown: name, email, department
+  6. Admin clicks Send Invites
+  7. Backend processes each row:
+       - Validates email domain (if domain mapping is configured)
+       - Checks for existing users and pending invites
+       - Creates an EmployeeInvite record
+       - Sends an invite email via Resend
+  8. Results shown: green success count + red failure list with per-row reasons
+
+  Limit: Maximum 200 employees per upload. Failed rows are shown with the exact reason
+  (duplicate, wrong domain, email send failure).
+
+
+5.4 ADMIN INVITATION FLOW
+
+  1. Super Admin or existing BU Admin generates an invite for a new admin
+  2. Admin invite email sent with a 48-hour acceptance link
+  3. New admin clicks the link and lands on the accept-invite page
+  4. Token is verified and admin sets their password
+  5. AdminUser record created → auto-login JWT token issued
+  6. Redirected to the admin dashboard
+
+
+5.5 TENANT ACCESS REQUEST FLOW
+
+  1. A company representative visits the landing page and clicks Request Access
+  2. Fills in: company name, work email, phone number, employee count
+  3. A TenantRequest record is created (status: pending)
+  4. A confirmation email is sent to the requester
+  5. Super Admin receives an in-app notification and an email notification
+  6. Super Admin reviews the request on the Access Requests page
+
+  If APPROVED:
+    - A BusinessUnit document is created (auto-generated slug and tenant ID)
+    - An AdminUser is created with a temporary password (must change on first login)
+    - Tenant credentials email sent to the company contact
+    - TenantRequest status updated to "provisioned"
+
+  If REJECTED:
+    - TenantRequest status updated to "rejected" (with optional note)
+    - Rejection email sent to the requester
+
+
+5.6 PASSWORD RESET FLOW
+
+  1. User clicks Forgot Password on the login page
+  2. Enters email — system generates a reset token (SHA-256 hashed, 1-hour expiry)
+  3. Password reset email sent with a tokenised link
+  4. User clicks the link and lands on the reset-password page
+  5. Token validated — user sets a new password
+  6. Token invalidated — user redirected to login
+
+
+5.7 FIRST-LOGIN PASSWORD CHANGE (ADMIN)
+
+Admins provisioned via the access request flow receive a system-generated temporary
+password. On their first login they are prompted to set a new password before accessing
+the dashboard.
+
+
+────────────────────────────────────────────────────────────────
+
+
+6. DASHBOARD TYPES
+
+Nexa AI provides three distinct dashboard experiences tailored to each user role.
+
+
+6.1 EMPLOYEE DASHBOARD (CHAT INTERFACE)
+
+Route:     / and /user-chat
+Audience:  Employees
+
+The primary employee experience is the AI chat interface. There is no traditional dashboard
+with charts — the interface is conversational-first.
+
+Components:
+
+  - Chat home screen — Quick-start suggestions based on the employee's accessible
+    documents (latest 4 documents surfaced as prompt hints)
+  - Chat input — Text input with image attachment support
+  - Message list — Full conversation history with source citations rendered as clickable
+    pills below AI responses
+  - Typing indicator — Animated indicator while the AI processes a response
+  - Conversation panel — Left sidebar with all past conversation sessions, accessible by name
+  - Document export — AI-generated Word, Excel, PowerPoint, or PDF documents
+    downloadable directly from chat
+  - Sharing — Share an entire conversation or a single AI response with a colleague
+
+
+6.2 BUSINESS UNIT ADMIN DASHBOARD
+
+Route:     /admin/dashboard
+Audience:  BU Admins
+
+A data-rich overview of the business unit's AI usage and platform health.
+
+Metrics Cards:
+  - Total registered users (active vs. deactivated)
+  - Total documents in the knowledge base
+  - Total AI queries this month
+  - Active knowledge groups
+
+Charts and Visualisations:
+  - Chat activity over time — Daily query volume (30-day rolling line chart)
+  - Top users — Bar chart of most active employees by query count
+  - Popular documents — Most-queried documents in the knowledge base
+  - Document processing status — Breakdown of pending / processing / completed / failed
+
+Quick Actions:
+  - Upload a document
+  - Invite an employee
+  - View audit logs
+  - Manage user groups
+
+
+6.3 SUPER ADMIN DASHBOARD
+
+Route:     /super-admin/dashboard
+Audience:  Super Admins
+
+System-wide visibility across all tenants.
+
+Metrics Cards:
+  - Total tenants (active vs. inactive)
+  - Total employees across all tenants
+  - Total documents across all tenants
+  - Total AI queries platform-wide (current month)
+  - Pending access requests (highlighted if greater than 0)
+
+Charts and Visualisations:
+  - Usage by business unit — Horizontal bar chart of query volume per tenant
+  - Cross-tenant activity over time — Multi-line chart showing query trends per BU
+  - Top tenants by document count — Ranked list
+  - Access request pipeline — Count of pending / provisioned / rejected requests
+
+Quick Actions:
+  - Review access requests
+  - Provision a new tenant manually
+  - View all tenants
+  - View system audit logs
+
+
+────────────────────────────────────────────────────────────────
+
+
+7. AI CHAT INTERFACE
+
+7.1 HOW IT WORKS
+
+The chat system uses Retrieval Augmented Generation (RAG) to ground AI responses in
+company documents. When an employee sends a message:
+
+  1. User submits a query
+  2. System checks for greeting patterns and returns a custom greeting if matched
+  3. RAG retrieval: semantic and keyword search across the user's accessible documents
+  4. Access control enforced — documents filtered by:
+       - User's knowledge group memberships
+       - Document sensitivity level
+  5. Google Search (SerpAPI) runs in parallel for external context
+  6. Hybrid context string assembled:
+       - Company documents (higher priority)
+       - External search results (supplementary)
+  7. System prompt + context + conversation history sent to the AI model
+  8. Response returned with source citations
+  9. Response saved to conversation history
+
+
+7.2 CONTEXT & SOURCE CITATIONS
+
+Each AI response includes:
+  - Source pills — Clickable document references shown beneath the response
+  - External links — Google search results as supplementary footnotes
+  - Access redaction — If a shared response references a document the recipient
+    cannot access, the source is hidden with an Access Denied indicator
+
+
+7.3 RATE LIMITING
+
+  - 30 requests per minute per business unit (enforced at the API gateway level)
+  - Rate limit headers returned in every response
+
+
+7.4 STREAMING RESPONSES
+
+Public-facing chat supports Server-Sent Events (SSE) for real-time token streaming:
+  - Event types: chunk, done, error
+  - Frontend renders tokens incrementally as they arrive
+
+
+7.5 DOCUMENT EXPORT FROM CHAT
+
+Employees can request the AI to generate structured documents directly from chat:
+  - Formats: Word (DOCX), Excel (XLSX), PowerPoint (PPTX), PDF
+  - Storage: Cloudinary CDN
+  - Download: Authenticated download link valid for the session
+
+
+7.6 IMAGE ATTACHMENTS IN CHAT
+
+  - Employees can attach images to messages (uploaded via Cloudinary)
+  - Images are preserved in conversation history for follow-up context
+  - Supported in authenticated sessions only (not public chat)
+
+
+7.7 CONVERSATION MANAGEMENT
+
+  Conversation Groups    Each named session is a group containing all messages
+  Auto-titling           New conversations are auto-titled based on the first message
+  History persistence    All conversations stored in the database per user
+  Message editing        Users can edit previous messages and regenerate responses
+  Deletion               Users can delete individual conversation groups
+
+
+7.8 CONVERSATION SHARING
+
+Peer-to-peer sharing (within a Business Unit):
+  - Share an entire conversation with a named colleague
+  - Share a single AI response and its preceding question
+  - Recipient sees the conversation in their Shared with me section
+  - Sources are redacted if the recipient does not have access
+
+Public share links:
+  - Admin or employee generates a shareable link
+  - Optional expiry date or permanent access
+  - Anyone with the link can view the conversation in read-only mode
+
+
+────────────────────────────────────────────────────────────────
+
+
+8. KNOWLEDGE BASE & DOCUMENT MANAGEMENT
+
+8.1 SUPPORTED FILE FORMATS
+
+  Format        Extension    Processing
+  PDF           .pdf         Text extraction → chunking → embedding
+  Word          .docx        Text extraction → chunking → embedding
+  Excel         .xlsx        Cell extraction → chunking → embedding
+  PowerPoint    .pptx        Slide text extraction → chunking → embedding
+  Plain text    .txt         Direct chunking → embedding
+
+
+8.2 DOCUMENT PROCESSING PIPELINE
+
+  Upload → Cloudinary Storage
+      → Bull Queue (Redis)
+          → Worker: Extract text
+          → Worker: Chunk text (token-aware splitting)
+          → Worker: Generate embeddings (OpenAI)
+          → MongoDB Atlas Vector Index
+              → Status: completed
+
+Processing Statuses:
+  - pending       Queued, awaiting processing
+  - extracting    Text extraction in progress
+  - chunking      Text being split into chunks
+  - embedding     Embeddings being generated
+  - completed     Ready for RAG queries
+  - failed        Processing error (can be reprocessed)
+  - superseded    Replaced by a newer version
+
+
+8.3 DOCUMENT VERSIONING
+
+  - Each document belongs to a document series (groups all versions together)
+  - Uploading a new version supersedes the previous one
+  - RAG queries only use the latest version
+  - Version history is retained for audit purposes
+
+
+8.4 SENSITIVITY LEVELS
+
+  Level           Description
+  public          Visible to all employees in the business unit
+  internal        Visible to all active employees
+  confidential    Visible to employees in specified knowledge groups
+  restricted      Visible only to specific knowledge groups (most sensitive)
+
+
+8.5 KNOWLEDGE GROUPS (ACCESS CONTROL)
+
+Knowledge groups gate document access at a fine-grained level:
+  - Admin creates groups (e.g., Finance Team, Legal, Senior Management)
+  - Documents can be assigned to one or more groups
+  - Employees are members of zero or more groups
+  - At chat time, only documents the employee's groups have access to are retrieved
+
+
+8.6 DOCUMENT CATEGORIES
+
+BU Admins can define custom document categories (e.g., Policy, Handbook, Compliance)
+with colour coding and icons. System-provided built-in categories are also available.
+
+
+8.7 ADMIN DOCUMENT MANAGEMENT
+
+Features available to BU Admins:
+  - Drag-and-drop upload with progress indicator
+  - Filter by status, category, sensitivity level, department
+  - Pagination for large knowledge bases
+  - Reprocess failed documents
+  - Delete documents (removes from vector index)
+  - Access restriction editing per document
+  - Employee notifications on new document upload
+
+
+────────────────────────────────────────────────────────────────
+
+
+9. USER & ORGANISATION MANAGEMENT
+
+9.1 USER DIRECTORY
+
+BU Admins access a paginated, searchable table of all users in their business unit showing:
+  - Full name and avatar initial
+  - Email address
+  - Department
+  - Role (Admin or Employee)
+  - User group memberships
+  - Account status (Active / Deactivated)
+  - Activate / Deactivate action button
+
+
+9.2 USER DETAIL PAGE
+
+Each user has a dedicated detail page showing:
+  - Profile header — name, email, business unit, join date, status
+  - Department management — Reassign the user to a different department
+  - User groups — Current group memberships
+  - Chat sessions — All AI conversation sessions with title, message count,
+    and last active time
+  - Account fields — Email verified status, joined date, last updated
+  - Activate / Deactivate toggle with a confirmation dialog
+
+
+9.3 DEPARTMENTS
+
+  - BU Admins create and name departments
+  - Departments are used for document scoping and user organisation
+  - Department Detail page shows all members and linked documents
+
+
+9.4 USER GROUPS (KNOWLEDGE GROUPS)
+
+  - Fine-grained access control groups
+  - Admins add and remove members
+  - Groups are linked to sensitive documents
+  - Group memberships are visible on the User Detail page
+
+
+9.5 EMAIL DOMAIN WHITELISTING
+
+Super Admins can configure allowed email domains per business unit. When a domain
+mapping exists, employee invites and self-registration are restricted to that domain
+(e.g., only addresses ending in @uacnplc.com can join the UACN business unit).
+
+
+────────────────────────────────────────────────────────────────
+
+
+10. ANALYTICS & REPORTING
+
+10.1 BU ADMIN ANALYTICS
+
+Accessible at /admin/analytics
+
+  Metric                  Description
+  Total queries           Cumulative and monthly AI queries
+  Active users            Users who have chatted in the last 30 days
+  Document count          Total indexed documents
+  Chat activity chart     Daily query volume (30-day rolling)
+  Top users               Most active employees by query count
+  Popular documents       Most-cited documents in AI responses
+
+
+10.2 SUPER ADMIN ANALYTICS
+
+Accessible at /super-admin/analytics
+
+  Metric                     Description
+  Platform-wide totals       Total queries, users, documents, tenants
+  Usage by BU                Per-tenant query volume bar chart
+  Cross-tenant activity      Multi-line time-series chart
+  Access request pipeline    Status breakdown (pending / provisioned / rejected)
+  Top tenants                Ranked by document count and usage
+
+
+────────────────────────────────────────────────────────────────
+
+
+11. AUDIT LOGGING & COMPLIANCE
+
+11.1 OVERVIEW
+
+Every significant platform action is written to the AuditLog collection. Logs are
+immutable and auto-expire after 90 days via a MongoDB TTL (Time-To-Live) index.
+
+
+11.2 AUDITED EVENT TYPES
+
+  Event Type                            Trigger
+  admin_login                           Admin signs in
+  admin_logout                          Admin signs out
+  user_login                            Employee signs in
+  user_logout                           Employee signs out
+  user_created                          New employee account created
+  user_deleted                          Employee account deleted
+  document_upload_completed             Document finishes uploading
+  document_processing_started           Processing pipeline begins
+  document_processing_completed         Processing pipeline succeeds
+  document_processing_failed            Processing pipeline fails
+  rag_query                             Employee sends a chat message
+  rag_retrieval_empty                   RAG returns no documents for a query
+  rag_access_denied                     User attempted to access a restricted document
+  chunk_embedding_batch_completed       Embedding batch finishes
+  conversation_shared                   Conversation shared with a user
+  conversation_share_denied             Share attempt denied (access control)
+  conversation_share_revoked            Share access revoked
+  policy_created                        Policy document created
+  policy_updated                        Policy document updated
+  policy_deleted                        Policy document deleted
+
+
+11.3 AUDIT LOG FIELDS
+
+Each log entry contains:
+  - eventType       One of the event types listed above
+  - userId/adminId  Actor identifier
+  - adminEmail      Email of the admin (for admin events)
+  - businessUnit    Tenant scope
+  - action          Human-readable action description
+  - details         Extended detail string
+  - documentId      Referenced document (if applicable)
+  - metadata        Flexible key-value store for event-specific data
+  - createdAt       Timestamp (TTL field — expires after 90 days)
+
+
+11.4 AUDIT LOG FILTERS (UI)
+
+The Audit Logs page supports filtering by:
+  - Event type — Dropdown (all events, login, logout, document events, etc.)
+  - Date presets — Today, Yesterday, Last 7 days, Last 30 days
+  - Custom date range — From/to datetime pickers
+  - Full-text search — Searches admin email, action, and details fields
+
+
+────────────────────────────────────────────────────────────────
+
+
+12. NOTIFICATIONS SYSTEM
+
+12.1 IN-APP NOTIFICATIONS
+
+A bell icon in the admin navigation bar shows the unread notification count.
+
+  Notification Kind               Trigger                                    Recipient
+  document_added                  New document uploaded to knowledge base     All employees in BU with access
+  access_request_submitted        New tenant request received                 Super Admin
+  access_request_provisioned      Access request approved                     Requester (email + in-app)
+  access_request_rejected         Access request rejected                     Requester (email + in-app)
+  admin_provisioned               New admin account created                   New admin (via email)
+
+
+12.2 NOTIFICATION MODEL
+
+  recipientId       User or admin being notified
+  recipientType     user, admin, or superadmin
+  businessUnit      Tenant scope
+  kind              Notification type (see above)
+  title             Short notification title
+  body              Full notification message
+  link              Optional deep-link to the relevant page
+  read              Boolean, default false
+  readAt            Timestamp when marked as read
+
+
+12.3 NOTIFICATION API
+
+  GET  /api/v1/notifications                   Fetch all notifications for current user
+  GET  /api/v1/notifications/unread-count      Returns integer badge count
+  PATCH /api/v1/notifications/:id/read         Mark a single notification as read
+  PATCH /api/v1/notifications/read-all         Bulk mark all notifications as read
+
+
+────────────────────────────────────────────────────────────────
+
+
+13. TENANT PROVISIONING & MULTI-TENANCY
+
+13.1 TENANT STRUCTURE
+
+Each tenant represents one business unit or company division.
+
+  Field           Description
+  tenantId        Immutable UUID assigned at creation
+  name            Internal name used for data scoping
+  label           Display name shown in the UI
+  slug            URL-safe lowercase identifier
+  logo            Logo file path (Cloudinary)
+  logoHash        SHA-256 hash of the logo file for deduplication
+  isActive        Whether the tenant is active
+  contactEmail    Primary contact email
+  colorCode       Brand colour in hex (default: #ed0000)
+
+
+13.2 TENANT MANAGEMENT (SUPER ADMIN)
+
+  - List all tenants — Searchable table with user count, document count, status
+  - Create tenant — Logo upload, label, colour, contact email; auto-generates slug
+  - Update tenant — Edit any field, re-upload logo
+  - Activate/Deactivate — Toggle tenant status (deactivated tenants cannot send invites)
+  - Logo deduplication — SHA-256 hash prevents duplicate logos across tenants
+
+
+13.3 ACCESS REQUEST REVIEW
+
+Super Admins review incoming access requests on the Access Requests page:
+  - View submitted company details
+  - Approve — auto-provisions the tenant and sends admin credentials by email
+  - Reject — sends a rejection email with an optional note
+
+
+────────────────────────────────────────────────────────────────
+
+
+14. EMAIL COMMUNICATIONS
+
+All emails are sent via Resend using HTML templates. The sender email address is
+configurable via an environment variable (FROM_EMAIL).
+
+
+14.1 EMAIL TEMPLATES
+
+  Template                         Trigger                               Key Variables
+  verification                     Employee email verification           fullName, otp, businessUnit, brandColor
+  welcome                          Post-verification welcome             fullName, chatUrl, buLabel, brandColor, logoUrl
+  password-reset                   Password reset request                fullName, resetLink
+  employee-invite                  Employee invited by admin             fullName, businessUnitLabel, inviterLabel, acceptLink, expiryDays
+  admin-invite                     Admin invited by super admin          fullName, businessUnit, acceptLink
+  tenant-credentials               New tenant admin provisioned          fullName, businessUnit, email, password, loginUrl
+  document-added                   New document in knowledge base        fullName, documentTitle, businessUnit, uploadedBy
+  access-request-notification      New access request (to super admin)   companyName, workEmail, employeeCount, reviewUrl
+  access-request-received          Access request confirmation           companyName, workEmail
+  access-request-rejected          Access request rejected               companyName, note
+
+
+14.2 BRANDING IN EMAILS
+
+Welcome and verification emails are tenant-branded:
+  - Business unit name in the email subject line
+  - Brand colour applied to call-to-action buttons and accents
+  - Tenant logo included if configured
+
+
+────────────────────────────────────────────────────────────────
+
+
+15. SECURITY & ACCESS CONTROL
+
+15.1 AUTHENTICATION
+
+  - JWT Bearer tokens — All authenticated routes require a valid Bearer token
+  - Token expiry — 7 days (employee and admin tokens)
+  - Separate token namespaces — Employee tokens and admin tokens cannot be
+    used interchangeably
+  - Password hashing — bcryptjs with salt rounds
+  - OTP verification — 6-digit code, 10-minute expiry
+  - Invite token security — Raw tokens sent by email; only the SHA-256 hash
+    is stored in the database
+
+
+15.2 DOCUMENT ACCESS CONTROL
+
+Three-layer enforcement on every RAG query:
+
+  1. Business unit scope — User can only access documents from their own BU
+  2. Sensitivity level — public and internal are open to all; confidential and
+     restricted require knowledge group membership
+  3. Knowledge group membership — Document's allowed group IDs are checked
+     against the user's group memberships
+
+
+15.3 API SECURITY
+
+  - Rate limiting — 30 requests per minute per BU on chat endpoints
+  - Middleware — Auth middleware validates the JWT on every protected route
+  - Super admin gate — Super admin middleware enforces elevated privileges
+    on all provisioning routes
+  - Input validation — Request bodies are validated at the route level before
+    any processing occurs
+  - CORS — Configurable allowed origins
+
+
+15.4 DATA ISOLATION
+
+  - Every MongoDB query includes a businessUnit filter
+  - Admins cannot query users or documents from other tenants
+  - Super admin token grants platform-wide access and is handled as a
+    separate elevated credential
+
+
+15.5 AUDIT TRAIL
+
+All sensitive operations (logins, document actions, policy changes, share events)
+are logged to the immutable AuditLog collection with full actor and timestamp context.
+
+
+────────────────────────────────────────────────────────────────
+
+
+16. NEW FEATURE — AI MODEL SELECTION
+
+16.1 OVERVIEW
+
+  Feature name:   AI Model Switcher
+  Target:         Chat interface (employee-facing)
+  Priority:       High
+  Status:         Planned
+
+Currently all employee chat sessions run on a single configured OpenAI GPT model.
+This feature allows employees to switch AI models on a per-session or per-conversation
+basis from a dropdown selector in the chat interface.
+
+
+16.2 BUSINESS JUSTIFICATION
+
+  - Different models have different strengths (reasoning, tone, speed, cost)
+  - Employees may prefer a specific model for specific tasks (e.g., Claude for
+    long-form writing, Kimi for multilingual queries)
+  - Offering model choice improves user satisfaction and platform adoption
+  - Future-proofs the platform against model deprecations or cost changes
+
+
+16.3 SUPPORTED MODELS — PHASE 1
+
+  Model            Provider       Description                                                        Default
+  GPT (OpenAI)     OpenAI         Current production model — optimised for speed and general Q&A     Yes
+  Claude           Anthropic      Excellent for long-form reasoning, summarisation, nuanced writing   No
+  Kimi             Moonshot AI    Strong multilingual support and extended context handling            No
+
+
+16.4 UX DESIGN
+
+Location: Chat input bar — the model selector dropdown sits to the left of the send button.
+
+Dropdown behaviour:
+  - Selected model shown with provider name
+  - Default model (GPT) pre-selected on every new session
+  - Selection persisted per conversation group — switching mid-conversation takes
+    effect from the next message onwards
+  - A subtle divider badge appears in the message history when the model changes
+    mid-conversation: "— Switched to Claude —"
+
+
+16.5 BACKEND REQUIREMENTS
+
+Chat Route Changes
+
+The existing POST /api/v1/chat/ route will accept a new optional field:
+
+  Body:
+    messages    Array of chat messages (existing)
+    model       Optional — "gpt", "claude", or "kimi" — defaults to "gpt"
+
+Model Router Service
+
+A new modelRouter service will abstract the provider selection:
+
+  Input:   model key, system prompt, messages, options
+  Output:  AI response string
+
+  Model       SDK / API                   Environment Variable
+  GPT         openai npm package          OPENAI_API_KEY
+  Claude      @anthropic-ai/sdk           ANTHROPIC_API_KEY
+  Kimi        REST API (Moonshot)         KIMI_API_KEY
+
+New Environment Variables Required:
+
+  ANTHROPIC_API_KEY       Anthropic Claude API key
+  KIMI_API_KEY            Moonshot Kimi API key
+  KIMI_API_BASE_URL       Kimi API base URL (https://api.moonshot.cn/v1)
+
+Model Configuration per Tenant (Future Phase)
+
+A future iteration will allow Super Admins to configure which models are enabled per
+tenant. For Phase 1, all three models are available to all tenants.
+
+
+16.6 CONVERSATION HISTORY CHANGES
+
+The message schema will be updated to store which AI model generated each assistant
+response. This allows historical conversations to display which model was used per reply.
+
+
+16.7 AUDIT LOGGING
+
+Model usage will be captured in the rag_query audit event metadata including:
+  - model used (gpt, claude, or kimi)
+  - number of context documents retrieved
+  - number of external search results included
+
+
+16.8 ACCEPTANCE CRITERIA
+
+  AC-1    A model selector dropdown is visible in the chat input bar
+  AC-2    GPT is pre-selected by default on every new conversation
+  AC-3    Selecting Claude or Kimi routes the next message to the correct provider API
+  AC-4    RAG context (company documents) is passed to all three models identically
+  AC-5    A model switch mid-conversation shows a divider badge in message history
+  AC-6    The selected model is stored on each assistant message in the database
+  AC-7    Model selection is included in the rag_query audit log metadata
+  AC-8    If a provider API is unavailable, a clear error is shown and GPT is used as fallback
+  AC-9    The model selector does not appear on the public (unauthenticated) chat page
+
+
+16.9 IMPLEMENTATION PLAN
+
+Phase 1 — Backend
+  1. Install Anthropic SDK and configure Kimi REST client
+  2. Create modelRouter service with provider abstraction
+  3. Update POST /api/v1/chat/ to accept and route the model parameter
+  4. Update the conversation message schema to store the model field
+  5. Update rag_query audit log to include model in metadata
+  6. Add ANTHROPIC_API_KEY and KIMI_API_KEY to Railway environment variables
+
+Phase 2 — Frontend
+  1. Add model selector component to the chat input bar
+  2. Persist the selected model in component state, passed with each message send
+  3. Store model preference in localStorage for cross-session persistence
+  4. Render model switch divider badge in the message list
+  5. Update the send-message API call to include the model parameter
+
+
+────────────────────────────────────────────────────────────────
+
+
+17. EXTERNAL INTEGRATIONS
+
+  Service              Purpose                                      Configuration
+  OpenAI               GPT model for AI chat responses              OPENAI_API_KEY, OPEN_AI_MODEL
+  Anthropic            Claude model (new)                           ANTHROPIC_API_KEY
+  Moonshot AI (Kimi)   Kimi model (new)                             KIMI_API_KEY, KIMI_API_BASE_URL
+  SerpAPI              Google Search for external context           SEARCH_API_KEY
+  Cloudinary           Document and image storage / CDN             CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET
+  Resend               Transactional email delivery                 RESEND_API_KEY, FROM_EMAIL
+  MongoDB Atlas        Primary database + vector search index       MONGODB_URI
+  Redis                Document processing queue (Bull)             REDIS_HOST, REDIS_PORT
+
+
+────────────────────────────────────────────────────────────────
+
+
+18. NON-FUNCTIONAL REQUIREMENTS
+
+18.1 PERFORMANCE
+
+  - AI chat response time: under 5 seconds (95th percentile)
+  - Document processing: under 2 minutes for a standard PDF (under 50 pages)
+  - API response time for non-AI routes: under 500ms (95th percentile)
+  - Frontend initial load: under 3 seconds on a 4G connection
+
+
+18.2 AVAILABILITY
+
+  - Target uptime: 99.5% monthly
+  - Railway auto-restarts the backend on crash
+  - MongoDB Atlas managed replication for data durability
+
+
+18.3 SCALABILITY
+
+  - Multi-tenant data model scales horizontally (each tenant isolated by businessUnit index)
+  - Redis Bull queue for async document processing (workers scale independently)
+  - Cloudinary CDN for static asset delivery globally
+
+
+18.4 DATA RETENTION
+
+  - Audit logs: 90 days (MongoDB TTL index, auto-deleted)
+  - Conversation history: Indefinite (until user deletes)
+  - Documents: Indefinite (until admin deletes)
+  - Invite tokens: Expire per configuration (7 days for employees, 48 hours for admins)
+
+
+18.5 COMPLIANCE
+
+  - Immutable audit logs with 90-day retention
+  - Role-based access control enforced at the API layer
+  - Sensitive documents gated by knowledge group membership
+  - Passwords never stored in plaintext (hashed with bcryptjs)
+  - Invite tokens hashed before storage — only the hash is in the DB, the raw token
+    is only ever sent by email
+
+
+18.6 BROWSER SUPPORT
+
+  - Chrome 110+, Firefox 110+, Safari 16+, Edge 110+
+  - Responsive design: desktop-first, mobile-compatible
+
+
+────────────────────────────────────────────────────────────────
+
+
+19. DATA MODELS REFERENCE
+
+USERS
+
+  Model       Collection    Key Fields
+  User        users         email, fullName, businessUnit, department, password (hashed), emailVerified, isActive
+  AdminUser   adminusers    email, fullName, businessUnit, password (hashed), mustChangePassword, isActive
+
+AUTHENTICATION
+
+  Model            Collection         Key Fields
+  AdminInvite      admininvites       email, businessUnit, token (hashed), status, expiresAt (TTL)
+  EmployeeInvite   employeeinvites    email, businessUnit, department, token (hashed), status, expiresAt (TTL)
+
+CONVERSATIONS
+
+  Model                 Collection              Key Fields
+  Conversation          userconversations        userId (unique), businessUnit, conversationGroups array
+  SharedConversation    sharedconversations      conversationGroupId, sharedByUserId, sharedWithUserId, messageIndex
+  ShareLink             sharelinks               conversationId, createdBy, businessUnit, expiresAt
+
+DOCUMENTS
+
+  Model               Collection            Key Fields
+  RagDocument         ragdocuments          title, businessUnit, sensitivityLevel, processingStatus, allowedGroupIds, version
+  DocumentChunk       documentchunks        ragDocumentId, chunkIndex, text, embedding
+  UserDocument        userdocuments         userId, conversationId, cloudinaryUrl
+  DocumentCategory    documentcategories    businessUnit, name, builtIn, color, icon
+
+ORGANISATION
+
+  Model                      Collection                    Key Fields
+  BusinessUnit               businessunits                 tenantId, name, label, slug, logo, colorCode, isActive
+  Department                 departments                   businessUnit, name, description
+  KnowledgeGroup             knowledgegroups               businessUnit, name, memberUserIds array
+  BusinessUnitEmailMapping   businessunitemailmappings      businessUnit, emailDomain
+
+PLATFORM OPERATIONS
+
+  Model           Collection       Key Fields
+  AuditLog        auditlogs        eventType, userId/adminId, businessUnit, action, createdAt (TTL 90 days)
+  Notification    notifications    recipientId, kind, title, body, read
+  TenantRequest   tenantrequests   companyName, workEmail, status, provisionedTenantId
+  Policy          policies         businessUnit, title, category, content
+
+
+────────────────────────────────────────────────────────────────
+
+
+20. API SURFACE REFERENCE
+
+BASE URL
+
+  Production:    https://nexa-api.railway.app
+  Local:         http://localhost:4000
+
+ROUTE GROUPS
+
+  Prefix                          Description                                    Auth
+  /api/v1/auth                    Employee authentication                        Public / JWT
+  /api/v1/admin/auth              Admin authentication & user management         Admin JWT
+  /api/v1/chat                    AI chat (authenticated + public)               JWT / Public
+  /api/v1/conversations           Conversation CRUD & sharing                    JWT
+  /api/v1/admin/documents         Knowledge base document management             Admin JWT
+  /api/v1/admin/user-groups       Knowledge group management                     Admin JWT
+  /api/v1/admin/audit-logs        Audit log queries                              Admin JWT
+  /api/v1/analytics               Usage analytics                                Admin JWT
+  /api/v1/notifications           In-app notifications                           JWT
+  /api/v1/provisioning            Tenant provisioning                            Super Admin JWT
+  /api/v1/employee-invite         Employee invite acceptance                     Public (token)
+  /api/v1/public                  Public-facing endpoints                        Public
+  /health                         Health check                                   Public
+
+
+────────────────────────────────────────────────────────────────
+
+
+21. ENVIRONMENT CONFIGURATION
+
+BACKEND ENVIRONMENT VARIABLES
+
+  Variable                         Description                              Required
+  PORT                             Server port (default 4000)               No
+  MONGODB_URI                      MongoDB Atlas connection string           Yes
+  NEXA_AI_JWT_SECRET               JWT signing secret                       Yes
+  OPENAI_API_KEY                   OpenAI API key                           Yes
+  OPEN_AI_MODEL                    OpenAI model ID (e.g. gpt-4o-mini)       No
+  ANTHROPIC_API_KEY                Anthropic Claude API key (new)           For Claude
+  KIMI_API_KEY                     Moonshot Kimi API key (new)              For Kimi
+  KIMI_API_BASE_URL                Kimi API base URL                        For Kimi
+  RESEND_API_KEY                   Resend email API key                     Yes
+  FROM_EMAIL                       Sender email address                     Yes
+  FRONTEND_URL                     Frontend base URL (for email links)      Yes
+  SEARCH_API_KEY                   SerpAPI key for Google search            No
+  SEARCH_API_PROVIDER              Search provider (serpapi)                No
+  CLOUDINARY_CLOUD_NAME            Cloudinary account name                  Yes
+  CLOUDINARY_API_KEY               Cloudinary API key                       Yes
+  CLOUDINARY_API_SECRET            Cloudinary API secret                    Yes
+  REDIS_HOST                       Redis host                               Yes
+  REDIS_PORT                       Redis port                               Yes
+  SUPERADMIN_NOTIFICATION_EMAIL    Super admin notification inbox           No
+  SEED_SUPERADMIN_EMAIL            Super admin seed email                   Dev only
+  SEED_SUPERADMIN_PASSWORD         Super admin seed password                Dev only
+
+FRONTEND ENVIRONMENT VARIABLES
+
+  Variable         Description
+  VITE_API_URL     Backend API base URL
+
+
+────────────────────────────────────────────────────────────────
+
+
+22. GLOSSARY
+
+  Term                  Definition
+  Business Unit (BU)    A tenant — one company or division on the platform
+  Tenant                Synonymous with Business Unit
+  Knowledge Base        The collection of documents uploaded by a BU admin
+  RAG                   Retrieval Augmented Generation — technique of grounding AI responses
+                        in specific documents
+  Chunk                 A segment of a document (typically 200–500 tokens) stored with an
+                        embedding vector
+  Embedding             A numerical vector representation of text used for semantic
+                        similarity search
+  Knowledge Group       A named set of users who share access to specific documents
+  Sensitivity Level     Document access tier: public, internal, confidential, restricted
+  Conversation Group    A named chat session containing all messages between a user and the AI
+  Super Admin           A Nexa AI platform operator with cross-tenant access
+  BU Admin              An administrator for a single business unit tenant
+  Employee              An end user who chats with the AI
+  Audit Log             An immutable timestamped record of a significant platform action
+  TTL Index             MongoDB Time-To-Live index that auto-deletes documents after a set
+                        duration
+  SSE                   Server-Sent Events — HTTP streaming protocol for real-time AI token
+                        delivery
+  JWT                   JSON Web Token — signed bearer token used for authentication
+  OTP                   One-Time Password — 6-digit code sent by email for verification
+  Slug                  URL-safe lowercase identifier derived from a business unit name
+  Model Switcher        New feature allowing employees to choose between GPT, Claude, and Kimi
+
+
+────────────────────────────────────────────────────────────────
+
+Document prepared by the Nexa AI Product Team.
+For questions contact the engineering lead or product owner.
