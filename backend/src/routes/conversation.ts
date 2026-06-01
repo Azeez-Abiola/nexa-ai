@@ -1387,7 +1387,12 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
     }
   } catch (error) {
     console.error("Message stream error:", error);
-    res.status(500).json({ error: "Internal server error" });
+    if (res.headersSent) {
+      res.write(`data: ${JSON.stringify({ error: "Failed to generate response", done: true })}\n\n`);
+      res.end();
+    } else {
+      res.status(500).json({ error: "Internal server error" });
+    }
   }
 });
 
