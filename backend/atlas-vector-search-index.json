@@ -8,7 +8,7 @@
         {
           "type": "vector",
           "path": "embedding",
-          "numDimensions": 1536,
+          "numDimensions": 512,
           "similarity": "cosine"
         },
         {
@@ -39,7 +39,7 @@
         {
           "type": "vector",
           "path": "embedding",
-          "numDimensions": 1536,
+          "numDimensions": 512,
           "similarity": "cosine"
         },
         {
