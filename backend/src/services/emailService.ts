@@ -152,6 +152,34 @@ export async function sendEmployeeInviteEmail(
   }
 }
 
+/** Notify a user they were @mentioned in a conversation. */
+export async function sendConversationMentionEmail(opts: {
+  mentionedEmail: string;
+  mentionedName: string;
+  mentionerName: string;
+  conversationTitle: string;
+  chatUrl: string;
+}): Promise<void> {
+  try {
+    const html = await renderTemplate("conversation-shared", {
+      recipientName: opts.mentionedName,
+      senderName: opts.mentionerName,
+      conversationTitle: opts.conversationTitle,
+      businessUnit: "",
+      chatUrl: opts.chatUrl,
+    });
+    const subject = `${opts.mentionerName} mentioned you in a Nexa AI conversation`;
+    // Override the template's generic copy with a mention-specific one inline
+    const mentionHtml = html.replace(
+      "shared a conversation with you on Nexa AI",
+      "mentioned you in a conversation on Nexa AI. The conversation has been added to your <strong>Shared Conversations</strong> on Nexa AI."
+    );
+    await sendEmail(opts.mentionedEmail, subject, mentionHtml);
+  } catch (error) {
+    console.error(`[EmailService] Failed to send mention email to ${opts.mentionedEmail}:`, error);
+  }
+}
+
 /** Send access-request email to the sharer with Accept / Decline links. */
 export async function sendConversationAccessRequestEmail(opts: {
   sharerEmail: string;

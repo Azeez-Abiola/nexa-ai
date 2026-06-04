@@ -243,6 +243,14 @@ export const App: React.FC = () => {
   const [isSuggestionsLoading, setIsSuggestionsLoading] = useState(false);
   const [accessRequestStatus, setAccessRequestStatus] = useState<Record<string, 'idle'|'pending'|'accepted'|'rejected'>>({});
 
+  // @mention state
+  const [buUsers, setBuUsers] = useState<{_id: string; fullName: string; email: string}[]>([]);
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [pendingMentions, setPendingMentions] = useState<{userId: string; name: string}[]>([]);
+  const [mentionedConversations, setMentionedConversations] = useState<{mentionId: string; mentionerName: string; conversation: Conversation}[]>([]);
+  const [isSharedConvCollapsed, setIsSharedConvCollapsed] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
   const [folders, setFolders] = useState<ConversationFolder[]>([]);
   const [expandedFolderIds, setExpandedFolderIds] = useState<Set<string>>(new Set());
   const [folderMenuId, setFolderMenuId] = useState<string | null>(null);
@@ -413,8 +421,11 @@ export const App: React.FC = () => {
             if (window.location.pathname === "/" || window.location.pathname === "/login") {
               window.history.replaceState(null, "", "/user-chat");
             }
-            loadConversations(savedToken);
+            const onSharePath = window.location.pathname.startsWith("/shared/");
+            loadConversations(savedToken, onSharePath);
             fetchFolders(savedToken);
+            fetchMentionedConversations(savedToken);
+            fetchBuUsers(savedToken);
             if (!localStorage.getItem("nexa-avatar")) {
               setShowAvatarPicker(true);
             }
@@ -520,6 +531,36 @@ export const App: React.FC = () => {
     fetchSuggestions();
   }, [user?.businessUnit, isAuthenticated]);
 
+  async function fetchMentionedConversations(authToken?: string) {
+    const t = authToken || token;
+    if (!t) return;
+    try {
+      const { data } = await axios.get("/api/v1/conversations/mentioned-in-me", { headers: { Authorization: `Bearer ${t}` } });
+      setMentionedConversations(data.mentions || []);
+    } catch { /* silent */ }
+  }
+
+  async function fetchBuUsers(authToken?: string) {
+    const t = authToken || token;
+    if (!t) return;
+    try {
+      const { data } = await axios.get("/api/v1/conversations/mentionable-users", { headers: { Authorization: `Bearer ${t}` } });
+      setBuUsers(data.users || []);
+    } catch { /* silent */ }
+  }
+
+  async function applyPendingMentions(convId: string) {
+    if (pendingMentions.length === 0 || !token) return;
+    const toApply = [...pendingMentions];
+    setPendingMentions([]);
+    for (const m of toApply) {
+      try {
+        await axios.post(`/api/v1/conversations/${convId}/mention`, { mentionedUserId: m.userId }, { headers: { Authorization: `Bearer ${token}` } });
+        fetchMentionedConversations();
+      } catch { /* silent — duplicate mention etc */ }
+    }
+  }
+
   async function handleAccessRequest(convId: string, sharerId: string) {
     if (!token) return;
     setAccessRequestStatus(prev => ({ ...prev, [convId]: 'pending' }));
@@ -599,7 +640,7 @@ export const App: React.FC = () => {
     setActiveMenuId(null);
   }
 
-  async function loadConversations(authToken: string) {
+  async function loadConversations(authToken: string, skipAutoSelect = false) {
     setIsConversationsLoading(true);
     try {
       const { data } = await axios.get<{ conversations: Conversation[]; total: number; hasMore: boolean }>(
@@ -610,7 +651,7 @@ export const App: React.FC = () => {
       setConversationsHasMore(data.hasMore ?? false);
       setConversationsOffset(20);
 
-      if (data.conversations.length > 0) {
+      if (!skipAutoSelect && data.conversations.length > 0) {
         const savedConversationId = localStorage.getItem("lastConversationId");
         const lastConversation = savedConversationId
           ? data.conversations.find(c => c._id === savedConversationId)
@@ -679,8 +720,10 @@ export const App: React.FC = () => {
       setIsConversationsLoading(true);
       axios.defaults.headers.common["Authorization"] = `Bearer ${authToken}`;
       applyTenantBrandFromSession(authUser.tenantColor);
-      await loadConversations(authToken);
+      await loadConversations(authToken, true); // don't auto-select; share link effect sets it
       fetchFolders(authToken);
+      fetchMentionedConversations(authToken);
+      fetchBuUsers(authToken);
       navigate(postLoginPath, { replace: true });
     } else {
       window.history.pushState(null, "", "/user-chat");
@@ -689,6 +732,8 @@ export const App: React.FC = () => {
       applyTenantBrandFromSession(authUser.tenantColor);
       await loadConversations(authToken);
       fetchFolders(authToken);
+      fetchMentionedConversations(authToken);
+      fetchBuUsers(authToken);
       if (!localStorage.getItem("nexa-avatar")) {
         setShowAvatarPicker(true);
       }
@@ -1331,6 +1376,7 @@ export const App: React.FC = () => {
       // Stream AI response
       try {
         const finalConversation = await streamResponse(createData.data.conversation._id, trimmed, filesToSend, selectedModel);
+        applyPendingMentions(createData.data.conversation._id);
 
         // Use the final conversation data from the stream response
         if (finalConversation) {
@@ -1357,6 +1403,7 @@ export const App: React.FC = () => {
     // Stream AI response
     try {
       const finalConversation = await streamResponse(currentConversation._id, trimmed, filesToSend, selectedModel);
+      applyPendingMentions(currentConversation._id);
 
       // Use the final conversation data from the stream response
       if (finalConversation) {
@@ -1620,6 +1667,32 @@ export const App: React.FC = () => {
             />
           )}
           <div className="sidebar-conversations-v2">
+            {mentionedConversations.length > 0 && (
+              <div className="folder-group">
+                <div className="folder-header" onClick={() => setIsSharedConvCollapsed(!isSharedConvCollapsed)}>
+                  <BiChevronDown size={14} style={{ transform: isSharedConvCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)', transition: 'transform 0.2s', flexShrink: 0 }} />
+                  <BiMessageRounded size={14} style={{ flexShrink: 0, color: 'var(--brand-color, #ed0000)' }} />
+                  <span className="folder-name">Shared Conversations</span>
+                  <span className="folder-count">{mentionedConversations.length}</span>
+                </div>
+                {!isSharedConvCollapsed && mentionedConversations.map(m => (
+                  <div
+                    key={String(m.mentionId)}
+                    className={`sidebar-conversation-v2 folder-conv ${currentConversation?._id === String(m.conversation._id) ? 'active' : ''}`}
+                    onClick={() => {
+                      setCurrentConversation({ ...m.conversation, _id: String(m.conversation._id) });
+                      if (location.pathname !== '/user-chat') navigate('/user-chat');
+                      if (window.innerWidth <= 768) setSidebarOpen(false);
+                    }}
+                    style={{ cursor: 'pointer' }}
+                  >
+                    <div className="conv-title-v2">{m.conversation.title}</div>
+                    <div style={{ fontSize: 10, opacity: 0.6, paddingLeft: 2 }}>From {m.mentionerName}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+
             {sharedConversations.length > 0 && (
               <div className="folder-group">
                 <div
@@ -1655,7 +1728,10 @@ export const App: React.FC = () => {
 
             {/* ── Folders ── */}
             {(() => {
-              const allFolderedIds = new Set(folders.flatMap(f => f.conversationIds));
+              const allFolderedIds = new Set([
+                ...folders.flatMap(f => f.conversationIds),
+                ...mentionedConversations.map(m => String(m.conversation._id)),
+              ]);
               return (
                 <>
                   <div className="sidebar-section-label retractable" style={{ justifyContent: 'space-between' }}>
@@ -2423,18 +2499,61 @@ export const App: React.FC = () => {
                     <BiMicrophone style={{ color: isRecording ? 'var(--brand-color, #ed0000)' : 'inherit' }} />
                   </button>
                 </div>
+                {mentionQuery !== null && (
+                  <div className="mention-dropdown">
+                    {buUsers
+                      .filter(u => u.fullName.toLowerCase().includes(mentionQuery.toLowerCase()) || u.email.toLowerCase().includes(mentionQuery.toLowerCase()))
+                      .slice(0, 6)
+                      .map(u => (
+                        <button
+                          key={u._id}
+                          className="mention-option"
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            // Replace @partial with @FullName in input
+                            const atIdx = input.lastIndexOf('@');
+                            const newInput = input.slice(0, atIdx) + `@${u.fullName} `;
+                            setInput(newInput);
+                            setPendingMentions(prev => prev.some(m => m.userId === u._id) ? prev : [...prev, { userId: u._id, name: u.fullName }]);
+                            setMentionQuery(null);
+                          }}
+                        >
+                          <span className="mention-avatar">{u.fullName.charAt(0).toUpperCase()}</span>
+                          <span className="mention-name">{u.fullName}</span>
+                          <span className="mention-email">{u.email}</span>
+                        </button>
+                      ))}
+                    {buUsers.filter(u => u.fullName.toLowerCase().includes(mentionQuery.toLowerCase())).length === 0 && (
+                      <div className="mention-empty">No users found</div>
+                    )}
+                  </div>
+                )}
                 <textarea
                   className="footer-textarea-v2"
-                  placeholder="Send a message..."
+                  placeholder="Send a message... (type @ to mention someone)"
                   value={input}
                   onChange={(e) => {
-                    setInput(e.target.value);
+                    const val = e.target.value;
+                    setInput(val);
                     autoGrowTextarea(e.target, 200);
+                    // Detect @mention
+                    const cursor = e.target.selectionStart ?? val.length;
+                    const textBefore = val.slice(0, cursor);
+                    const match = textBefore.match(/@([^@\s]*)$/);
+                    if (match) {
+                      setMentionQuery(match[1]);
+                    } else {
+                      setMentionQuery(null);
+                    }
                   }}
                   ref={(el) => {
+                    (textareaRef as any).current = el;
                     if (el && !input) el.style.height = "";
                   }}
-                  onKeyDown={handleKeyDown}
+                  onKeyDown={(e) => {
+                    if (mentionQuery !== null && e.key === 'Escape') { setMentionQuery(null); return; }
+                    handleKeyDown(e);
+                  }}
                   rows={1}
                 />
                 <button
@@ -2916,6 +3035,39 @@ export const App: React.FC = () => {
         .folder-submenu-empty {
           padding: 6px 14px; font-size: 11px; color: #9ca3af; display: block;
         }
+
+        /* @mention dropdown */
+        .mention-dropdown {
+          position: absolute;
+          bottom: calc(100% + 8px);
+          left: 0; right: 0;
+          background: white;
+          border: 1px solid #e5e7eb;
+          border-radius: 12px;
+          box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+          z-index: 200;
+          overflow: hidden;
+          max-height: 220px;
+          overflow-y: auto;
+        }
+        .dark-theme .mention-dropdown { background: #1e1e1e; border-color: #333; }
+        .mention-option {
+          display: flex; align-items: center; gap: 8px;
+          width: 100%; padding: 9px 14px;
+          border: none; background: transparent; cursor: pointer; text-align: left;
+        }
+        .mention-option:hover { background: #f3f4f6; }
+        .dark-theme .mention-option:hover { background: rgba(255,255,255,0.07); }
+        .mention-avatar {
+          width: 28px; height: 28px; border-radius: 8px; flex-shrink: 0;
+          background: var(--brand-color, #ed0000); color: #fff;
+          display: flex; align-items: center; justify-content: center;
+          font-size: 12px; font-weight: 700;
+        }
+        .mention-name { font-size: 13px; font-weight: 700; color: #111; flex: 1; }
+        .dark-theme .mention-name { color: #f3f4f6; }
+        .mention-email { font-size: 11px; color: #9ca3af; }
+        .mention-empty { padding: 10px 14px; font-size: 12px; color: #9ca3af; text-align: center; }
 
         /* Dark theme overrides for folders */
         .dark-theme .folder-header { color: rgba(255,255,255,0.75); }
@@ -4696,6 +4848,7 @@ export const App: React.FC = () => {
         }
 
         .footer-input-container-v2 {
+          position: relative;
           width: 100%;
           max-width: 800px;
           min-width: 0;
