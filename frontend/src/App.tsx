@@ -340,6 +340,33 @@ export const App: React.FC = () => {
     return false;
   };
 
+  // Intercept 401s globally — a stale/expired token should force re-login.
+  // We do this once on mount, not on every render.
+  useEffect(() => {
+    const interceptorId = axios.interceptors.response.use(
+      (res) => res,
+      (error) => {
+        if (error?.response?.status === 401) {
+          const currentPath = window.location.pathname;
+          // Preserve share links so the user lands back on them after re-auth
+          try {
+            if (currentPath.startsWith("/shared/")) {
+              sessionStorage.setItem("post-login-redirect", currentPath);
+            }
+          } catch { /* ignore */ }
+          localStorage.removeItem("nexa-token");
+          localStorage.removeItem("nexa-user");
+          delete axios.defaults.headers.common["Authorization"];
+          setIsAuthenticated(false);
+          setToken(null);
+          setUser(null);
+        }
+        return Promise.reject(error);
+      }
+    );
+    return () => axios.interceptors.response.eject(interceptorId);
+  }, []);
+
   useEffect(() => {
     const initApp = async () => {
       const savedToken = localStorage.getItem("nexa-token");
@@ -949,6 +976,9 @@ export const App: React.FC = () => {
         navigate("/user-chat", { replace: true });
       } catch (err: any) {
         if (cancelled) return;
+        // 401 means the interceptor already cleared the token and will re-render
+        // to the login screen — no need to alert or navigate manually.
+        if (err?.response?.status === 401) return;
         const msg =
           err?.response?.data?.error ||
           "This share link is invalid or you don't have permission to view it.";
