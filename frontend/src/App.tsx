@@ -627,12 +627,12 @@ export const App: React.FC = () => {
     } else if (authUser.isAdmin === true) {
       window.location.href = "/admin/dashboard";
     } else if (postLoginPath && postLoginPath.startsWith("/shared/")) {
-      window.history.pushState(null, "", postLoginPath);
       setIsConversationsLoading(true);
       axios.defaults.headers.common["Authorization"] = `Bearer ${authToken}`;
       applyTenantBrandFromSession(authUser.tenantColor);
       await loadConversations(authToken);
       fetchFolders(authToken);
+      navigate(postLoginPath, { replace: true });
     } else {
       window.history.pushState(null, "", "/user-chat");
       setIsConversationsLoading(true);
@@ -1561,6 +1561,12 @@ export const App: React.FC = () => {
             </button>
           </div>
 
+          {(folderMenuId || activeMenuId) && (
+            <div
+              style={{ position: 'fixed', inset: 0, zIndex: 90 }}
+              onClick={() => { setFolderMenuId(null); setActiveMenuId(null); setFolderSubMenuConvId(null); }}
+            />
+          )}
           <div className="sidebar-conversations-v2">
             {sharedConversations.length > 0 ? (
               <>
@@ -1600,7 +1606,7 @@ export const App: React.FC = () => {
                 <>
                   <div className="sidebar-section-label retractable" style={{ justifyContent: 'space-between' }}>
                     <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                      <MdFolder size={13} />
+                      <MdFolder size={14} style={{ color: 'var(--brand-color, #ed0000)' }} />
                       Folders
                     </span>
                     <button
@@ -1644,7 +1650,9 @@ export const App: React.FC = () => {
                           })}
                         >
                           <BiChevronDown size={14} style={{ transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)', transition: 'transform 0.2s', flexShrink: 0 }} />
-                          {isExpanded ? <MdFolderOpen size={14} style={{ flexShrink: 0 }} /> : <MdFolder size={14} style={{ flexShrink: 0 }} />}
+                          {isExpanded
+                            ? <MdFolderOpen size={15} style={{ flexShrink: 0, color: 'var(--brand-color, #ed0000)' }} />
+                            : <MdFolder size={15} style={{ flexShrink: 0, color: 'var(--brand-color, #ed0000)' }} />}
                           {renamingFolderId === folder._id ? (
                             <input
                               autoFocus
@@ -2831,6 +2839,18 @@ export const App: React.FC = () => {
         .folder-submenu-empty {
           padding: 6px 14px; font-size: 11px; color: #9ca3af; display: block;
         }
+
+        /* Dark theme overrides for folders */
+        .dark-theme .folder-header { color: rgba(255,255,255,0.75); }
+        .dark-theme .folder-header:hover { background: rgba(255,255,255,0.08); }
+        .dark-theme .folder-name-input { background: #2a2a2a; border-color: #444; color: #fff; }
+        .dark-theme .folder-name-input:focus { border-color: var(--brand-color, #ed0000); }
+        .dark-theme .folder-submenu { background: #2a2a2a; border-top-color: rgba(255,255,255,0.08); }
+        .dark-theme .folder-submenu button { color: rgba(255,255,255,0.8); }
+        .dark-theme .folder-submenu button:hover { background: rgba(255,255,255,0.08); }
+        .dark-theme .conv-dropdown { background: #1e1e1e; border-color: #333; }
+        .dark-theme .conv-dropdown button { color: rgba(255,255,255,0.8); }
+        .dark-theme .conv-dropdown button:hover { background: rgba(255,255,255,0.08); color: var(--brand-color, #ed0000); }
 
         /* Shared-with-me sidebar list */
         .shared-with-me-list {

@@ -152,6 +152,28 @@ export async function sendEmployeeInviteEmail(
   }
 }
 
+/** Notify a user that a colleague shared a conversation with them. Fire-and-forget. */
+export async function sendConversationSharedEmail(
+  recipientEmail: string,
+  recipientName: string,
+  senderName: string,
+  conversationTitle: string,
+  businessUnit: string
+): Promise<void> {
+  try {
+    const html = await renderTemplate("conversation-shared", {
+      recipientName,
+      senderName,
+      conversationTitle,
+      businessUnit,
+      chatUrl: `${FRONTEND_URL}/user-chat`,
+    });
+    await sendEmail(recipientEmail, `${senderName} shared a conversation with you on Nexa AI`, html);
+  } catch (error) {
+    console.error(`[EmailService] Failed to send share notification to ${recipientEmail}:`, error);
+  }
+}
+
 /**
  * Notify a single employee that a new document is available in their knowledge base.
  * Called in a fire-and-forget loop — never throws (errors are swallowed and logged).

@@ -7,6 +7,7 @@ import { ShareLink } from "../models/ShareLink";
 import { RagDocument } from "../models/RagDocument";
 import { KnowledgeGroup } from "../models/KnowledgeGroup";
 import { logEvent } from "./auditService";
+import { sendConversationSharedEmail } from "./emailService";
 
 /** Placeholder shown to a recipient on assistant messages whose cited sources they aren't authorised to see. */
 const REDACTION_PLACEHOLDER =
@@ -241,6 +242,17 @@ export async function shareConversation(
       messageIndex: normalizedIndex
     }
   });
+
+  // Fire-and-forget email — never block the share response on delivery
+  const senderUser = await User.findById(senderUserId).select("fullName email").lean();
+  const senderLabel = senderUser?.fullName || senderUser?.email || "A colleague";
+  sendConversationSharedEmail(
+    recipient.email,
+    recipient.fullName || recipient.email,
+    senderLabel,
+    group.title,
+    senderBusinessUnit
+  );
 
   return {
     success: true,
