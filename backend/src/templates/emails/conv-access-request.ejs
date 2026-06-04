@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Conversation access request</title>
+</head>
+<body style="margin:0;padding:0;background:#f0f0f0;font-family:Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f0f0;padding:32px 0;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;border-radius:8px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.08);">
+          <tr>
+            <td style="background:linear-gradient(135deg,#ed0000 0%,#a00000 100%);padding:40px 32px;">
+              <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td width="60" style="vertical-align:middle;">
+                    <img src="<%= nexaLogoUrl %>" alt="Nexa" width="45" style="display:block;border-radius:8px;background:#fff;padding:6px;object-fit:contain;" />
+                  </td>
+                  <td style="vertical-align:middle;padding-left:12px;">
+                    <h1 style="color:#fff;margin:0;font-size:20px;font-weight:700;">Conversation access request</h1>
+                    <p style="color:rgba(255,255,255,0.85);margin:4px 0 0;font-size:13px;">Nexa AI · <%= businessUnit %></p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="background:#f9f9f9;padding:40px 32px;">
+              <p style="color:#333;font-size:16px;margin:0 0 12px;">Hi <%= sharerName %>,</p>
+              <p style="color:#555;font-size:15px;line-height:1.6;margin:0 0 20px;">
+                <strong><%= requesterName %></strong> (<%= requesterEmail %>) is requesting access to continue the conversation you shared with them on Nexa AI.
+              </p>
+              <table width="100%" cellpadding="0" cellspacing="0" style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:28px;">
+                <tr>
+                  <td style="padding:20px 24px;">
+                    <p style="color:#999;font-size:11px;text-transform:uppercase;letter-spacing:0.08em;margin:0 0 4px;">Conversation</p>
+                    <p style="color:#111;font-size:16px;font-weight:700;margin:0;">"<%= conversationTitle %>"</p>
+                  </td>
+                </tr>
+              </table>
+              <p style="color:#555;font-size:15px;line-height:1.6;margin:0 0 28px;">
+                If you accept, they will receive a copy of this conversation in their Nexa AI account and can continue asking questions from where it left off.
+              </p>
+              <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td align="center" style="padding:8px 0 24px;">
+                    <a href="<%= acceptUrl %>" style="display:inline-block;background:#16a34a;color:#fff;padding:12px 28px;text-decoration:none;border-radius:6px;font-size:14px;font-weight:700;margin-right:12px;">
+                      ✓ Accept
+                    </a>
+                    <a href="<%= rejectUrl %>" style="display:inline-block;background:#dc2626;color:#fff;padding:12px 28px;text-decoration:none;border-radius:6px;font-size:14px;font-weight:700;">
+                      ✕ Decline
+                    </a>
+                  </td>
+                </tr>
+              </table>
+              <p style="color:#999;font-size:12px;margin:0;">
+                These links are one-time use. If you weren't expecting this, you can safely ignore it.
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background:#f8f9fa;padding:24px 20px;text-align:center;border-top:1px solid #eee;">
+              <p style="color:#94a3b8;font-size:11px;margin:0;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;">&copy; <%= new Date().getFullYear() %> Nexa AI. All rights reserved.</p>
+              <p style="color:#cbd5e1;font-size:10px;margin:10px 0 0;font-weight:700;">POWERED BY 1879 TECH HUB</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

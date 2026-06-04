@@ -152,6 +152,68 @@ export async function sendEmployeeInviteEmail(
   }
 }
 
+/** Send access-request email to the sharer with Accept / Decline links. */
+export async function sendConversationAccessRequestEmail(opts: {
+  sharerEmail: string;
+  sharerName: string;
+  requesterName: string;
+  requesterEmail: string;
+  conversationTitle: string;
+  businessUnit: string;
+  acceptUrl: string;
+  rejectUrl: string;
+}): Promise<void> {
+  try {
+    const html = await renderTemplate("conv-access-request", opts);
+    await sendEmail(
+      opts.sharerEmail,
+      `${opts.requesterName} is requesting access to continue a conversation on Nexa AI`,
+      html
+    );
+  } catch (error) {
+    console.error(`[EmailService] Failed to send access-request email to ${opts.sharerEmail}:`, error);
+  }
+}
+
+/** Notify the requester that their access request was accepted. */
+export async function sendAccessRequestAcceptedEmail(opts: {
+  requesterEmail: string;
+  requesterName: string;
+  sharerName: string;
+  conversationTitle: string;
+  chatUrl: string;
+}): Promise<void> {
+  try {
+    const subject = `${opts.sharerName} accepted your request — conversation ready on Nexa AI`;
+    const html = await renderTemplate("conversation-shared", {
+      recipientName: opts.requesterName,
+      senderName: opts.sharerName,
+      conversationTitle: opts.conversationTitle,
+      businessUnit: "",
+      chatUrl: opts.chatUrl,
+    });
+    await sendEmail(opts.requesterEmail, subject, html);
+  } catch (error) {
+    console.error(`[EmailService] Failed to send accepted email to ${opts.requesterEmail}:`, error);
+  }
+}
+
+/** Notify the requester that their access request was declined. */
+export async function sendAccessRequestDeclinedEmail(opts: {
+  requesterEmail: string;
+  requesterName: string;
+  sharerName: string;
+  conversationTitle: string;
+}): Promise<void> {
+  try {
+    const subject = `Update on your Nexa AI access request`;
+    const bodyHtml = `<p>Hi ${opts.requesterName},</p><p>${opts.sharerName} has declined your request to continue the conversation <strong>"${opts.conversationTitle}"</strong> on Nexa AI.</p>`;
+    await sendEmail(opts.requesterEmail, subject, `<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;padding:32px;color:#333">${bodyHtml}</body></html>`);
+  } catch (error) {
+    console.error(`[EmailService] Failed to send declined email to ${opts.requesterEmail}:`, error);
+  }
+}
+
 /** Notify a user that a colleague shared a conversation with them. Fire-and-forget. */
 export async function sendConversationSharedEmail(
   recipientEmail: string,

@@ -72,7 +72,7 @@ interface Conversation {
   /** True when viewing a conversation shared with this user — input is hidden and edits are disabled. */
   isShared?: boolean;
   /** When isShared, who shared it. */
-  sharedBy?: { fullName?: string; email?: string };
+  sharedBy?: { userId?: string; fullName?: string; email?: string };
   /** Number of messages hidden from this recipient by the access redactor. */
   redactedMessageCount?: number;
 }
@@ -241,6 +241,8 @@ export const App: React.FC = () => {
   const shareLinkCopyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [suggestions, setSuggestions] = useState<{ title: string; category: string; prompt: string }[]>([]);
   const [isSuggestionsLoading, setIsSuggestionsLoading] = useState(false);
+  const [accessRequestStatus, setAccessRequestStatus] = useState<Record<string, 'idle'|'pending'|'accepted'|'rejected'>>({});
+
   const [folders, setFolders] = useState<ConversationFolder[]>([]);
   const [expandedFolderIds, setExpandedFolderIds] = useState<Set<string>>(new Set());
   const [folderMenuId, setFolderMenuId] = useState<string | null>(null);
@@ -517,6 +519,26 @@ export const App: React.FC = () => {
 
     fetchSuggestions();
   }, [user?.businessUnit, isAuthenticated]);
+
+  async function handleAccessRequest(convId: string, sharerId: string) {
+    if (!token) return;
+    setAccessRequestStatus(prev => ({ ...prev, [convId]: 'pending' }));
+    try {
+      await axios.post(
+        "/api/v1/conversations/access-request",
+        { conversationGroupId: convId, sharerId },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+    } catch (err: any) {
+      const msg = err?.response?.data?.error || "";
+      if (msg.includes("pending")) {
+        // already pending — keep status
+      } else {
+        setAccessRequestStatus(prev => ({ ...prev, [convId]: 'idle' }));
+        alert(msg || "Could not send request. Please try again.");
+      }
+    }
+  }
 
   async function fetchFolders(authToken?: string) {
     const t = authToken || token;
@@ -1598,36 +1620,38 @@ export const App: React.FC = () => {
             />
           )}
           <div className="sidebar-conversations-v2">
-            {sharedConversations.length > 0 ? (
-              <>
+            {sharedConversations.length > 0 && (
+              <div className="folder-group">
                 <div
-                  className="sidebar-section-label retractable"
+                  className="folder-header"
                   onClick={() => setIsSharedSectionCollapsed(!isSharedSectionCollapsed)}
                 >
-                  <span>Shared with me</span>
-                  <BiChevronDown style={{ transform: isSharedSectionCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }} />
+                  <BiChevronDown size={14} style={{ transform: isSharedSectionCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)', transition: 'transform 0.2s', flexShrink: 0 }} />
+                  <BiShareAlt size={14} style={{ flexShrink: 0, color: 'var(--brand-color, #ed0000)' }} />
+                  <span className="folder-name">Shared with me</span>
+                  <span className="folder-count">{sharedConversations.length}</span>
                 </div>
-                {!isSharedSectionCollapsed ? (
+                {!isSharedSectionCollapsed && (
                   <div className="shared-with-me-list">
                     {sharedConversations.map((s) => (
-                      <button
+                      <div
                         key={s.shareId}
-                        type="button"
-                        className={`conversation-item-v2 shared ${currentConversation?._id === s.conversation._id && currentConversation?.isShared ? 'active' : ''}`}
+                        className={`sidebar-conversation-v2 folder-conv ${currentConversation?._id === s.conversation._id && currentConversation?.isShared ? 'active' : ''}`}
                         onClick={() => openSharedConversation(s)}
+                        style={{ cursor: 'pointer' }}
                       >
-                        <div className="conv-title-v2 shared-conv-title">
+                        <div className="conv-title-v2">
                           {s.singleMessage ? "💬 " : ""}{s.conversation.title}
                         </div>
-                        <div className="shared-meta">
-                          {s.singleMessage ? "Single response · " : ""}{s.sharedBy?.fullName || s.sharedBy?.email || "Someone"}
+                        <div className="shared-meta" style={{ fontSize: 10, opacity: 0.6, paddingLeft: 2 }}>
+                          {s.sharedBy?.fullName || s.sharedBy?.email || "Someone"}
                         </div>
-                      </button>
+                      </div>
                     ))}
                   </div>
-                ) : null}
-              </>
-            ) : null}
+                )}
+              </div>
+            )}
 
             {/* ── Folders ── */}
             {(() => {
@@ -2230,6 +2254,29 @@ export const App: React.FC = () => {
                             ? ` · ${currentConversation.redactedMessageCount} message${currentConversation.redactedMessageCount === 1 ? "" : "s"} hidden by access controls`
                             : ""}
                         </div>
+                        {(() => {
+                          const convId = String(currentConversation._id);
+                          const status = accessRequestStatus[convId] || 'idle';
+                          const sharerId = currentConversation.sharedBy?.userId;
+                          if (!sharerId) return null;
+                          if (status === 'pending') return (
+                            <div className="shared-banner-request-sent">⏳ Request sent — waiting for approval</div>
+                          );
+                          if (status === 'accepted') return (
+                            <div className="shared-banner-request-sent" style={{ color: '#16a34a' }}>✓ Access granted — check your recent chats</div>
+                          );
+                          if (status === 'rejected') return (
+                            <div className="shared-banner-request-sent" style={{ color: '#dc2626' }}>✕ Request declined by sharer</div>
+                          );
+                          return (
+                            <button
+                              className="shared-banner-request-btn"
+                              onClick={() => handleAccessRequest(convId, sharerId)}
+                            >
+                              Request access to continue conversation with Nexa
+                            </button>
+                          );
+                        })()}
                       </div>
                     </div>
                   ) : null}
@@ -2958,6 +3005,26 @@ export const App: React.FC = () => {
           color: #6b7280;
         }
         .dark-theme .shared-banner-meta { color: #9ca3af; }
+        .shared-banner-request-btn {
+          margin-top: 10px;
+          align-self: flex-start;
+          background: var(--brand-color, #ed0000);
+          color: #fff;
+          border: none;
+          border-radius: 8px;
+          padding: 8px 16px;
+          font-size: 12px;
+          font-weight: 700;
+          cursor: pointer;
+          transition: opacity 0.2s;
+        }
+        .shared-banner-request-btn:hover { opacity: 0.85; }
+        .shared-banner-request-sent {
+          margin-top: 8px;
+          font-size: 12px;
+          font-weight: 600;
+          color: #6b7280;
+        }
 
         /* Redacted message style — kept subtle so the conversation reads naturally */
         .message-row-v2.redacted .message-bubble-v2 {
