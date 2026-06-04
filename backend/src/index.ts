@@ -104,10 +104,13 @@ app.get("/api/docs.json", (_req, res) => {
 
 app.use("/api/v1/auth", authRouter);
 app.use("/api/v1/admin/auth", adminAuthRouter);
-app.use("/api/v1/conversations", conversationRouter);
+// Specific-path routers MUST be mounted before conversationRouter because
+// conversationRouter contains GET /:id which catches any unmatched path and
+// returns 404, preventing the sharing/mention routes from ever being reached.
 app.use("/api/v1/conversations", conversationSharingRouter);
 app.use("/api/v1/conversations", conversationAccessRouter);
 app.use("/api/v1/conversations", conversationMentionsRouter);
+app.use("/api/v1/conversations", conversationRouter);
 app.use("/api/v1/conversations", userDocumentsRouter);
 app.use("/api/v1/chat", chatRouter);
 app.use("/api/v1/admin/policies", adminPoliciesRouter);
