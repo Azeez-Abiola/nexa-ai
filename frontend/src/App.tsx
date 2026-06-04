@@ -8,7 +8,7 @@ import {
   BiUpArrowAlt, BiMessageRounded, BiPlus, BiDotsHorizontalRounded,
   BiPaperclip, BiMicrophone, BiMoon, BiSun, BiCamera, BiCopy, BiCheck
 } from "react-icons/bi";
-import { MdPushPin, MdAutoAwesome } from "react-icons/md";
+import { MdPushPin, MdAutoAwesome, MdCreateNewFolder, MdFolder, MdFolderOpen } from "react-icons/md";
 import { FiLogOut, FiDownload, FiTrash2, FiExternalLink } from "react-icons/fi";
 import { useLocation, useNavigate } from "react-router-dom";
 import { ChatGptStyleMenuIcon } from "./components/ChatGptStyleMenuIcon";
@@ -75,6 +75,12 @@ interface Conversation {
   sharedBy?: { fullName?: string; email?: string };
   /** Number of messages hidden from this recipient by the access redactor. */
   redactedMessageCount?: number;
+}
+
+interface ConversationFolder {
+  _id: string;
+  name: string;
+  conversationIds: string[];
 }
 
 interface SharedConversation {
@@ -235,6 +241,15 @@ export const App: React.FC = () => {
   const shareLinkCopyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [suggestions, setSuggestions] = useState<{ title: string; category: string; prompt: string }[]>([]);
   const [isSuggestionsLoading, setIsSuggestionsLoading] = useState(false);
+  const [folders, setFolders] = useState<ConversationFolder[]>([]);
+  const [expandedFolderIds, setExpandedFolderIds] = useState<Set<string>>(new Set());
+  const [folderMenuId, setFolderMenuId] = useState<string | null>(null);
+  const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
+  const [renameFolderName, setRenameFolderName] = useState("");
+  const [isCreatingFolder, setIsCreatingFolder] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [folderSubMenuConvId, setFolderSubMenuConvId] = useState<string | null>(null);
+
   const [pinnedConversations, setPinnedConversations] = useState<Set<string>>(() => {
     try {
       const saved = localStorage.getItem("pinnedConversations");
@@ -370,6 +385,7 @@ export const App: React.FC = () => {
               window.history.replaceState(null, "", "/user-chat");
             }
             loadConversations(savedToken);
+            fetchFolders(savedToken);
             if (!localStorage.getItem("nexa-avatar")) {
               setShowAvatarPicker(true);
             }
@@ -475,6 +491,65 @@ export const App: React.FC = () => {
     fetchSuggestions();
   }, [user?.businessUnit, isAuthenticated]);
 
+  async function fetchFolders(authToken?: string) {
+    const t = authToken || token;
+    if (!t) return;
+    try {
+      const { data } = await axios.get("/api/v1/conversations/folders", { headers: { Authorization: `Bearer ${t}` } });
+      setFolders(data.folders || []);
+    } catch { /* silent */ }
+  }
+
+  async function handleCreateFolder() {
+    const name = newFolderName.trim();
+    if (!name || !token) return;
+    try {
+      const { data } = await axios.post("/api/v1/conversations/folders", { name }, { headers: { Authorization: `Bearer ${token}` } });
+      setFolders(prev => [...prev, data.folder]);
+      setExpandedFolderIds(prev => new Set([...prev, data.folder._id]));
+    } catch { /* silent */ }
+    setNewFolderName("");
+    setIsCreatingFolder(false);
+  }
+
+  async function handleRenameFolder(folderId: string) {
+    const name = renameFolderName.trim();
+    if (!name || !token) return;
+    try {
+      await axios.patch(`/api/v1/conversations/folders/${folderId}`, { name }, { headers: { Authorization: `Bearer ${token}` } });
+      setFolders(prev => prev.map(f => f._id === folderId ? { ...f, name } : f));
+    } catch { /* silent */ }
+    setRenamingFolderId(null);
+  }
+
+  async function handleDeleteFolder(folderId: string) {
+    if (!token) return;
+    try {
+      await axios.delete(`/api/v1/conversations/folders/${folderId}`, { headers: { Authorization: `Bearer ${token}` } });
+      setFolders(prev => prev.filter(f => f._id !== folderId));
+    } catch { /* silent */ }
+    setFolderMenuId(null);
+  }
+
+  async function handleAddToFolder(folderId: string, convId: string) {
+    if (!token) return;
+    try {
+      const { data } = await axios.post(`/api/v1/conversations/folders/${folderId}/add`, { conversationId: convId }, { headers: { Authorization: `Bearer ${token}` } });
+      setFolders(prev => prev.map(f => f._id === folderId ? { ...f, conversationIds: data.folder.conversationIds } : { ...f, conversationIds: f.conversationIds.filter(id => id !== convId) }));
+    } catch { /* silent */ }
+    setFolderSubMenuConvId(null);
+    setActiveMenuId(null);
+  }
+
+  async function handleRemoveFromFolder(folderId: string, convId: string) {
+    if (!token) return;
+    try {
+      await axios.delete(`/api/v1/conversations/folders/${folderId}/conversations/${convId}`, { headers: { Authorization: `Bearer ${token}` } });
+      setFolders(prev => prev.map(f => f._id === folderId ? { ...f, conversationIds: f.conversationIds.filter(id => id !== convId) } : f));
+    } catch { /* silent */ }
+    setActiveMenuId(null);
+  }
+
   async function loadConversations(authToken: string) {
     setIsConversationsLoading(true);
     try {
@@ -557,12 +632,14 @@ export const App: React.FC = () => {
       axios.defaults.headers.common["Authorization"] = `Bearer ${authToken}`;
       applyTenantBrandFromSession(authUser.tenantColor);
       await loadConversations(authToken);
+      fetchFolders(authToken);
     } else {
       window.history.pushState(null, "", "/user-chat");
       setIsConversationsLoading(true);
       axios.defaults.headers.common["Authorization"] = `Bearer ${authToken}`;
       applyTenantBrandFromSession(authUser.tenantColor);
       await loadConversations(authToken);
+      fetchFolders(authToken);
       if (!localStorage.getItem("nexa-avatar")) {
         setShowAvatarPicker(true);
       }
@@ -1516,27 +1593,136 @@ export const App: React.FC = () => {
               </>
             ) : null}
 
-            <div
-              className="sidebar-section-label retractable"
-              onClick={() => setIsHistoryCollapsed(!isHistoryCollapsed)}
-            >
-              <span>Recent</span>
-              <BiChevronDown style={{ transform: isHistoryCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }} />
-            </div>
-            {!isHistoryCollapsed && (
-              conversations.length === 0 ? (
-                <div className="sidebar-empty">No conversations yet</div>
-              ) : (
-                (() => {
-                  const sorted = [...conversations].sort((a, b) => {
-                    const aPinned = pinnedConversations.has(a._id);
-                    const bPinned = pinnedConversations.has(b._id);
-                    if (aPinned !== bPinned) return aPinned ? -1 : 1;
-                    return 0;
-                  });
-                  // Only show top 7 or so, with a "Show more"
-                  return (
-                    <>
+            {/* ── Folders ── */}
+            {(() => {
+              const allFolderedIds = new Set(folders.flatMap(f => f.conversationIds));
+              return (
+                <>
+                  <div className="sidebar-section-label retractable" style={{ justifyContent: 'space-between' }}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <MdFolder size={13} />
+                      Folders
+                    </span>
+                    <button
+                      title="New folder"
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px', borderRadius: 4, display: 'flex', alignItems: 'center', color: 'inherit', opacity: 0.6 }}
+                      onClick={(e) => { e.stopPropagation(); setIsCreatingFolder(true); setNewFolderName(""); }}
+                    >
+                      <MdCreateNewFolder size={15} />
+                    </button>
+                  </div>
+
+                  {isCreatingFolder && (
+                    <div className="folder-create-row" onClick={e => e.stopPropagation()}>
+                      <input
+                        autoFocus
+                        className="folder-name-input"
+                        value={newFolderName}
+                        onChange={e => setNewFolderName(e.target.value)}
+                        placeholder="Folder name…"
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') handleCreateFolder();
+                          if (e.key === 'Escape') setIsCreatingFolder(false);
+                        }}
+                      />
+                      <button className="folder-confirm-btn" onClick={handleCreateFolder} disabled={!newFolderName.trim()}>✓</button>
+                      <button className="folder-cancel-btn" onClick={() => setIsCreatingFolder(false)}>✕</button>
+                    </div>
+                  )}
+
+                  {folders.map(folder => {
+                    const isExpanded = expandedFolderIds.has(folder._id);
+                    const folderConvs = conversations.filter(c => folder.conversationIds.includes(c._id));
+                    return (
+                      <div key={folder._id} className="folder-group">
+                        <div
+                          className="folder-header"
+                          onClick={() => setExpandedFolderIds(prev => {
+                            const next = new Set(prev);
+                            isExpanded ? next.delete(folder._id) : next.add(folder._id);
+                            return next;
+                          })}
+                        >
+                          <BiChevronDown size={14} style={{ transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)', transition: 'transform 0.2s', flexShrink: 0 }} />
+                          {isExpanded ? <MdFolderOpen size={14} style={{ flexShrink: 0 }} /> : <MdFolder size={14} style={{ flexShrink: 0 }} />}
+                          {renamingFolderId === folder._id ? (
+                            <input
+                              autoFocus
+                              className="folder-name-input inline"
+                              value={renameFolderName}
+                              onChange={e => setRenameFolderName(e.target.value)}
+                              onClick={e => e.stopPropagation()}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') { e.stopPropagation(); handleRenameFolder(folder._id); }
+                                if (e.key === 'Escape') setRenamingFolderId(null);
+                              }}
+                            />
+                          ) : (
+                            <span className="folder-name">{folder.name}</span>
+                          )}
+                          <span className="folder-count">{folder.conversationIds.length}</span>
+                          <button
+                            className="conv-menu-btn"
+                            onClick={e => { e.stopPropagation(); setFolderMenuId(folderMenuId === folder._id ? null : folder._id); }}
+                          >
+                            <BiDotsHorizontalRounded size={15} />
+                          </button>
+                          {folderMenuId === folder._id && (
+                            <div className="conv-dropdown" onClick={e => e.stopPropagation()}>
+                              <button onClick={() => { setRenamingFolderId(folder._id); setRenameFolderName(folder.name); setFolderMenuId(null); }}>Rename</button>
+                              <button style={{ color: '#ef4444' }} onClick={() => handleDeleteFolder(folder._id)}>Delete folder</button>
+                            </div>
+                          )}
+                        </div>
+                        {isExpanded && folderConvs.map(conv => (
+                          <div
+                            key={conv._id}
+                            className={`sidebar-conversation-v2 folder-conv ${currentConversation?._id === conv._id ? 'active' : ''}`}
+                            onClick={() => {
+                              setCurrentConversation(conv);
+                              if (location.pathname !== '/user-chat') navigate('/user-chat');
+                              if (window.innerWidth <= 768) setSidebarOpen(false);
+                            }}
+                          >
+                            <div className="conv-title-v2">{conv.title}</div>
+                            <button className="conv-menu-btn visible" onClick={e => { e.stopPropagation(); setActiveMenuId(activeMenuId === conv._id ? null : conv._id); }}>
+                              <BiDotsHorizontalRounded size={18} />
+                            </button>
+                            {activeMenuId === conv._id && (
+                              <div className="conv-dropdown">
+                                <button onClick={e => { handleOpenShareModal(conv._id, e as any); }}>Share</button>
+                                <button onClick={() => handleRemoveFromFolder(folder._id, conv._id)}>Remove from folder</button>
+                                <button onClick={e => { handleContextMenuDelete(conv._id, e as any); setActiveMenuId(null); }}>Delete</button>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                        {isExpanded && folderConvs.length === 0 && (
+                          <div className="sidebar-empty" style={{ paddingLeft: 32, fontSize: 11 }}>Empty folder</div>
+                        )}
+                      </div>
+                    );
+                  })}
+
+                  {/* ── Recent (unfiled only) ── */}
+                  <div
+                    className="sidebar-section-label retractable"
+                    onClick={() => setIsHistoryCollapsed(!isHistoryCollapsed)}
+                  >
+                    <span>Recent</span>
+                    <BiChevronDown style={{ transform: isHistoryCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }} />
+                  </div>
+                  {!isHistoryCollapsed && (() => {
+                    const unfiled = conversations.filter(c => !allFolderedIds.has(c._id));
+                    const sorted = [...unfiled].sort((a, b) => {
+                      const aPinned = pinnedConversations.has(a._id);
+                      const bPinned = pinnedConversations.has(b._id);
+                      if (aPinned !== bPinned) return aPinned ? -1 : 1;
+                      return 0;
+                    });
+                    return sorted.length === 0 ? (
+                      <div className="sidebar-empty">No conversations yet</div>
+                    ) : (
                       <AnimatePresence initial={false}>
                         {sorted.slice(0, 10).map((conv) => (
                           <motion.div
@@ -1546,67 +1732,65 @@ export const App: React.FC = () => {
                             animate={{ opacity: 1, x: 0 }}
                             exit={{ opacity: 0, x: 20 }}
                             transition={{ duration: 0.3 }}
-                            className={`sidebar-conversation-v2 ${currentConversation?._id === conv._id ? "active" : ""
-                              } ${pinnedConversations.has(conv._id) ? "pinned" : ""}`}
+                            className={`sidebar-conversation-v2 ${currentConversation?._id === conv._id ? 'active' : ''} ${pinnedConversations.has(conv._id) ? 'pinned' : ''}`}
                             onClick={() => {
                               setCurrentConversation(conv);
-                              // Jump back to the chat surface if the user is somewhere else
-                              // (e.g. /user-chat/profile) — otherwise their click appears to do nothing.
-                              if (location.pathname !== "/user-chat") navigate("/user-chat");
+                              if (location.pathname !== '/user-chat') navigate('/user-chat');
                               if (window.innerWidth <= 768) setSidebarOpen(false);
                             }}
                           >
-                            {pinnedConversations.has(conv._id) && (
-                              <MdPushPin size={16} className="pin-active-icon mr-2 flex-shrink-0" />
-                            )}
+                            {pinnedConversations.has(conv._id) && <MdPushPin size={16} className="pin-active-icon mr-2 flex-shrink-0" />}
                             <div className="conv-title-v2">{conv.title}</div>
-                            <button
-                              className="conv-menu-btn visible"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setActiveMenuId(activeMenuId === conv._id ? null : conv._id);
-                              }}
-                            >
+                            <button className="conv-menu-btn visible" onClick={e => { e.stopPropagation(); setActiveMenuId(activeMenuId === conv._id ? null : conv._id); setFolderSubMenuConvId(null); }}>
                               <BiDotsHorizontalRounded size={18} />
                             </button>
                             {activeMenuId === conv._id && (
                               <div className="conv-dropdown">
-                                <button onClick={(e) => {
-                                  handlePinConversation(conv._id, e as any);
-                                  setActiveMenuId(null);
-                                }}>
-                                  {pinnedConversations.has(conv._id) ? "Unpin" : "Pin"}
+                                <button onClick={e => { handlePinConversation(conv._id, e as any); setActiveMenuId(null); }}>
+                                  {pinnedConversations.has(conv._id) ? 'Unpin' : 'Pin'}
                                 </button>
-                                <button onClick={(e) => {
-                                  handleOpenShareModal(conv._id, e as any);
-                                }}>
-                                  Share
+                                <button onClick={e => { handleOpenShareModal(conv._id, e as any); }}>Share</button>
+                                <button
+                                  onClick={e => { e.stopPropagation(); setFolderSubMenuConvId(folderSubMenuConvId === conv._id ? null : conv._id); }}
+                                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+                                >
+                                  Move to folder <span style={{ opacity: 0.5, fontSize: 10 }}>▶</span>
                                 </button>
-                                <button onClick={(e) => {
-                                  handleContextMenuDelete(conv._id, e as any);
-                                  setActiveMenuId(null);
-                                }}>
-                                  Delete
-                                </button>
+                                {folderSubMenuConvId === conv._id && (
+                                  <div className="folder-submenu">
+                                    {folders.length === 0 ? (
+                                      <span className="folder-submenu-empty">No folders yet</span>
+                                    ) : folders.map(f => (
+                                      <button key={f._id} onClick={() => handleAddToFolder(f._id, conv._id)}>
+                                        <MdFolder size={12} style={{ marginRight: 6, flexShrink: 0 }} />
+                                        {f.name}
+                                      </button>
+                                    ))}
+                                    <button
+                                      style={{ borderTop: '1px solid rgba(0,0,0,0.08)', marginTop: 2, paddingTop: 6 }}
+                                      onClick={() => { setIsCreatingFolder(true); setNewFolderName(""); setActiveMenuId(null); setFolderSubMenuConvId(null); }}
+                                    >
+                                      <MdCreateNewFolder size={12} style={{ marginRight: 6 }} /> New folder
+                                    </button>
+                                  </div>
+                                )}
+                                <button onClick={e => { handleContextMenuDelete(conv._id, e as any); setActiveMenuId(null); }}>Delete</button>
                               </div>
                             )}
                           </motion.div>
                         ))}
                       </AnimatePresence>
-                    </>
-                  );
-                })())
-            )}
-            {!isHistoryCollapsed && conversationsHasMore && (
-              <button
-                className="show-more-btn"
-                onClick={loadMoreConversations}
-                disabled={isLoadingMoreConversations}
-              >
-                <BiChevronDown size={18} />
-                <span>{isLoadingMoreConversations ? "Loading..." : "Show more"}</span>
-              </button>
-            )}
+                    );
+                  })()}
+                  {!isHistoryCollapsed && conversationsHasMore && (
+                    <button className="show-more-btn" onClick={loadMoreConversations} disabled={isLoadingMoreConversations}>
+                      <BiChevronDown size={18} />
+                      <span>{isLoadingMoreConversations ? 'Loading...' : 'Show more'}</span>
+                    </button>
+                  )}
+                </>
+              );
+            })()}
           </div>
 
           <div className="sidebar-footer-actions">
@@ -2585,6 +2769,67 @@ export const App: React.FC = () => {
         .conv-dropdown button:hover {
           background: #f3f4f6;
           color: var(--brand-color, #ed0000);
+        }
+
+        /* ── Folder styles ── */
+        .folder-group {
+          display: flex;
+          flex-direction: column;
+        }
+        .folder-header {
+          display: flex;
+          align-items: center;
+          gap: 5px;
+          padding: 5px 8px 5px 10px;
+          border-radius: 8px;
+          cursor: pointer;
+          font-size: 12px;
+          font-weight: 600;
+          color: var(--sidebar-text, #374151);
+          position: relative;
+          user-select: none;
+        }
+        .folder-header:hover { background: var(--sidebar-hover, rgba(0,0,0,0.05)); }
+        .folder-name { flex: 1; truncate; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .folder-count { font-size: 10px; font-weight: 700; opacity: 0.4; }
+        .folder-conv { padding-left: 24px !important; }
+        .folder-create-row {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+          padding: 4px 8px;
+        }
+        .folder-name-input {
+          flex: 1;
+          font-size: 12px;
+          padding: 4px 8px;
+          border: 1px solid #e5e7eb;
+          border-radius: 6px;
+          outline: none;
+          background: white;
+          color: #111;
+        }
+        .folder-name-input:focus { border-color: var(--brand-color, #ed0000); }
+        .folder-name-input.inline { font-size: 12px; height: 22px; padding: 2px 6px; max-width: 100px; }
+        .folder-confirm-btn, .folder-cancel-btn {
+          background: none; border: none; cursor: pointer; font-size: 13px; padding: 2px 5px; border-radius: 4px;
+        }
+        .folder-confirm-btn { color: #16a34a; }
+        .folder-confirm-btn:disabled { opacity: 0.3; cursor: default; }
+        .folder-cancel-btn { color: #6b7280; }
+        .folder-submenu {
+          display: flex;
+          flex-direction: column;
+          background: #f9fafb;
+          border-top: 1px solid #f0f0f0;
+          margin: 0 -1px;
+          padding: 2px 0;
+        }
+        .folder-submenu button {
+          display: flex; align-items: center; padding: 8px 14px; font-size: 12px;
+        }
+        .folder-submenu-empty {
+          padding: 6px 14px; font-size: 11px; color: #9ca3af; display: block;
         }
 
         /* Shared-with-me sidebar list */

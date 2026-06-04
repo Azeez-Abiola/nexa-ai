@@ -38,6 +38,7 @@ import {
   PptxContent,
 } from "../services/documentGeneratorService";
 import { randomUUID } from "crypto";
+import { ConversationFolder } from "../models/ConversationFolder";
 
 // ─── Ephemeral document cache (avoids Cloudinary for AI-generated files) ──────
 
@@ -360,6 +361,89 @@ ${KNOWLEDGE_BASE_VERSIONING_RULES}`);
 
   return sections.join("\n\n");
 }
+
+// ─── Folder endpoints ────────────────────────────────────────────────────────
+
+conversationRouter.get("/folders", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const folders = await ConversationFolder.find({ userId: req.userId }).sort({ createdAt: 1 });
+    res.json({ folders });
+  } catch {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+conversationRouter.post("/folders", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const name = typeof req.body.name === "string" ? req.body.name.trim() : "";
+    if (!name) return res.status(400).json({ error: "name is required" });
+    const folder = await ConversationFolder.create({
+      userId: req.userId,
+      businessUnit: req.businessUnit || "",
+      name,
+      conversationIds: [],
+    });
+    res.status(201).json({ folder });
+  } catch {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+conversationRouter.patch("/folders/:folderId", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const name = typeof req.body.name === "string" ? req.body.name.trim() : "";
+    if (!name) return res.status(400).json({ error: "name is required" });
+    const folder = await ConversationFolder.findOneAndUpdate(
+      { _id: req.params.folderId, userId: req.userId },
+      { $set: { name } },
+      { new: true }
+    );
+    if (!folder) return res.status(404).json({ error: "Folder not found" });
+    res.json({ folder });
+  } catch {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+conversationRouter.delete("/folders/:folderId", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    await ConversationFolder.deleteOne({ _id: req.params.folderId, userId: req.userId });
+    res.json({ message: "Folder deleted" });
+  } catch {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Add a conversation to a folder (removes it from any other folder first)
+conversationRouter.post("/folders/:folderId/add", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { conversationId } = req.body;
+    if (!conversationId) return res.status(400).json({ error: "conversationId is required" });
+    await ConversationFolder.updateMany({ userId: req.userId }, { $pull: { conversationIds: conversationId } });
+    const folder = await ConversationFolder.findOneAndUpdate(
+      { _id: req.params.folderId, userId: req.userId },
+      { $addToSet: { conversationIds: conversationId } },
+      { new: true }
+    );
+    if (!folder) return res.status(404).json({ error: "Folder not found" });
+    res.json({ folder });
+  } catch {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Remove a conversation from a folder
+conversationRouter.delete("/folders/:folderId/conversations/:convId", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    await ConversationFolder.updateOne(
+      { _id: req.params.folderId, userId: req.userId },
+      { $pull: { conversationIds: req.params.convId } }
+    );
+    res.json({ message: "Removed from folder" });
+  } catch {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
 
 // ─── Get conversations (paginated) ───────────────────────────────────────────
 conversationRouter.get("/", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
