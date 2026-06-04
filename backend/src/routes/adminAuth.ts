@@ -1788,6 +1788,56 @@ adminAuthRouter.post("/departments", adminAuthMiddleware, async (req: Authentica
   }
 });
 
+adminAuthRouter.patch("/departments/:id", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { businessUnit, isSuperAdmin } = req;
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ error: "Invalid department id" });
+    }
+
+    const rawName = typeof req.body.name === "string" ? req.body.name.trim() : "";
+    if (!rawName || rawName.length < 1 || rawName.length > 100) {
+      return res.status(400).json({ error: "name is required and must be between 1 and 100 characters" });
+    }
+
+    const dept = await Department.findById(id);
+    if (!dept) return res.status(404).json({ error: "Department not found" });
+    if (!isSuperAdmin && dept.businessUnit !== businessUnit) {
+      return res.status(403).json({ error: "Access denied" });
+    }
+
+    const oldName = dept.name;
+    if (oldName === rawName) {
+      return res.json({ department: dept });
+    }
+
+    // Check for name collision
+    const collision = await Department.findOne({ name: rawName, businessUnit: dept.businessUnit });
+    if (collision) {
+      return res.status(409).json({ error: "A department with this name already exists in your organization" });
+    }
+
+    dept.name = rawName;
+    await dept.save();
+
+    // Cascade rename on users and documents so nothing is left pointing at the old name
+    await Promise.all([
+      User.updateMany({ department: oldName, businessUnit: dept.businessUnit }, { $set: { department: rawName } }),
+      RagDocument.updateMany({ department: oldName, businessUnit: dept.businessUnit }, { $set: { department: rawName } })
+    ]);
+
+    res.json({ department: dept });
+  } catch (error: any) {
+    if (error.code === 11000) {
+      return res.status(409).json({ error: "A department with this name already exists in your organization" });
+    }
+    console.error("Update department error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 adminAuthRouter.delete("/departments/:id", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { businessUnit, isSuperAdmin } = req;

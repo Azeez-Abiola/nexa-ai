@@ -7,6 +7,7 @@ import {
   FileText,
   Layers,
   Loader2,
+  Pencil,
   Plus,
   Trash2,
   Users
@@ -76,6 +77,10 @@ const Departments: React.FC = () => {
 
   const [deleteTarget, setDeleteTarget] = useState<Department | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  const [editTarget, setEditTarget] = useState<Department | null>(null);
+  const [editName, setEditName] = useState("");
+  const [saving, setSaving] = useState(false);
 
   const token = useMemo(() => localStorage.getItem("nexa-token"), []);
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
@@ -224,6 +229,28 @@ const Departments: React.FC = () => {
     }
   };
 
+  const handleEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editTarget) return;
+    const name = editName.trim();
+    if (!name) return;
+    try {
+      setSaving(true);
+      await axios.patch(`/api/v1/admin/auth/departments/${editTarget._id}`, { name }, { headers });
+      toast({ title: "Department updated", description: `Renamed to "${name}" and all records updated.` });
+      setEditTarget(null);
+      fetchDepartments();
+    } catch (err: any) {
+      toast({
+        variant: "destructive",
+        title: "Could not update department",
+        description: err.response?.data?.error || "Please try again."
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div className="px-6 lg:px-12 py-10 space-y-10">
       <header className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
@@ -315,6 +342,19 @@ const Departments: React.FC = () => {
                   </div>
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setEditTarget(dept);
+                      setEditName(dept.name);
+                    }}
+                    className="h-10 w-10 rounded-xl text-slate-400 hover:text-[var(--brand-color)] hover:bg-[var(--brand-color)]/10"
+                    title="Edit department"
+                  >
+                    <Pencil size={16} />
+                  </Button>
                   <Button
                     variant="ghost"
                     size="icon"
@@ -454,6 +494,54 @@ const Departments: React.FC = () => {
               style={{ backgroundColor: "var(--brand-color)" }}
             >
               {creating ? <Loader2 className="animate-spin" size={18} /> : "Create department"}
+            </Button>
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
+
+      {/* Edit department sheet */}
+      <Sheet
+        open={!!editTarget}
+        onOpenChange={(o) => { if (!o && saving) return; if (!o) setEditTarget(null); }}
+      >
+        <SheetContent side="right" className="sm:max-w-md flex flex-col p-0">
+          <SheetHeader className="text-left space-y-2 px-8 pt-8 pb-4">
+            <SheetTitle className="text-2xl font-black font-['Sen']">Edit department</SheetTitle>
+            <SheetDescription className="text-slate-500 font-medium text-sm leading-relaxed">
+              Renaming will update all users and documents currently tagged to this department.
+            </SheetDescription>
+          </SheetHeader>
+          <form onSubmit={handleEdit} className="flex-1 px-8 pb-6 space-y-6">
+            <div className="space-y-2">
+              <Label className="text-sm font-bold text-slate-700">Department name</Label>
+              <Input
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                placeholder="e.g. Finance, Operations, HR"
+                className={inputBu}
+                maxLength={100}
+                required
+                autoFocus
+              />
+            </div>
+          </form>
+          <SheetFooter className="px-8 py-6 border-t border-slate-100 flex-row gap-3 sm:gap-3 bg-slate-50/50">
+            <Button
+              type="button"
+              variant="ghost"
+              className="flex-1 rounded-xl font-bold"
+              onClick={() => { if (!saving) setEditTarget(null); }}
+              disabled={saving}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleEdit}
+              disabled={saving || !editName.trim() || editName.trim() === editTarget?.name}
+              className="flex-[2] rounded-xl font-bold text-white h-11"
+              style={{ backgroundColor: "var(--brand-color)" }}
+            >
+              {saving ? <Loader2 className="animate-spin" size={18} /> : "Save changes"}
             </Button>
           </SheetFooter>
         </SheetContent>
