@@ -350,6 +350,47 @@ export const App: React.FC = () => {
     return false;
   };
 
+  // Handle /access-request/respond?token=&action= links from email
+  useEffect(() => {
+    if (location.pathname !== '/access-request/respond') return;
+    const params = new URLSearchParams(location.search);
+    const token_ = params.get('token');
+    const action = params.get('action');
+    if (!token_ || !action) { navigate('/user-chat'); return; }
+    (async () => {
+      try {
+        const { data } = await axios.post('/api/v1/conversations/access-request/process', { token: token_, action });
+        alert(data.message || (action === 'accept' ? 'Access granted!' : 'Request declined.'));
+      } catch (err: any) {
+        alert(err?.response?.data?.error || 'Could not process the request.');
+      }
+      navigate('/user-chat', { replace: true });
+    })();
+  }, [location.pathname, location.search]);
+
+  // Poll for accepted/rejected access requests
+  useEffect(() => {
+    const pending = Object.entries(accessRequestStatus).filter(([, v]) => v === 'pending');
+    if (pending.length === 0 || !token) return;
+    const interval = setInterval(async () => {
+      for (const [convId] of pending) {
+        try {
+          const { data } = await axios.get(
+            `/api/v1/conversations/access-request/status/${convId}`,
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+          if (data.status === 'accepted') {
+            setAccessRequestStatus(prev => ({ ...prev, [convId]: 'accepted' }));
+            loadConversations(token, false); // refresh to get forked conversation
+          } else if (data.status === 'rejected') {
+            setAccessRequestStatus(prev => ({ ...prev, [convId]: 'rejected' }));
+          }
+        } catch { /* silent */ }
+      }
+    }, 6000);
+    return () => clearInterval(interval);
+  }, [accessRequestStatus, token]);
+
   // Intercept 401s globally — a stale/expired token should force re-login.
   // We do this once on mount, not on every render.
   useEffect(() => {
@@ -1353,9 +1394,50 @@ export const App: React.FC = () => {
     if (!trimmed && attachedFiles.length === 0) return;
     if (loading || !token) return;
 
+    // If the message contains @mentions and nothing else of substance, send as a
+    // notification-only note — no AI response generated.
+    const isMentionOnly = pendingMentions.length > 0;
+
     const filesToSend = [...attachedFiles];
     setInput("");
     setAttachedFiles([]);
+    setMentionQuery(null);
+
+    if (isMentionOnly && trimmed) {
+      const userMsg: Message = { role: "user", content: trimmed, timestamp: new Date() };
+      try {
+        if (!currentConversation) {
+          // Create a new conversation first, then save the note
+          const createData = await axios.post<{ conversation: Conversation }>(
+            "/api/v1/conversations", {}, { headers: { Authorization: `Bearer ${token}` } }
+          );
+          const conv = createData.data.conversation;
+          const { data } = await axios.post(
+            `/api/v1/conversations/${conv._id}/note`,
+            { content: trimmed },
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+          const updated = { ...conv, messages: data.conversation.messages };
+          setCurrentConversation(updated);
+          setConversations(prev => [updated, ...prev]);
+          applyPendingMentions(conv._id);
+        } else {
+          const { data } = await axios.post(
+            `/api/v1/conversations/${currentConversation._id}/note`,
+            { content: trimmed },
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+          const updated = { ...currentConversation, messages: data.conversation.messages };
+          setCurrentConversation(updated);
+          setConversations(prev => prev.map(c => c._id === updated._id ? updated : c));
+          applyPendingMentions(currentConversation._id);
+        }
+      } catch {
+        setCurrentConversation(prev => prev ? { ...prev, messages: [...(prev.messages || []), userMsg] } : prev);
+        applyPendingMentions(currentConversation?._id || '');
+      }
+      return;
+    }
 
     // If no conversation exists, create one first
     if (!currentConversation) {
@@ -1536,6 +1618,11 @@ export const App: React.FC = () => {
     // Authenticated — render chat shell below; the effect below loads the share.
   }
 
+  // Access-request respond links — process token then redirect to user-chat
+  if (location.pathname === '/access-request/respond') {
+    return <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100vh', fontFamily:'Arial', color:'#555' }}>Processing request…</div>;
+  }
+
   // Any other unmatched route for unauthenticated users → landing page
   if (!isAuthenticated) {
     return <NewLandingPage />;
@@ -1667,64 +1754,6 @@ export const App: React.FC = () => {
             />
           )}
           <div className="sidebar-conversations-v2">
-            {/* ── Shared Conversations (mentions) ── */}
-            <div className="folder-group">
-              <div className="folder-header" onClick={() => setIsSharedConvCollapsed(!isSharedConvCollapsed)}>
-                <BiChevronDown size={14} style={{ transform: isSharedConvCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)', transition: 'transform 0.2s', flexShrink: 0 }} />
-                <BiMessageRounded size={14} style={{ flexShrink: 0, color: 'var(--brand-color, #ed0000)' }} />
-                <span className="folder-name">Shared Conversations</span>
-                {mentionedConversations.length > 0 && <span className="folder-count">{mentionedConversations.length}</span>}
-              </div>
-              {!isSharedConvCollapsed && (
-                mentionedConversations.length === 0
-                  ? <div className="sidebar-empty" style={{ paddingLeft: 28, fontSize: 11 }}>No shared conversations yet</div>
-                  : mentionedConversations.map(m => (
-                    <div
-                      key={String(m.mentionId)}
-                      className={`sidebar-conversation-v2 folder-conv ${currentConversation?._id === String(m.conversation._id) ? 'active' : ''}`}
-                      onClick={() => {
-                        setCurrentConversation({ ...m.conversation, _id: String(m.conversation._id) });
-                        if (location.pathname !== '/user-chat') navigate('/user-chat');
-                        if (window.innerWidth <= 768) setSidebarOpen(false);
-                      }}
-                      style={{ cursor: 'pointer' }}
-                    >
-                      <div className="conv-title-v2">{m.conversation.title}</div>
-                      <div style={{ fontSize: 10, opacity: 0.6, paddingLeft: 2 }}>From {m.mentionerName}</div>
-                    </div>
-                  ))
-              )}
-            </div>
-
-            {/* ── Shared with me (direct shares) ── */}
-            <div className="folder-group">
-              <div className="folder-header" onClick={() => setIsSharedSectionCollapsed(!isSharedSectionCollapsed)}>
-                <BiChevronDown size={14} style={{ transform: isSharedSectionCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)', transition: 'transform 0.2s', flexShrink: 0 }} />
-                <BiShareAlt size={14} style={{ flexShrink: 0, color: 'var(--brand-color, #ed0000)' }} />
-                <span className="folder-name">Shared with me</span>
-                {sharedConversations.length > 0 && <span className="folder-count">{sharedConversations.length}</span>}
-              </div>
-              {!isSharedSectionCollapsed && (
-                sharedConversations.length === 0
-                  ? <div className="sidebar-empty" style={{ paddingLeft: 28, fontSize: 11 }}>Nothing shared with you yet</div>
-                  : sharedConversations.map((s) => (
-                    <div
-                      key={s.shareId}
-                      className={`sidebar-conversation-v2 folder-conv ${currentConversation?._id === s.conversation._id && currentConversation?.isShared ? 'active' : ''}`}
-                      onClick={() => openSharedConversation(s)}
-                      style={{ cursor: 'pointer' }}
-                    >
-                      <div className="conv-title-v2">
-                        {s.singleMessage ? "💬 " : ""}{s.conversation.title}
-                      </div>
-                      <div className="shared-meta" style={{ fontSize: 10, opacity: 0.6, paddingLeft: 2 }}>
-                        {s.sharedBy?.fullName || s.sharedBy?.email || "Someone"}
-                      </div>
-                    </div>
-                  ))
-              )}
-            </div>
-
             {/* ── Folders ── */}
             {(() => {
               const allFolderedIds = new Set([
@@ -1840,6 +1869,62 @@ export const App: React.FC = () => {
                       </div>
                     );
                   })}
+
+                  {/* ── Group Conversations (mentions) ── */}
+                  <div className="folder-group" style={{ marginTop: 4 }}>
+                    <div className="folder-header" onClick={() => setIsSharedConvCollapsed(!isSharedConvCollapsed)}>
+                      <BiChevronDown size={14} style={{ transform: isSharedConvCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)', transition: 'transform 0.2s', flexShrink: 0 }} />
+                      <BiMessageRounded size={14} style={{ flexShrink: 0, color: 'var(--brand-color, #ed0000)' }} />
+                      <span className="folder-name">Group Conversations</span>
+                      {mentionedConversations.length > 0 && <span className="folder-count">{mentionedConversations.length}</span>}
+                    </div>
+                    {!isSharedConvCollapsed && (
+                      mentionedConversations.length === 0
+                        ? <div className="sidebar-empty" style={{ paddingLeft: 28, fontSize: 11 }}>No group conversations yet</div>
+                        : mentionedConversations.map(m => (
+                          <div
+                            key={String(m.mentionId)}
+                            className={`sidebar-conversation-v2 folder-conv ${currentConversation?._id === String(m.conversation._id) ? 'active' : ''}`}
+                            onClick={() => {
+                              setCurrentConversation({ ...m.conversation, _id: String(m.conversation._id) });
+                              if (location.pathname !== '/user-chat') navigate('/user-chat');
+                              if (window.innerWidth <= 768) setSidebarOpen(false);
+                            }}
+                            style={{ cursor: 'pointer' }}
+                          >
+                            <div className="conv-title-v2">{m.conversation.title}</div>
+                            <div style={{ fontSize: 10, opacity: 0.6, paddingLeft: 2 }}>From {m.mentionerName}</div>
+                          </div>
+                        ))
+                    )}
+                  </div>
+
+                  {/* ── Shared with me (direct shares) ── */}
+                  <div className="folder-group" style={{ marginTop: 4 }}>
+                    <div className="folder-header" onClick={() => setIsSharedSectionCollapsed(!isSharedSectionCollapsed)}>
+                      <BiChevronDown size={14} style={{ transform: isSharedSectionCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)', transition: 'transform 0.2s', flexShrink: 0 }} />
+                      <BiShareAlt size={14} style={{ flexShrink: 0, color: 'var(--brand-color, #ed0000)' }} />
+                      <span className="folder-name">Shared with me</span>
+                      {sharedConversations.length > 0 && <span className="folder-count">{sharedConversations.length}</span>}
+                    </div>
+                    {!isSharedSectionCollapsed && (
+                      sharedConversations.length === 0
+                        ? <div className="sidebar-empty" style={{ paddingLeft: 28, fontSize: 11 }}>Nothing shared with you yet</div>
+                        : sharedConversations.map((s) => (
+                          <div
+                            key={s.shareId}
+                            className={`sidebar-conversation-v2 folder-conv ${currentConversation?._id === s.conversation._id && currentConversation?.isShared ? 'active' : ''}`}
+                            onClick={() => openSharedConversation(s)}
+                            style={{ cursor: 'pointer' }}
+                          >
+                            <div className="conv-title-v2">{s.singleMessage ? "💬 " : ""}{s.conversation.title}</div>
+                            <div style={{ fontSize: 10, opacity: 0.6, paddingLeft: 2 }}>
+                              {s.sharedBy?.fullName || s.sharedBy?.email || "Someone"}
+                            </div>
+                          </div>
+                        ))
+                    )}
+                  </div>
 
                   {/* ── Recent (unfiled only) ── */}
                   <div

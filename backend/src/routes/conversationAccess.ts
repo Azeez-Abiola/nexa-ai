@@ -14,7 +14,6 @@ import {
 export const conversationAccessRouter = express.Router();
 
 const FRONTEND_URL = (process.env.FRONTEND_URL || "http://localhost:3000").replace(/\/$/, "");
-const BACKEND_URL = (process.env.BACKEND_URL || FRONTEND_URL).replace(/\/$/, "");
 
 /** POST /api/v1/conversations/access-request */
 conversationAccessRouter.post(
@@ -72,8 +71,8 @@ conversationAccessRouter.post(
         requesterEmail: requester.email,
         conversationTitle,
         businessUnit: req.businessUnit || "",
-        acceptUrl: `${BACKEND_URL}/api/v1/conversations/access-request/respond?token=${acceptToken}&action=accept`,
-        rejectUrl: `${BACKEND_URL}/api/v1/conversations/access-request/respond?token=${rejectToken}&action=reject`,
+        acceptUrl: `${FRONTEND_URL}/access-request/respond?token=${acceptToken}&action=accept`,
+        rejectUrl: `${FRONTEND_URL}/access-request/respond?token=${rejectToken}&action=reject`,
       });
 
       return res.status(201).json({ message: "Access request sent" });
@@ -147,6 +146,67 @@ conversationAccessRouter.get(
     } catch (err) {
       console.error("[access-request/respond]", err);
       return page("Something went wrong", "Please try again later.", "#dc2626");
+    }
+  }
+);
+
+/** POST /api/v1/conversations/access-request/process — JSON endpoint for frontend */
+conversationAccessRouter.post(
+  "/access-request/process",
+  async (req: Request, res: Response) => {
+    const { token, action } = req.body as { token?: string; action?: string };
+    if (!token || !["accept", "reject"].includes(action || "")) {
+      return res.status(400).json({ error: "Invalid request" });
+    }
+    try {
+      const field = action === "accept" ? "acceptToken" : "rejectToken";
+      const ar = await ConversationAccessRequest.findOne({ [field]: token });
+      if (!ar) return res.status(404).json({ error: "This link has already been used or expired." });
+      if (ar.status !== "pending") return res.status(409).json({ status: ar.status, error: "Already processed" });
+
+      if (action === "reject") {
+        ar.status = "rejected";
+        await ar.save();
+        sendAccessRequestDeclinedEmail({ requesterEmail: ar.requesterEmail, requesterName: ar.requesterName, sharerName: ar.sharerName, conversationTitle: ar.conversationTitle });
+        return res.json({ status: "rejected", message: `You declined ${ar.requesterName}'s request.` });
+      }
+
+      ar.status = "accepted";
+      await ar.save();
+
+      const ownerConvs = await Conversation.findOne({ userId: ar.sharerId });
+      const group = ownerConvs?.conversationGroups.find(g => g._id.toString() === ar.conversationGroupId.toString());
+      if (group) {
+        let recipientConvs = await Conversation.findOne({ userId: ar.requesterId });
+        if (!recipientConvs) {
+          recipientConvs = new Conversation({ userId: ar.requesterId, businessUnit: ar.businessUnit, conversationGroups: [] });
+        }
+        recipientConvs.conversationGroups.push({ title: group.title, messages: group.messages, createdAt: new Date(), updatedAt: new Date() } as any);
+        await recipientConvs.save();
+      }
+
+      sendAccessRequestAcceptedEmail({ requesterEmail: ar.requesterEmail, requesterName: ar.requesterName, sharerName: ar.sharerName, conversationTitle: ar.conversationTitle, chatUrl: `${FRONTEND_URL}/user-chat` });
+      return res.json({ status: "accepted", message: `Access granted! ${ar.requesterName} can now continue the conversation.` });
+    } catch (err) {
+      console.error("[access-request/process]", err);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  }
+);
+
+/** GET /api/v1/conversations/access-request/status/:conversationGroupId — requester polls this */
+conversationAccessRouter.get(
+  "/access-request/status/:conversationGroupId",
+  authMiddleware,
+  async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const ar = await ConversationAccessRequest.findOne({
+        conversationGroupId: new mongoose.Types.ObjectId(req.params.conversationGroupId),
+        requesterId: new mongoose.Types.ObjectId(req.userId!),
+      }).sort({ createdAt: -1 });
+      return res.json({ status: ar?.status || "none" });
+    } catch {
+      return res.status(500).json({ error: "Internal server error" });
     }
   }
 );

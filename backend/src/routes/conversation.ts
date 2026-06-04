@@ -602,6 +602,37 @@ conversationRouter.delete("/:id", authMiddleware, async (req: AuthenticatedReque
   }
 });
 
+// ─── Save a user note without triggering AI ──────────────────────────────────
+conversationRouter.post("/:id/note", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { content } = req.body;
+    if (!content?.trim()) return res.status(400).json({ error: "content is required" });
+
+    const userConvs = await Conversation.findOne({ userId: req.userId });
+    if (!userConvs) return res.status(404).json({ error: "Conversation not found" });
+
+    const group = userConvs.conversationGroups.find(g => g._id.toString() === id);
+    if (!group) return res.status(404).json({ error: "Conversation not found" });
+
+    group.messages.push({ role: "user", content: content.trim(), timestamp: new Date() } as any);
+    group.updatedAt = new Date();
+    await userConvs.save();
+
+    res.json({
+      conversation: {
+        _id: group._id,
+        title: group.title,
+        messages: group.messages,
+        createdAt: group.createdAt,
+        updatedAt: group.updatedAt,
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // ─── Update conversation title ────────────────────────────────────────────────
 conversationRouter.put("/:id", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
