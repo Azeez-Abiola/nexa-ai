@@ -8,6 +8,7 @@ import {
   FileText,
   Layers,
   Loader2,
+  Pencil,
   Plus,
   Trash2,
   Users
@@ -81,6 +82,10 @@ const DepartmentDetail: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+
+  const [editOpen, setEditOpen] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [saving, setSaving] = useState(false);
 
   // Assign-employees Sheet state
   const [assignOpen, setAssignOpen] = useState(false);
@@ -199,6 +204,24 @@ const DepartmentDetail: React.FC = () => {
     }
   };
 
+  const handleEditSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!dept) return;
+    const name = editName.trim();
+    if (!name) return;
+    try {
+      setSaving(true);
+      await axios.patch(`/api/v1/admin/auth/departments/${dept._id}`, { name }, { headers });
+      toast({ title: "Department renamed", description: `Now called "${name}".` });
+      setEditOpen(false);
+      fetchDetail();
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Could not rename", description: err.response?.data?.error || "Please try again." });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleDelete = async () => {
     if (!dept) return;
     try {
@@ -269,14 +292,23 @@ const DepartmentDetail: React.FC = () => {
             </div>
           </div>
         </div>
-        <Button
-          variant="outline"
-          onClick={() => setDeleteOpen(true)}
-          className="rounded-xl font-bold h-11 px-5 border-slate-200 text-slate-700 hover:text-red-600 hover:border-red-200 shrink-0"
-        >
-          <Trash2 size={16} className="mr-2" />
-          Delete department
-        </Button>
+        <div className="flex items-center gap-3 shrink-0">
+          <Button
+            variant="outline"
+            onClick={() => { setEditName(dept.name); setEditOpen(true); }}
+            className="rounded-xl font-bold h-11 px-5 border-slate-200 text-slate-700 hover:text-[var(--brand-color)] hover:border-[var(--brand-color)]/30"
+          >
+            <Pencil size={16} className="mr-2" />
+            Edit department
+          </Button>
+          <Button
+            onClick={() => setDeleteOpen(true)}
+            className="rounded-xl font-bold h-11 px-5 bg-red-600 hover:bg-red-700 text-white border-none"
+          >
+            <Trash2 size={16} className="mr-2" />
+            Delete department
+          </Button>
+        </div>
       </header>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -421,6 +453,43 @@ const DepartmentDetail: React.FC = () => {
           )}
         </CardContent>
       </Card>
+
+      <Sheet open={editOpen} onOpenChange={(o) => { if (!o && saving) return; setEditOpen(o); }}>
+        <SheetContent side="right" className="sm:max-w-md flex flex-col p-0">
+          <SheetHeader className="text-left space-y-2 px-8 pt-8 pb-4">
+            <SheetTitle className="text-2xl font-black font-['Sen']">Edit department</SheetTitle>
+            <SheetDescription className="text-slate-500 font-medium text-sm leading-relaxed">
+              Renaming will update all users and documents currently tagged to this department.
+            </SheetDescription>
+          </SheetHeader>
+          <form onSubmit={handleEditSave} className="flex-1 px-8 pb-6 space-y-4">
+            <div className="space-y-2">
+              <Label className="text-sm font-bold text-slate-700">Department name</Label>
+              <Input
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                className="rounded-xl h-11 border-slate-200"
+                maxLength={100}
+                required
+                autoFocus
+              />
+            </div>
+          </form>
+          <SheetFooter className="px-8 py-6 border-t border-slate-100 flex-row gap-3 sm:gap-3 bg-slate-50/50">
+            <Button type="button" variant="ghost" className="flex-1 rounded-xl font-bold" onClick={() => setEditOpen(false)} disabled={saving}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleEditSave}
+              disabled={saving || !editName.trim() || editName.trim() === dept.name}
+              className="flex-[2] rounded-xl font-bold text-white h-11"
+              style={{ backgroundColor: "var(--brand-color)" }}
+            >
+              {saving ? <Loader2 className="animate-spin" size={18} /> : "Save changes"}
+            </Button>
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
 
       <AlertDialog open={deleteOpen} onOpenChange={(o) => !o && !deleting && setDeleteOpen(false)}>
         <AlertDialogContent className="rounded-2xl">
