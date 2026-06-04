@@ -296,14 +296,14 @@ const DepartmentDetail: React.FC = () => {
           <Button
             variant="outline"
             onClick={() => { setEditName(dept.name); setEditOpen(true); }}
-            className="rounded-xl font-bold h-11 px-5 border-slate-200 text-slate-700 hover:text-[var(--brand-color)] hover:border-[var(--brand-color)]/30"
+            className="rounded-xl font-bold h-11 px-5 border-slate-200 text-slate-700 hover:bg-[var(--brand-color)]/10 hover:text-[var(--brand-color)] hover:border-[var(--brand-color)]/30"
           >
             <Pencil size={16} className="mr-2" />
             Edit department
           </Button>
           <Button
             onClick={() => setDeleteOpen(true)}
-            className="rounded-xl font-bold h-11 px-5 bg-red-600 hover:bg-red-700 text-white border-none"
+            className="rounded-xl font-bold h-11 px-5 bg-red-600 hover:bg-red-700 text-white hover:text-white border-none"
           >
             <Trash2 size={16} className="mr-2" />
             Delete department
