@@ -7,6 +7,9 @@ dotenv.config();
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 const FRONTEND_URL = (process.env.FRONTEND_URL || "http://0.0.0.0:3000").replace(/\/$/, "");
+// Logos are served from the backend — use BACKEND_URL so email clients can reach them.
+// Falls back to FRONTEND_URL for local dev where both run behind the same proxy.
+const BACKEND_URL = (process.env.BACKEND_URL || FRONTEND_URL).replace(/\/$/, "");
 const FROM_EMAIL = process.env.FROM_EMAIL || "noreply@1879techhub.com";
 const NOTIFICATION_INBOX = process.env.SUPERADMIN_NOTIFICATION_EMAIL || process.env.CONTACT_INBOX_EMAIL || FROM_EMAIL;
 
@@ -191,7 +194,7 @@ export async function sendWelcomeEmail(
   const brandColor = tenantInfo?.colorCode || '#ed0000';
   const buLabel = tenantInfo?.label || businessUnit;
   const logoUrl = tenantInfo?.logo
-    ? (tenantInfo.logo.startsWith('http') ? tenantInfo.logo : `${FRONTEND_URL}/logos/${tenantInfo.logo.replace(/^\/logos\//, '')}`)
+    ? (tenantInfo.logo.startsWith('http') ? tenantInfo.logo : `${BACKEND_URL}/logos/${tenantInfo.logo.replace(/^\/logos\//, '')}`)
     : undefined;
   try {
     const html = await renderTemplate("welcome", {
