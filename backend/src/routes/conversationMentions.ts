@@ -2,6 +2,7 @@ import express, { Response } from "express";
 import mongoose from "mongoose";
 import { authMiddleware, AuthenticatedRequest } from "../middleware/auth";
 import { ConversationMention } from "../models/ConversationMention";
+import { ConversationCollaboration } from "../models/ConversationCollaboration";
 import { Conversation } from "../models/Conversation";
 import { User } from "../models/User";
 import { sendConversationMentionEmail } from "../services/emailService";
@@ -119,6 +120,15 @@ conversationMentionsRouter.post(
       await mentionedConvs.save();
 
       const forkedGroup = mentionedConvs.conversationGroups[mentionedConvs.conversationGroups.length - 1];
+
+      // Create bidirectional collaboration record so messages sync both ways
+      await ConversationCollaboration.create({
+        ownerId: new mongoose.Types.ObjectId(req.userId!),
+        ownerGroupId: conversationGroupId,
+        collaboratorId: new mongoose.Types.ObjectId(mentionedUserId),
+        collaboratorGroupId: forkedGroup._id.toString(),
+        businessUnit: req.businessUnit || "",
+      });
 
       await ConversationMention.create({
         mentionerId: new mongoose.Types.ObjectId(req.userId!),

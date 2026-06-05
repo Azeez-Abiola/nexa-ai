@@ -24,6 +24,9 @@ export interface ChatMessage {
   /** AI-generated file (docx/xlsx/pptx/pdf) attached to this assistant reply. */
   generatedDocument?: GeneratedDocument;
   timestamp: Date;
+  /** Set on user messages in collaborative conversations so recipients know who sent what. */
+  senderId?: string;
+  senderName?: string;
 }
 
 export interface ConversationGroup {
@@ -69,7 +72,9 @@ const MessageSchema = new Schema<ChatMessage>(
     imageUrls: { type: [String], default: undefined },
     sources: { type: [MessageSourceSchema], default: undefined },
     generatedDocument: { type: GeneratedDocumentSchema, default: undefined },
-    timestamp: { type: Date, default: Date.now }
+    timestamp: { type: Date, default: Date.now },
+    senderId: { type: String, default: undefined },
+    senderName: { type: String, default: undefined },
   },
   { _id: false }
 );

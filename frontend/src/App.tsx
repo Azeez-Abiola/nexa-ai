@@ -55,6 +55,8 @@ interface GeneratedDocument {
 interface Message {
   role: "user" | "assistant";
   content: string;
+  senderId?: string;
+  senderName?: string;
   imageUrls?: string[];
   sources?: MessageSource[];
   generatedDocument?: GeneratedDocument;
@@ -367,6 +369,30 @@ export const App: React.FC = () => {
       navigate('/user-chat', { replace: true });
     })();
   }, [location.pathname, location.search]);
+
+  // Poll current conversation for new messages from collaborators
+  useEffect(() => {
+    if (!currentConversation?._id || currentConversation.isShared || loading || !token) return;
+    // Only poll if conversation has any message with a senderId (collaborative)
+    const isCollab = currentConversation.messages?.some(m => m.senderId);
+    if (!isCollab) return;
+    const interval = setInterval(async () => {
+      try {
+        const { data } = await axios.get(
+          `/api/v1/conversations/${currentConversation._id}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        const fresh = data.conversation;
+        if (fresh && fresh.messages?.length > (currentConversation.messages?.length ?? 0)) {
+          setCurrentConversation(prev => prev && prev._id === fresh._id
+            ? { ...prev, messages: fresh.messages }
+            : prev
+          );
+        }
+      } catch { /* silent */ }
+    }, 8000);
+    return () => clearInterval(interval);
+  }, [currentConversation?._id, currentConversation?.messages?.length, loading, token]);
 
   // Poll for accepted/rejected access requests
   useEffect(() => {
@@ -2440,15 +2466,27 @@ export const App: React.FC = () => {
                       </div>
                     </div>
                   ) : null}
-                  {(currentConversation?.messages ?? []).map((m, idx) => (
-                    <div key={idx} className={`message-row-v2 ${m.role}${m.redacted ? ' redacted' : ''}`}>
-                      {m.role === 'assistant' && (
+                  {(currentConversation?.messages ?? []).map((m, idx) => {
+                    // Determine if this user message is from someone else in a collab convo
+                    const isOtherUser = m.role === 'user' && m.senderId && m.senderId !== user?.id;
+                    const initials = m.senderName
+                      ? m.senderName.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2)
+                      : (user?.fullName || user?.email || 'U').split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2);
+                    return (
+                    <div key={idx} className={`message-row-v2 ${isOtherUser ? 'assistant' : m.role}${m.redacted ? ' redacted' : ''}`} style={isOtherUser ? { alignItems: 'flex-start' } : {}}>
+                      {m.role === 'assistant' && !isOtherUser && (
                         <div className="message-avatar-v2">
                           <img src={selectedAvatar || "/avatar-1.png"} alt="Nexa" className="bot-avatar-img" />
                         </div>
                       )}
+                      {isOtherUser && (
+                        <div className="collab-avatar" title={m.senderName}>{initials}</div>
+                      )}
                       <div className="message-bubble-wrap-v2">
-                        <div className="message-bubble-v2">
+                        {isOtherUser && m.senderName && (
+                          <div className="collab-sender-name">{m.senderName}</div>
+                        )}
+                        <div className={`message-bubble-v2${isOtherUser ? ' collab-other' : ''}`}>
                           {m.imageUrls && m.imageUrls.length > 0 ? (
                             <div className="message-image-grid-v2">
                               {m.imageUrls.map((url, iIdx) => (
@@ -2534,8 +2572,13 @@ export const App: React.FC = () => {
                           ) : null}
                         </div>
                       </div>
+                      {/* Sender initials badge — own messages only */}
+                      {m.role === 'user' && !isOtherUser && (
+                        <div className="collab-avatar own" title={user?.fullName || user?.email}>{initials}</div>
+                      )}
                     </div>
-                  ))}
+                    );
+                  })}
                   {loading && currentConversation?.messages?.[currentConversation.messages.length - 1]?.role !== "assistant" && (
                     <div className="message-row-v2 assistant">
                       <div className="message-avatar-v2 message-avatar-thinking-v2">
@@ -3241,6 +3284,26 @@ export const App: React.FC = () => {
           color: #6b7280;
         }
         .dark-theme .shared-banner-meta { color: #9ca3af; }
+        /* Collaborative conversation sender initials */
+        .collab-avatar {
+          width: 28px; height: 28px; border-radius: 8px; flex-shrink: 0;
+          background: var(--brand-color, #ed0000); color: #fff;
+          display: flex; align-items: center; justify-content: center;
+          font-size: 11px; font-weight: 800;
+          align-self: flex-end; margin-bottom: 4px; margin-left: 6px;
+        }
+        .collab-avatar.own { order: 2; }
+        .message-row-v2.user { position: relative; }
+        .collab-sender-name {
+          font-size: 11px; font-weight: 700; color: var(--brand-color, #ed0000);
+          margin-bottom: 3px; padding-left: 2px;
+        }
+        .message-bubble-v2.collab-other {
+          background: #f0f0f0; color: #1a1a1a;
+          border-radius: 0 18px 18px 18px;
+        }
+        .dark-theme .message-bubble-v2.collab-other { background: #2a2a2a; color: #f3f4f6; }
+
         .shared-banner-request-btn {
           margin-top: 10px;
           align-self: flex-start;

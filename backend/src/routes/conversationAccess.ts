@@ -3,6 +3,7 @@ import crypto from "crypto";
 import mongoose from "mongoose";
 import { authMiddleware, AuthenticatedRequest } from "../middleware/auth";
 import { ConversationAccessRequest } from "../models/ConversationAccessRequest";
+import { ConversationCollaboration } from "../models/ConversationCollaboration";
 import { Conversation } from "../models/Conversation";
 import { User } from "../models/User";
 import {
@@ -132,6 +133,22 @@ conversationAccessRouter.get(
         }
         recipientConvs.conversationGroups.push({ title: group.title, messages: group.messages, createdAt: new Date(), updatedAt: new Date() } as any);
         await recipientConvs.save();
+
+        const forkedGroup = recipientConvs.conversationGroups[recipientConvs.conversationGroups.length - 1];
+        // Create collaboration so future messages sync both ways
+        const existingCollab = await ConversationCollaboration.findOne({
+          ownerGroupId: ar.conversationGroupId.toString(),
+          collaboratorId: ar.requesterId,
+        });
+        if (!existingCollab) {
+          await ConversationCollaboration.create({
+            ownerId: ar.sharerId,
+            ownerGroupId: ar.conversationGroupId.toString(),
+            collaboratorId: ar.requesterId,
+            collaboratorGroupId: forkedGroup._id.toString(),
+            businessUnit: ar.businessUnit,
+          });
+        }
       }
 
       sendAccessRequestAcceptedEmail({
@@ -183,6 +200,22 @@ conversationAccessRouter.post(
         }
         recipientConvs.conversationGroups.push({ title: group.title, messages: group.messages, createdAt: new Date(), updatedAt: new Date() } as any);
         await recipientConvs.save();
+
+        const forkedGroup = recipientConvs.conversationGroups[recipientConvs.conversationGroups.length - 1];
+        // Create collaboration so future messages sync both ways
+        const existingCollab = await ConversationCollaboration.findOne({
+          ownerGroupId: ar.conversationGroupId.toString(),
+          collaboratorId: ar.requesterId,
+        });
+        if (!existingCollab) {
+          await ConversationCollaboration.create({
+            ownerId: ar.sharerId,
+            ownerGroupId: ar.conversationGroupId.toString(),
+            collaboratorId: ar.requesterId,
+            collaboratorGroupId: forkedGroup._id.toString(),
+            businessUnit: ar.businessUnit,
+          });
+        }
       }
 
       sendAccessRequestAcceptedEmail({ requesterEmail: ar.requesterEmail, requesterName: ar.requesterName, sharerName: ar.sharerName, conversationTitle: ar.conversationTitle, chatUrl: `${FRONTEND_URL}/user-chat` });

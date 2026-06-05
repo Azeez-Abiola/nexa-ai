@@ -39,6 +39,7 @@ import {
 } from "../services/documentGeneratorService";
 import { randomUUID } from "crypto";
 import { ConversationFolder } from "../models/ConversationFolder";
+import { syncToCollaborators } from "../utils/syncCollaboration";
 
 // ─── Ephemeral document cache (avoids Cloudinary for AI-generated files) ──────
 
@@ -615,9 +616,17 @@ conversationRouter.post("/:id/note", authMiddleware, async (req: AuthenticatedRe
     const group = userConvs.conversationGroups.find(g => g._id.toString() === id);
     if (!group) return res.status(404).json({ error: "Conversation not found" });
 
-    group.messages.push({ role: "user", content: content.trim(), timestamp: new Date() } as any);
+    const noteMsg = {
+      role: "user" as const,
+      content: content.trim(),
+      timestamp: new Date(),
+      senderId: String(req.userId),
+      senderName: req.fullName || req.email || "User",
+    };
+    group.messages.push(noteMsg as any);
     group.updatedAt = new Date();
     await userConvs.save();
+    syncToCollaborators(id, [noteMsg]);
 
     res.json({
       conversation: {
@@ -1218,6 +1227,8 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
       role: "user" as const,
       content,
       timestamp: new Date(),
+      senderId: String(userId),
+      senderName: (req as AuthenticatedRequest).fullName || (req as AuthenticatedRequest).email || "User",
       ...(persistedImageUrls.length > 0 ? { imageUrls: persistedImageUrls } : {})
     };
     group.messages.push(userMessage);
@@ -1418,6 +1429,9 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
         { userId, "conversationGroups._id": new Types.ObjectId(chatSessionId) },
         { $set: { "conversationGroups.$.messages": group.messages } }
       );
+
+      // Sync user message + AI response to all collaboration partners (fire-and-forget)
+      syncToCollaborators(chatSessionId, [userMessage, assistantMessage]);
 
       const conversation = {
         _id: group._id,
