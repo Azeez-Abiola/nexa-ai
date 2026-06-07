@@ -60,6 +60,18 @@ import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import Directory from './Directory';
 
+/**
+ * Logos are served by the backend (e.g. "/logos/foo.png"). The super-admin app
+ * is hosted on a different origin, so relative paths must be resolved against
+ * the API base URL — otherwise the <img> 404s on the frontend origin.
+ */
+const resolveAssetUrl = (url?: string): string | undefined => {
+  if (!url) return url;
+  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) return url;
+  const base = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
+  return base ? `${base}${url}` : url;
+};
+
 const Tenants: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const mainTab = searchParams.get('tab') === 'registered' ? 'registered' : 'registry';
@@ -254,7 +266,7 @@ const Tenants: React.FC = () => {
                   <TableCell className="px-10 py-6">
                     <div className="flex items-center gap-5">
                       <div className="w-12 h-12 rounded-2xl bg-white dark:bg-slate-800 shadow-lg border border-slate-100 dark:border-slate-700 flex items-center justify-center text-[var(--brand-color)] overflow-hidden">
-                        {t.logo ? <img src={t.logo} alt="" className="w-full h-full object-contain p-2" /> : <Building2 size={24} />}
+                        {t.logo ? <img src={resolveAssetUrl(t.logo)} alt="" className="w-full h-full object-contain p-2" /> : <Building2 size={24} />}
                       </div>
                       <div className="space-y-0.5">
                         <p className="font-bold text-slate-900 text-base leading-tight">{t.name}</p>
@@ -580,7 +592,7 @@ const CreateTenantDrawer = ({ isOpen, onClose, onSuccess, tenant }: any) => {
               />
               {isEditing && tenant.logo && !logo ? (
                 <>
-                  <img src={tenant.logo} alt="Current logo" className="w-16 h-16 rounded-[1.5rem] object-contain mb-5 border border-slate-100 bg-white p-2" />
+                  <img src={resolveAssetUrl(tenant.logo)} alt="Current logo" className="w-16 h-16 rounded-[1.5rem] object-contain mb-5 border border-slate-100 bg-white p-2" />
                   <p className="text-slate-900 text-sm font-medium tracking-tight">Current logo</p>
                   <p className="text-[10px] text-slate-400 font-bold uppercase tracking-[0.2em] mt-3">Click to replace</p>
                 </>
