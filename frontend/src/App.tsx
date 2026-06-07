@@ -2467,26 +2467,25 @@ export const App: React.FC = () => {
                     </div>
                   ) : null}
                   {(currentConversation?.messages ?? []).map((m, idx) => {
-                    // Determine if this user message is from someone else in a collab convo
-                    const isOtherUser = m.role === 'user' && m.senderId && m.senderId !== user?.id;
-                    const initials = m.senderName
-                      ? m.senderName.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2)
-                      : (user?.fullName || user?.email || 'U').split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2);
+                    // In a collaborative conversation, user messages are tagged with a senderId.
+                    const showSender = m.role === 'user' && !!m.senderId;
+                    const isOwn = m.senderId === user?.id;
+                    const senderInitials = (m.senderName || '?')
+                      .split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2);
                     return (
-                    <div key={idx} className={`message-row-v2 ${isOtherUser ? 'assistant' : m.role}${m.redacted ? ' redacted' : ''}`} style={isOtherUser ? { alignItems: 'flex-start' } : {}}>
-                      {m.role === 'assistant' && !isOtherUser && (
+                    <div key={idx} className={`message-row-v2 ${m.role}${m.redacted ? ' redacted' : ''}`}>
+                      {m.role === 'assistant' && (
                         <div className="message-avatar-v2">
                           <img src={selectedAvatar || "/avatar-1.png"} alt="Nexa" className="bot-avatar-img" />
                         </div>
                       )}
-                      {isOtherUser && (
-                        <div className="collab-avatar" title={m.senderName}>{initials}</div>
-                      )}
                       <div className="message-bubble-wrap-v2">
-                        {isOtherUser && m.senderName && (
-                          <div className="collab-sender-name">{m.senderName}</div>
+                        {showSender && (
+                          <div className={`collab-sender-badge${isOwn ? ' own' : ''}`} title={isOwn ? 'You' : (m.senderName || 'Collaborator')}>
+                            {isOwn ? 'You' : senderInitials}
+                          </div>
                         )}
-                        <div className={`message-bubble-v2${isOtherUser ? ' collab-other' : ''}`}>
+                        <div className="message-bubble-v2">
                           {m.imageUrls && m.imageUrls.length > 0 ? (
                             <div className="message-image-grid-v2">
                               {m.imageUrls.map((url, iIdx) => (
@@ -2572,10 +2571,6 @@ export const App: React.FC = () => {
                           ) : null}
                         </div>
                       </div>
-                      {/* Sender initials badge — own messages only */}
-                      {m.role === 'user' && !isOtherUser && (
-                        <div className="collab-avatar own" title={user?.fullName || user?.email}>{initials}</div>
-                      )}
                     </div>
                     );
                   })}
@@ -3284,25 +3279,23 @@ export const App: React.FC = () => {
           color: #6b7280;
         }
         .dark-theme .shared-banner-meta { color: #9ca3af; }
-        /* Collaborative conversation sender initials */
-        .collab-avatar {
-          width: 28px; height: 28px; border-radius: 8px; flex-shrink: 0;
+        /* Collaborative conversation sender badge — sits top-right of the bubble */
+        .collab-sender-badge {
+          align-self: flex-end;
+          min-width: 24px; height: 22px; padding: 0 7px;
+          border-radius: 7px; flex-shrink: 0;
           background: var(--brand-color, #ed0000); color: #fff;
-          display: flex; align-items: center; justify-content: center;
-          font-size: 11px; font-weight: 800;
-          align-self: flex-end; margin-bottom: 4px; margin-left: 6px;
+          display: inline-flex; align-items: center; justify-content: center;
+          font-size: 11px; font-weight: 800; letter-spacing: 0.3px;
         }
-        .collab-avatar.own { order: 2; }
-        .message-row-v2.user { position: relative; }
-        .collab-sender-name {
-          font-size: 11px; font-weight: 700; color: var(--brand-color, #ed0000);
-          margin-bottom: 3px; padding-left: 2px;
+        /* Your own messages get a quieter, outlined badge labelled "You" */
+        .collab-sender-badge.own {
+          background: transparent;
+          color: var(--brand-color, #ed0000);
+          border: 1px solid var(--brand-color, #ed0000);
+          font-weight: 700;
         }
-        .message-bubble-v2.collab-other {
-          background: #f0f0f0; color: #1a1a1a;
-          border-radius: 0 18px 18px 18px;
-        }
-        .dark-theme .message-bubble-v2.collab-other { background: #2a2a2a; color: #f3f4f6; }
+        .dark-theme .collab-sender-badge.own { color: #f3f4f6; border-color: #4b5563; }
 
         .shared-banner-request-btn {
           margin-top: 10px;

@@ -3,7 +3,9 @@ import { ConversationCollaboration } from "../models/ConversationCollaboration";
 
 /**
  * After any message save in a collaborative conversation, push the same
- * messages to every partner's copy so both parties see an up-to-date thread.
+ * messages to every *other* participant's copy so the whole group — the
+ * owner and all collaborators — sees an up-to-date thread, including the
+ * messages people exchange with the AI and the AI's replies.
  *
  * Fire-and-forget — never throws; errors are logged and swallowed.
  */
@@ -12,30 +14,41 @@ export async function syncToCollaborators(
   newMessages: Partial<ChatMessage>[]
 ): Promise<void> {
   try {
-    const collabs = await ConversationCollaboration.find({
+    // Find every collaboration record this group participates in (as owner or collaborator).
+    const direct = await ConversationCollaboration.find({
       $or: [{ ownerGroupId: sourceGroupId }, { collaboratorGroupId: sourceGroupId }],
     }).lean();
 
-    if (collabs.length === 0) return;
+    if (direct.length === 0) return;
 
-    for (const collab of collabs) {
-      const isOwnerSide = collab.ownerGroupId === sourceGroupId;
-      const partnerId = isOwnerSide ? collab.collaboratorId : collab.ownerId;
-      const partnerGroupId = isOwnerSide ? collab.collaboratorGroupId : collab.ownerGroupId;
+    // A "cluster" is keyed by the owner group id. Pull the full cluster so a message
+    // from one collaborator also reaches the owner AND all other collaborators.
+    const ownerGroupIds = [...new Set(direct.map((c) => c.ownerGroupId))];
+    const cluster = await ConversationCollaboration.find({
+      ownerGroupId: { $in: ownerGroupIds },
+    }).lean();
 
-      const partnerConvs = await Conversation.findOne({ userId: partnerId });
-      if (!partnerConvs) continue;
+    // Map every participant's group -> their userId (dedup across records).
+    const targets = new Map<string, any>();
+    for (const c of cluster) {
+      targets.set(c.ownerGroupId, c.ownerId);
+      targets.set(c.collaboratorGroupId, c.collaboratorId);
+    }
+    // Never echo the message back to the sender's own copy.
+    targets.delete(sourceGroupId);
 
-      const partnerGroup = partnerConvs.conversationGroups.find(
-        (g) => g._id.toString() === partnerGroupId
-      );
-      if (!partnerGroup) continue;
+    for (const [groupId, userId] of targets) {
+      const convs = await Conversation.findOne({ userId });
+      if (!convs) continue;
+
+      const group = convs.conversationGroups.find((g) => g._id.toString() === groupId);
+      if (!group) continue;
 
       for (const msg of newMessages) {
-        partnerGroup.messages.push(msg as ChatMessage);
+        group.messages.push(msg as ChatMessage);
       }
-      partnerGroup.updatedAt = new Date();
-      await partnerConvs.save();
+      group.updatedAt = new Date();
+      await convs.save();
     }
   } catch (err) {
     console.error("[syncCollaboration] error:", (err as Error).message);
