@@ -5,6 +5,7 @@ import { Types } from "mongoose";
 import { Conversation } from "../models/Conversation";
 import { UserDocument } from "../models/UserDocument";
 import { RagDocument } from "../models/RagDocument";
+import { KnowledgeGroup } from "../models/KnowledgeGroup";
 import { authMiddleware, AuthenticatedRequest } from "../middleware/auth";
 import {
   generateConversationTitle,
@@ -308,17 +309,39 @@ const KB_INVENTORY_RE = /\b(how many|number of|count of|total|list|what|which)\b
  * knowledge base — asked "how many documents do we have?" it just counts the excerpts
  * in front of it. When the query is an inventory question, give it the real totals
  * (latest, fully-processed documents for the business unit) so it answers accurately.
+ *
+ * Access is enforced the same way as chunk retrieval: open documents (no/empty
+ * allowedGroupIds) are visible to everyone; restricted ones require the user to be a
+ * member of at least one of the document's knowledge groups. This prevents leaking
+ * the titles of documents the user cannot otherwise see.
  */
-async function buildKbInventoryNote(businessUnit: string, query: string): Promise<string> {
+async function buildKbInventoryNote(
+  businessUnit: string,
+  query: string,
+  userId?: string
+): Promise<string> {
   if (!KB_INVENTORY_RE.test(query)) return "";
   try {
+    const uid = userId && Types.ObjectId.isValid(userId) ? new Types.ObjectId(userId) : null;
+    const groups = uid
+      ? await KnowledgeGroup.find({ businessUnit, memberUserIds: uid }).select("_id").lean()
+      : [];
+    const groupIds = groups.map((g) => g._id as Types.ObjectId);
+
+    // Open docs are visible to all; restricted docs need a matching group membership.
+    const accessOr: Record<string, unknown>[] = [
+      { allowedGroupIds: { $exists: false } },
+      { allowedGroupIds: { $size: 0 } }
+    ];
+    if (groupIds.length > 0) accessOr.push({ allowedGroupIds: { $in: groupIds } });
+
     const docs = await RagDocument.find(
-      { businessUnit, isLatestVersion: true, processingStatus: "completed" },
+      { businessUnit, isLatestVersion: true, processingStatus: "completed", $or: accessOr },
       { title: 1 }
     ).sort({ title: 1 }).lean();
     if (docs.length === 0) return "";
     const titles = docs.map((d: any, i: number) => `${i + 1}. ${d.title}`).join("\n");
-    return `\n\nKNOWLEDGE BASE INVENTORY (authoritative — this is the COMPLETE list of documents in the knowledge base, not limited to the excerpts retrieved above. Use it for any "how many / list / what documents" question):\nTotal documents: ${docs.length}\n${titles}`;
+    return `\n\nKNOWLEDGE BASE INVENTORY (authoritative — this is the COMPLETE list of documents in the knowledge base you can access, not limited to the excerpts retrieved above. Use it for any "how many / list / what documents" question):\nTotal documents: ${docs.length}\n${titles}`;
   } catch {
     return "";
   }
@@ -875,7 +898,7 @@ conversationRouter.post("/:id/message", authMiddleware, async (req: Authenticate
     // ── Build system prompt ───────────────────────────────────────────────────
     const hasGlobalContext = globalContext.source !== "none" && !globalContext.accessDenied;
 
-    const systemPrompt = buildSystemPrompt(
+    let systemPrompt = buildSystemPrompt(
       businessUnit,
       sessionContextString,
       globalContext.hybridContextString,
@@ -884,6 +907,8 @@ conversationRouter.post("/:id/message", authMiddleware, async (req: Authenticate
       globalContext.source,
       model
     );
+    // Give the model the true knowledge-base totals when asked an inventory question.
+    systemPrompt += await buildKbInventoryNote(businessUnit, content, req.userId);
 
     // ── Generate AI response ──────────────────────────────────────────────────
     let aiResponse = "";
@@ -1025,7 +1050,7 @@ conversationRouter.post("/:id/message/:index/edit", authMiddleware, async (req: 
     }
 
     const hasGlobalContext = globalContext.source !== "none" && !globalContext.accessDenied;
-    const systemPrompt = buildSystemPrompt(
+    let systemPrompt = buildSystemPrompt(
       businessUnit,
       sessionContextString,
       globalContext.hybridContextString,
@@ -1034,6 +1059,8 @@ conversationRouter.post("/:id/message/:index/edit", authMiddleware, async (req: 
       globalContext.source,
       model
     );
+    // Give the model the true knowledge-base totals when asked an inventory question.
+    systemPrompt += await buildKbInventoryNote(businessUnit, content, req.userId);
 
     let aiResponse = "";
     try {
@@ -1363,7 +1390,7 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
       systemPrompt += `\n\n📎 DOCUMENT GENERATION: The user has requested a ${docRequest.label}. Confirm you are generating it and briefly describe (1–2 sentences) what the file will contain. Do NOT mention a download link — the system will attach it automatically below your message.`;
     }
     // Give the model the true knowledge-base totals when asked an inventory question.
-    systemPrompt += await buildKbInventoryNote(businessUnit, content);
+    systemPrompt += await buildKbInventoryNote(businessUnit, content, req.userId);
 
     const policyContext = globalContext.policies.map((p: any) => ({
       title: p.title,
