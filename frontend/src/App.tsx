@@ -1758,7 +1758,15 @@ export const App: React.FC = () => {
       <div className={`ufl-root ${theme === 'dark' ? 'dark-theme' : ''}`}>
         <aside className={`sidebar ${sidebarOpen ? 'sidebar-open' : ''}`}>
           <div className="sidebar-header-main">
-            <div className="sidebar-logo">
+            <div
+              className="sidebar-logo"
+              role="button"
+              tabIndex={0}
+              title="Start a new chat"
+              style={{ cursor: 'pointer' }}
+              onClick={handleNewChat}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleNewChat(); } }}
+            >
               <div className="logo-icon-wrapper">
                 <img src="/1879-22.png" alt="Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
               </div>
@@ -2128,7 +2136,13 @@ export const App: React.FC = () => {
             </div>
             <div
               className="header-brand-v2"
+              role="button"
+              tabIndex={0}
+              title="Start a new chat"
+              style={{ cursor: 'pointer' }}
               aria-label={user?.tenantLabel || user?.businessUnit || "Nexa"}
+              onClick={handleNewChat}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleNewChat(); } }}
             >
               {chatHeaderTenantLogoUrl ? (
                 <img

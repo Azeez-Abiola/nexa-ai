@@ -300,6 +300,30 @@ async function extractTextFromFile(file: Express.Multer.File): Promise<string> {
   }
 }
 
+// "how many / list / what documents are in the knowledge base?" — inventory questions.
+const KB_INVENTORY_RE = /\b(how many|number of|count of|total|list|what|which)\b[\s\S]{0,40}\b(document|file|policy|policies|knowledge ?base|kb|upload)/i;
+
+/**
+ * The chat model only ever sees the top-K retrieved chunks, so it cannot count the
+ * knowledge base — asked "how many documents do we have?" it just counts the excerpts
+ * in front of it. When the query is an inventory question, give it the real totals
+ * (latest, fully-processed documents for the business unit) so it answers accurately.
+ */
+async function buildKbInventoryNote(businessUnit: string, query: string): Promise<string> {
+  if (!KB_INVENTORY_RE.test(query)) return "";
+  try {
+    const docs = await RagDocument.find(
+      { businessUnit, isLatestVersion: true, processingStatus: "completed" },
+      { title: 1 }
+    ).sort({ title: 1 }).lean();
+    if (docs.length === 0) return "";
+    const titles = docs.map((d: any, i: number) => `${i + 1}. ${d.title}`).join("\n");
+    return `\n\nKNOWLEDGE BASE INVENTORY (authoritative — this is the COMPLETE list of documents in the knowledge base, not limited to the excerpts retrieved above. Use it for any "how many / list / what documents" question):\nTotal documents: ${docs.length}\n${titles}`;
+  } catch {
+    return "";
+  }
+}
+
 /**
  * Build the combined system prompt, injecting session document context and/or
  * global business-unit context depending on what's available.
@@ -1338,6 +1362,8 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
     if (docRequest) {
       systemPrompt += `\n\n📎 DOCUMENT GENERATION: The user has requested a ${docRequest.label}. Confirm you are generating it and briefly describe (1–2 sentences) what the file will contain. Do NOT mention a download link — the system will attach it automatically below your message.`;
     }
+    // Give the model the true knowledge-base totals when asked an inventory question.
+    systemPrompt += await buildKbInventoryNote(businessUnit, content);
 
     const policyContext = globalContext.policies.map((p: any) => ({
       title: p.title,
