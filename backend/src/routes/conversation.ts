@@ -301,8 +301,13 @@ async function extractTextFromFile(file: Express.Multer.File): Promise<string> {
   }
 }
 
-// "how many / list / what documents are in the knowledge base?" — inventory questions.
-const KB_INVENTORY_RE = /\b(how many|number of|count of|total|list|what|which)\b[\s\S]{0,40}\b(document|file|policy|policies|knowledge ?base|kb|upload)/i;
+// Inventory questions ("how many / list / what documents are in the knowledge base?").
+// Two-part match: the query must mention a KB noun AND an inventory/quantity intent.
+// Kept deliberately permissive — a false positive only adds a doc list to the prompt,
+// whereas a miss leaves the model counting the handful of retrieved chunks.
+const KB_NOUN_RE = /\b(knowledge ?base|kb|kbs|documents?|files?|policy|policies|uploads?|uploaded)\b/i;
+const KB_INTENT_RE = /\b(how many|how much|numbers?|count|counting|total|list|listing|inventory|all (of|the)|what (are|documents|files|do)|which (documents|files))\b/i;
+const isKbInventoryQuery = (q: string): boolean => KB_NOUN_RE.test(q) && KB_INTENT_RE.test(q);
 
 /**
  * The chat model only ever sees the top-K retrieved chunks, so it cannot count the
@@ -320,7 +325,7 @@ async function buildKbInventoryNote(
   query: string,
   userId?: string
 ): Promise<string> {
-  if (!KB_INVENTORY_RE.test(query)) return "";
+  if (!isKbInventoryQuery(query)) return "";
   try {
     const uid = userId && Types.ObjectId.isValid(userId) ? new Types.ObjectId(userId) : null;
     const groups = uid
