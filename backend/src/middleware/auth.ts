@@ -33,16 +33,26 @@ export const authMiddleware = (
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET) as any;
-    req.userId = decoded.userId;
-    req.email = decoded.email;
     // Trim BU values in case an old JWT carries legacy trailing-space drift — downstream queries
     // exact-match on these and silently return empty if the JWT value doesn't match the cleaned DB.
     req.businessUnit = typeof decoded.businessUnit === "string" ? decoded.businessUnit.trim() : decoded.businessUnit;
-    req.department = decoded.department;
     req.tenantId = decoded.tenantId;
     req.tenantSlug = decoded.tenantSlug;
     req.tenantName = typeof decoded.tenantName === "string" ? decoded.tenantName.trim() : decoded.tenantName;
+    req.email = decoded.email;
     req.isAdmin = !!decoded.isAdmin;
+
+    if (decoded.isAdmin) {
+      // Admin token used on a chat/employee route — allow access, treat adminId as userId
+      // so all downstream conversation storage and retrieval works unchanged.
+      const id = (decoded.adminId || decoded.userId)?.toString();
+      req.adminId = id;
+      req.userId = id;
+      req.fullName = decoded.fullName;
+    } else {
+      req.userId = decoded.userId;
+      req.department = decoded.department;
+    }
     next();
   } catch (error) {
     res.status(401).json({ error: "Invalid or expired token" });

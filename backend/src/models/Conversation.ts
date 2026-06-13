@@ -1,4 +1,5 @@
 import mongoose, { Schema, Document } from "mongoose";
+import { encrypt, decrypt } from "../utils/encryption";
 
 export interface MessageSource {
   documentId: string;
@@ -68,7 +69,12 @@ const GeneratedDocumentSchema = new Schema<GeneratedDocument>(
 const MessageSchema = new Schema<ChatMessage>(
   {
     role: { type: String, enum: ["user", "assistant"], required: true },
-    content: { type: String, required: true },
+    content: {
+      type: String,
+      required: true,
+      get: (v: string) => decrypt(v),
+      set: (v: string) => encrypt(v),
+    },
     imageUrls: { type: [String], default: undefined },
     sources: { type: [MessageSourceSchema], default: undefined },
     generatedDocument: { type: GeneratedDocumentSchema, default: undefined },
