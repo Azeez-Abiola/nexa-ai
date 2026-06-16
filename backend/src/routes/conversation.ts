@@ -42,9 +42,7 @@ import { randomUUID } from "crypto";
 import { ConversationFolder } from "../models/ConversationFolder";
 import { syncToCollaborators } from "../utils/syncCollaboration";
 
-// ─── Ephemeral document cache (avoids Cloudinary for AI-generated files) ──────
-
-const DOC_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const DOC_TTL_MS = 24 * 60 * 60 * 1000;
 
 interface CachedDoc {
   buffer: Buffer;
@@ -58,14 +56,11 @@ const docCache = new Map<string, CachedDoc>();
 function cacheDocument(buffer: Buffer, filename: string, mimeType: string): string {
   const id = randomUUID();
   docCache.set(id, { buffer, filename, mimeType, expiresAt: Date.now() + DOC_TTL_MS });
-  // Lazy cleanup: remove expired entries whenever a new one is added
   for (const [k, v] of docCache) {
     if (v.expiresAt < Date.now()) docCache.delete(k);
   }
   return id;
 }
-
-// ─── Document generation helpers ─────────────────────────────────────────────
 
 const DOC_LABELS: Record<DocumentType, string> = {
   docx: "Word document",
@@ -162,7 +157,6 @@ async function generateAndCacheDocument(
 
 export const conversationRouter = express.Router();
 
-// ─── Multer — in-memory, for chat file uploads ────────────────────────────────
 const ALLOWED_MIME_TYPES = [
   "application/pdf",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -194,10 +188,7 @@ const upload = multer({
   }
 });
 
-/**
- * Run multer as a promise so it can be called inside async route handlers
- * and errors can be caught with try/catch.
- */
+// Wrapped in a promise so it can be awaited inside async route handlers and errors caught with try/catch.
 function runMulter(req: any, res: any): Promise<void> {
   return new Promise((resolve, reject) => {
     upload.array("files", MAX_FILES_PER_REQUEST)(req, res, (err) => {
@@ -207,10 +198,6 @@ function runMulter(req: any, res: any): Promise<void> {
   });
 }
 
-/**
- * Upload files to Cloudinary, create UserDocument records, and enqueue processing jobs.
- * Returns the created document records.
- */
 async function handleFileUploads(
   files: Express.Multer.File[],
   userId: string,
@@ -221,7 +208,6 @@ async function handleFileUploads(
 
   for (const file of files) {
     try {
-      // Upload to Cloudinary
       const { publicId, secureUrl } = await uploadDocument(
         file.buffer,
         file.originalname,
@@ -229,7 +215,6 @@ async function handleFileUploads(
         file.mimetype
       );
 
-      // Create UserDocument record
       const doc = await UserDocument.create({
         userId,
         chatSessionId,
@@ -241,7 +226,6 @@ async function handleFileUploads(
         status: "pending"
       });
 
-      // Enqueue async processing job
       await userDocumentQueue.add(
         `process-${doc._id}`,
         {
@@ -268,7 +252,7 @@ async function handleFileUploads(
         fileName: file.originalname,
         error: err.message
       });
-      // Don't throw — partial failure should not block the chat message
+      // Partial failure should not block the rest of the chat message.
       results.push({ fileName: file.originalname, status: "failed", documentId: "" });
     }
   }
@@ -301,7 +285,6 @@ async function extractTextFromFile(file: Express.Multer.File): Promise<string> {
   }
 }
 
-// Inventory questions ("how many / list / what documents are in the knowledge base?").
 // Two-part match: the query must mention a KB noun AND an inventory/quantity intent.
 // Kept deliberately permissive — a false positive only adds a doc list to the prompt,
 // whereas a miss leaves the model counting the handful of retrieved chunks.
@@ -333,7 +316,6 @@ async function buildKbInventoryNote(
       : [];
     const groupIds = groups.map((g) => g._id as Types.ObjectId);
 
-    // Open docs are visible to all; restricted docs need a matching group membership.
     const accessOr: Record<string, unknown>[] = [
       { allowedGroupIds: { $exists: false } },
       { allowedGroupIds: { $size: 0 } }
@@ -352,10 +334,6 @@ async function buildKbInventoryNote(
   }
 }
 
-/**
- * Build the combined system prompt, injecting session document context and/or
- * global business-unit context depending on what's available.
- */
 function buildSystemPrompt(
   businessUnit: string,
   sessionContextString: string,
@@ -363,10 +341,14 @@ function buildSystemPrompt(
   pendingFileNames: string[],
   hasGlobalContext: boolean,
   contextSource: "rag" | "keyword" | "google_only" | "none" = "none",
-  activeModel: "gpt" | "claude" = "gpt"
+  activeModel: "gpt" | "claude" | "kimi" | "deepseek" = "gpt"
 ): string {
   const today = new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
-  const modelLabel = activeModel === "claude" ? "Claude Opus 4.7" : "GPT-5";
+  const modelLabel =
+    activeModel === "claude"   ? "Claude Opus 4.7" :
+    activeModel === "kimi"     ? "Kimi k2.5" :
+    activeModel === "deepseek" ? "DeepSeek v4" :
+    "GPT-5";
   const sections: string[] = [
     `You are Nexa AI, a helpful AI assistant for ${businessUnit}, a business unit of UACN, powered by ${modelLabel}. Today's date is ${today}. If asked which model or AI you use, say you are Nexa AI powered by ${modelLabel}. Users can switch between models at any time — if the model differs from a previous message, do not apologize or treat it as an error; simply state the current model naturally.`
   ];
@@ -382,9 +364,9 @@ function buildSystemPrompt(
   }
 
   if (globalContextString && hasGlobalContext) {
-    // Label the context block for what it actually is. When the source is pure web results, the
-    // old "COMPANY KNOWLEDGE BASE" label confused the model into ignoring them for time-sensitive
-    // questions and falling back to its training cutoff.
+    // The label must match the actual source — when it's pure web results, the old
+    // "COMPANY KNOWLEDGE BASE" label confused the model into ignoring them for
+    // time-sensitive questions and falling back to its training cutoff.
     const isWebOnly = contextSource === "google_only";
     const header = isWebOnly
       ? `🌐 FRESH WEB SEARCH RESULTS (from Google, pulled at request time — these are authoritative for current events, dates, news, sports, prices, and anything time-sensitive):`
@@ -414,8 +396,6 @@ ${KNOWLEDGE_BASE_VERSIONING_RULES}`);
 
   return sections.join("\n\n");
 }
-
-// ─── Folder endpoints ────────────────────────────────────────────────────────
 
 conversationRouter.get("/folders", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -467,7 +447,7 @@ conversationRouter.delete("/folders/:folderId", authMiddleware, async (req: Auth
   }
 });
 
-// Add a conversation to a folder (removes it from any other folder first)
+// Removes the conversation from any other folder first, so it can only ever live in one folder.
 conversationRouter.post("/folders/:folderId/add", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { conversationId } = req.body;
@@ -485,7 +465,6 @@ conversationRouter.post("/folders/:folderId/add", authMiddleware, async (req: Au
   }
 });
 
-// Remove a conversation from a folder
 conversationRouter.delete("/folders/:folderId/conversations/:convId", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     await ConversationFolder.updateOne(
@@ -498,7 +477,6 @@ conversationRouter.delete("/folders/:folderId/conversations/:convId", authMiddle
   }
 });
 
-// ─── Get conversations (paginated) ───────────────────────────────────────────
 conversationRouter.get("/", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const limit = Math.min(parseInt((req.query.limit as string) || "20"), 50);
@@ -529,7 +507,7 @@ conversationRouter.get("/", authMiddleware, async (req: AuthenticatedRequest, re
     ]);
 
     if (!result) {
-      // First login — atomically create the document (upsert avoids race-condition duplicate key errors)
+      // Upsert avoids a race-condition duplicate key error on a user's first login.
       await Conversation.updateOne(
         { userId: req.userId },
         { $setOnInsert: { businessUnit: req.businessUnit, conversationGroups: [] } },
@@ -554,7 +532,6 @@ conversationRouter.get("/", authMiddleware, async (req: AuthenticatedRequest, re
   }
 });
 
-// ─── Create a new conversation ────────────────────────────────────────────────
 conversationRouter.post("/", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     let userConversations = await Conversation.findOne({ userId: req.userId });
@@ -595,7 +572,6 @@ conversationRouter.post("/", authMiddleware, async (req: AuthenticatedRequest, r
   }
 });
 
-// ─── Get a specific conversation ─────────────────────────────────────────────
 conversationRouter.get("/:id", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
@@ -628,7 +604,6 @@ conversationRouter.get("/:id", authMiddleware, async (req: AuthenticatedRequest,
   }
 });
 
-// ─── Delete a conversation ────────────────────────────────────────────────────
 conversationRouter.delete("/:id", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
@@ -655,7 +630,6 @@ conversationRouter.delete("/:id", authMiddleware, async (req: AuthenticatedReque
   }
 });
 
-// ─── Save a user note without triggering AI ──────────────────────────────────
 conversationRouter.post("/:id/note", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
@@ -694,7 +668,6 @@ conversationRouter.post("/:id/note", authMiddleware, async (req: AuthenticatedRe
   }
 });
 
-// ─── Update conversation title ────────────────────────────────────────────────
 conversationRouter.put("/:id", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
@@ -736,7 +709,6 @@ conversationRouter.put("/:id", authMiddleware, async (req: AuthenticatedRequest,
   }
 });
 
-// ─── Add message + optional file upload ──────────────────────────────────────
 /**
  * Accepts multipart/form-data OR application/json.
  *
@@ -753,7 +725,6 @@ conversationRouter.post("/:id/message", authMiddleware, async (req: Authenticate
     const userId = req.userId!;
     const businessUnit = req.businessUnit!;
 
-    // Parse multipart if needed — no-op for application/json
     try {
       await runMulter(req, res);
     } catch (multerErr: any) {
@@ -763,7 +734,7 @@ conversationRouter.post("/:id/message", authMiddleware, async (req: Authenticate
       throw multerErr;
     }
 
-    // Support both multipart (message field) and JSON (content field) for backward compat
+    // Supports both multipart (message field) and JSON (content field) for backward compat.
     const content: string = (req.body.message || req.body.content || "").trim();
     const model = parseModel(req.body.model);
     const uploadedFiles = (req.files as Express.Multer.File[]) || [];
@@ -772,7 +743,6 @@ conversationRouter.post("/:id/message", authMiddleware, async (req: Authenticate
       return res.status(400).json({ error: "Message content or file is required" });
     }
 
-    // ── Session file-count guard ──────────────────────────────────────────────
     if (uploadedFiles.length > 0) {
       const existingCount = await UserDocument.countDocuments({ userId, chatSessionId });
       if (existingCount + uploadedFiles.length > MAX_FILES_PER_SESSION) {
@@ -782,7 +752,6 @@ conversationRouter.post("/:id/message", authMiddleware, async (req: Authenticate
       }
     }
 
-    // ── Load conversation ─────────────────────────────────────────────────────
     const userConversations = await Conversation.findOne({ userId });
     if (!userConversations) {
       return res.status(404).json({ error: "Conversation not found" });
@@ -795,13 +764,11 @@ conversationRouter.post("/:id/message", authMiddleware, async (req: Authenticate
       return res.status(404).json({ error: "Conversation not found" });
     }
 
-    // ── Upload files (async, non-blocking for chat) ───────────────────────────
     let uploadedDocs: { fileName: string; status: string; documentId: string }[] = [];
     if (uploadedFiles.length > 0) {
       uploadedDocs = await handleFileUploads(uploadedFiles, userId, chatSessionId, businessUnit);
     }
 
-    // If user only uploaded files with no message, acknowledge and return
     if (!content && uploadedFiles.length > 0) {
       const successUploads = uploadedDocs.filter((d) => d.status === "pending");
       const failedUploads = uploadedDocs.filter((d) => d.status === "failed");
@@ -829,18 +796,15 @@ conversationRouter.post("/:id/message", authMiddleware, async (req: Authenticate
       });
     }
 
-    // ── Push user message ─────────────────────────────────────────────────────
     const userMessage = { role: "user" as const, content, timestamp: new Date() };
     group.messages.push(userMessage);
 
-    // ── Build context: session docs + global ──────────────────────────────────
     const [sessionStatus, hasSessionChunks, globalContext] = await Promise.all([
       getSessionDocumentStatus(userId, chatSessionId),
       hasReadySessionChunks(userId, chatSessionId),
       buildContextForQuery(content, businessUnit, { userId: req.userId, userDepartment: req.department })
     ]);
 
-    // Access denied by global RAG grade restriction
     if (globalContext.accessDenied && !hasSessionChunks) {
       const deniedMessage = {
         role: "assistant" as const,
@@ -865,7 +829,6 @@ conversationRouter.post("/:id/message", authMiddleware, async (req: Authenticate
       });
     }
 
-    // ── Session RAG retrieval ─────────────────────────────────────────────────
     let sessionContextString = "";
 
     if (hasSessionChunks) {
@@ -891,7 +854,6 @@ conversationRouter.post("/:id/message", authMiddleware, async (req: Authenticate
       });
     }
 
-    // Log queries with no context at all
     if (!sessionContextString && globalContext.source === "none") {
       logger.info("[Conversation] No context found for query", {
         userId,
@@ -900,7 +862,6 @@ conversationRouter.post("/:id/message", authMiddleware, async (req: Authenticate
       });
     }
 
-    // ── Build system prompt ───────────────────────────────────────────────────
     const hasGlobalContext = globalContext.source !== "none" && !globalContext.accessDenied;
 
     let systemPrompt = buildSystemPrompt(
@@ -912,10 +873,8 @@ conversationRouter.post("/:id/message", authMiddleware, async (req: Authenticate
       globalContext.source,
       model
     );
-    // Give the model the true knowledge-base totals when asked an inventory question.
     systemPrompt += await buildKbInventoryNote(businessUnit, content, req.userId);
 
-    // ── Generate AI response ──────────────────────────────────────────────────
     let aiResponse = "";
     try {
       aiResponse = await getGenerateAIResponse(model)(
@@ -944,7 +903,6 @@ conversationRouter.post("/:id/message", authMiddleware, async (req: Authenticate
     const assistantMessage = { role: "assistant" as const, content: aiResponse, timestamp: new Date() };
     group.messages.push(assistantMessage);
 
-    // Generate title on first exchange
     if (group.messages.length === 2) {
       try {
         group.title = await generateConversationTitle(content);
@@ -972,7 +930,6 @@ conversationRouter.post("/:id/message", authMiddleware, async (req: Authenticate
   }
 });
 
-// ─── Edit message and regenerate ─────────────────────────────────────────────
 conversationRouter.post("/:id/message/:index/edit", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id, index } = req.params;
@@ -1064,7 +1021,6 @@ conversationRouter.post("/:id/message/:index/edit", authMiddleware, async (req: 
       globalContext.source,
       model
     );
-    // Give the model the true knowledge-base totals when asked an inventory question.
     systemPrompt += await buildKbInventoryNote(businessUnit, content, req.userId);
 
     let aiResponse = "";
@@ -1113,7 +1069,6 @@ conversationRouter.post("/:id/message/:index/edit", authMiddleware, async (req: 
   }
 });
 
-// ─── Stream AI response (SSE) ─────────────────────────────────────────────────
 /**
  * Accepts multipart/form-data OR application/json.
  * Same contract as /:id/message but streams the AI response via Server-Sent Events.
@@ -1125,7 +1080,6 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
     const businessUnit = req.businessUnit!;
     const t = { start: Date.now(), cloudinaryMs: 0, dbMs: 0, contextMs: 0, ttftMs: 0, streamMs: 0 };
 
-    // Parse multipart if needed
     try {
       await runMulter(req, res);
     } catch (multerErr: any) {
@@ -1143,7 +1097,7 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
       return res.status(400).json({ error: "Message content or file is required" });
     }
 
-    // ── Detect document generation intent early so generation runs in parallel ──
+    // Detected early so generation can run in parallel with the rest of this handler.
     const docRequest = content ? detectDocumentRequest(content) : null;
     let documentGenPromise: Promise<GeneratedDocResult | null> | null = null;
     if (docRequest) {
@@ -1155,11 +1109,9 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
         });
     }
 
-    // ── Separate images from documents ─────────────────────────────────────────
     const imageFiles = uploadedFiles.filter(f => IMAGE_MIME_TYPES.includes(f.mimetype));
     const documentFiles = uploadedFiles.filter(f => !IMAGE_MIME_TYPES.includes(f.mimetype));
 
-    // Session file-count guard (documents only, images are processed inline)
     if (documentFiles.length > 0) {
       const existingCount = await UserDocument.countDocuments({ userId, chatSessionId });
       if (existingCount + documentFiles.length > MAX_FILES_PER_SESSION) {
@@ -1169,20 +1121,17 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
       }
     }
 
-    // ── Open SSE connection immediately — browser unblocks before any async work ──
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
     res.setHeader("Access-Control-Allow-Origin", "*");
-    // Convert images to base64 in memory (zero latency) so the model gets them this turn.
-    // Cloudinary upload is persistence-only (needed for follow-up turns) and runs in parallel
-    // with conversation loading — it no longer blocks the LLM pipeline.
+    // Images go to the model as in-memory base64 (zero latency). The Cloudinary upload below
+    // is persistence-only (needed for follow-up turns) and runs in parallel, off the critical path.
     const imageAttachments: ImageAttachment[] = imageFiles.map(f => ({
       base64: f.buffer.toString("base64"),
       mimeType: f.mimetype
     }));
 
-    // Run Cloudinary image uploads and conversation load in parallel — both are independent.
     const parallelStart = Date.now();
     const [cloudinaryResults, userConversations] = await Promise.all([
       imageFiles.length > 0
@@ -1226,13 +1175,11 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
       return;
     }
 
-    // Upload document files (non-images) for RAG processing
     let uploadedDocs: { fileName: string; status: string; documentId: string }[] = [];
     if (documentFiles.length > 0) {
       uploadedDocs = await handleFileUploads(documentFiles, userId, chatSessionId, businessUnit);
     }
 
-    // ── Extract text from documents inline for immediate AI access ───────────
     let inlineDocumentText = "";
     if (documentFiles.length > 0) {
       const extractions = await Promise.all(
@@ -1244,7 +1191,6 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
       inlineDocumentText = extractions.filter(Boolean).join("\n\n");
     }
 
-    // File-only upload with no text: auto-summarize the document
     if (!content && uploadedFiles.length > 0 && !inlineDocumentText && imageAttachments.length === 0) {
       const successUploads = uploadedDocs.filter((d) => d.status === "pending");
       const failedUploads = uploadedDocs.filter((d) => d.status === "failed");
@@ -1278,7 +1224,6 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
       return;
     }
 
-    // ── Push user message ─────────────────────────────────────────────────────
     const userMessage = {
       role: "user" as const,
       content,
@@ -1289,12 +1234,10 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
     };
     group.messages.push(userMessage);
 
-    // ── Build context ─────────────────────────────────────────────────────────
-    // For simple/conversational queries (greetings, acks) we skip the entire RAG
-    // pipeline — no embedding generation, no vector search, no keyword search.
-    // This cuts TTFT from ~6–7 s to under 1 s for those messages.
-    // Any message with file attachments or a doc-generation request always runs
-    // the full pipeline regardless of content length.
+    // Simple/conversational queries (greetings, acks) skip the entire RAG pipeline —
+    // no embedding generation, no vector search, no keyword search. Cuts TTFT from
+    // ~6-7s to under 1s for those messages. Attachments or a doc-generation request
+    // always force the full pipeline regardless of content length.
     const ragBypassed =
       !docRequest &&
       uploadedFiles.length === 0 &&
@@ -1326,7 +1269,6 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
         retrieveSessionChunks({ query: content, userId, chatSessionId })
       ]);
 
-      // Inform the client what context was found before AI generation starts
       const contextStatusMsg =
         globalContext.source === "rag" ? "Found relevant documents. Generating response..." :
         globalContext.source === "keyword" ? "Found matching policies. Generating response..." :
@@ -1370,7 +1312,6 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
       return;
     }
 
-    // ── Session RAG result (already fetched above) ────────────────────────────
     let sessionContextString = "";
     if (hasSessionChunks && speculativeSessionRAG.chunks.length > 0) {
       sessionContextString = buildSessionRAGContext(speculativeSessionRAG.chunks);
@@ -1394,7 +1335,6 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
     if (docRequest) {
       systemPrompt += `\n\n📎 DOCUMENT GENERATION: The user has requested a ${docRequest.label}. Confirm you are generating it and briefly describe (1–2 sentences) what the file will contain. Do NOT mention a download link — the system will attach it automatically below your message.`;
     }
-    // Give the model the true knowledge-base totals when asked an inventory question.
     systemPrompt += await buildKbInventoryNote(businessUnit, content, req.userId);
 
     const policyContext = globalContext.policies.map((p: any) => ({
@@ -1404,7 +1344,6 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
       score: p.score || 0
     }));
 
-    // ── Stream response ───────────────────────────────────────────────────────
     const aiUserMessage = inlineDocumentText
       ? `${content || "Please analyze and summarize the following document(s)."}\n\n${inlineDocumentText}`
       : content;
@@ -1431,8 +1370,8 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
         res.write(`data: ${JSON.stringify({ chunk, fullResponse })}\n\n`);
       }
 
-      // Resolve the cited RAG chunks back to parent documents so the UI can render clickable source pills.
-      // De-duplicates by documentId, picks the highest-scoring chunk's metadata, and fetches the file URL.
+      // Resolve cited RAG chunks back to parent documents so the UI can render clickable source
+      // pills. De-duplicates by documentId, keeping each document's highest-scoring chunk.
       let sources: { documentId: string; title: string; documentType: string; version?: number; url?: string }[] = [];
       const chunkByDocId = new Map<string, typeof globalContext.ragChunks[number]>();
       for (const c of globalContext.ragChunks) {
@@ -1462,15 +1401,14 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
         }
       }
 
-      // Await generated document if one was requested — it ran in parallel with AI streaming
       let generatedDocument: { url: string; filename: string; documentType: string } | undefined;
       if (documentGenPromise) {
         const docResult = await documentGenPromise;
         if (docResult) generatedDocument = docResult;
       }
 
-      // Only attach the generated document if the AI actually produced a response.
-      // Showing a download button alongside "I wasn't able to generate a response" is confusing.
+      // A download button next to "I wasn't able to generate a response" would be confusing,
+      // so only attach the document if the AI actually produced a response.
       const attachDocument = generatedDocument && !!fullResponse;
       const assistantMessage = {
         role: "assistant" as const,
@@ -1488,7 +1426,6 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
         { $set: { "conversationGroups.$.messages": group.messages } }
       );
 
-      // Sync user message + AI response to all collaboration partners (fire-and-forget)
       syncToCollaborators(chatSessionId, [userMessage, assistantMessage]);
 
       const conversation = {
@@ -1526,7 +1463,7 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
         streamMs: t.streamMs
       });
 
-      // Generate and persist title after stream ends — doesn't block the client.
+      // Runs after the stream ends so title generation never blocks the client response.
       if (isFirstMessage) {
         const fallback = content.length > 50 ? content.substring(0, 50) + "..." : content;
         generateConversationTitle(content)
@@ -1542,7 +1479,7 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
     } catch (error) {
       console.error("Stream error:", error);
 
-      // Even if the AI stream failed, a document may have been successfully cached — send it.
+      // A document may have been successfully cached even if the AI stream itself failed.
       let generatedDocOnError: GeneratedDocResult | undefined;
       if (documentGenPromise) {
         const docResult = await documentGenPromise.catch(() => null);
@@ -1550,7 +1487,6 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
       }
 
       if (generatedDocOnError) {
-        // Save a fallback assistant message so the doc link persists in the conversation.
         const fallbackContent = `Your ${generatedDocOnError.documentType.toUpperCase()} has been generated and is ready to download.`;
         const assistantMsg = {
           role: "assistant" as const,
@@ -1583,7 +1519,6 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
   }
 });
 
-// ─── Ephemeral document download ──────────────────────────────────────────────
 // No auth required — the UUID acts as an unguessable one-time token.
 conversationRouter.get("/download-doc/:id", (req, res) => {
   const entry = docCache.get(req.params.id);

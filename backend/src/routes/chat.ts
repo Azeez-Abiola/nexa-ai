@@ -76,50 +76,21 @@ interface ChatMessage {
   content: string;
 }
 
-// Simple in-memory per-BU rate limiter: max 30 requests per minute per business unit
-const buRateLimiter = (() => {
-  const counts = new Map<string, { count: number; resetAt: number }>();
-  const WINDOW_MS = 60_000;
-  const MAX_REQUESTS = 30;
-
-  return (req: AuthenticatedRequest, res: express.Response, next: express.NextFunction) => {
-    const key = req.businessUnit || req.ip || "unknown";
-    const now = Date.now();
-    const entry = counts.get(key);
-
-    if (!entry || now >= entry.resetAt) {
-      counts.set(key, { count: 1, resetAt: now + WINDOW_MS });
-      return next();
-    }
-
-    entry.count += 1;
-    if (entry.count > MAX_REQUESTS) {
-      return res.status(429).json({ error: "Too many requests. Please wait a moment before sending another message." });
-    }
-
-    next();
-  };
-})();
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_MODEL = process.env.OPEN_AI_MODEL || "gpt-4o-mini";
 
-// Greeting patterns
 const GREETING_PATTERNS = [
   /^(hello|hi|hey|greetings|good morning|good afternoon|good evening|sup|howdy|yo)\b/i,
   /\b(hello|hi|hey|greetings|good morning|good afternoon|good evening|sup|howdy|yo)\s*[,!?]?\s*$/i,
   /^(how are you|how's it going|how do you do)\b/i
 ];
 
-
-// Function to detect if message is a greeting
 const isGreeting = (message: string): boolean => {
   const trimmed = message.trim();
   return GREETING_PATTERNS.some((pattern) => pattern.test(trimmed));
 };
 
-
-// Greeting responses
 const getGreetingResponse = async (businessUnit: string): Promise<string> => {
   const buName = await getBusinessUnitLabel(businessUnit);
   const greetings = [
@@ -130,7 +101,6 @@ const getGreetingResponse = async (businessUnit: string): Promise<string> => {
   return greetings[Math.floor(Math.random() * greetings.length)];
 };
 
-// Call OpenAI API
 async function callOpenAIAPI(systemPrompt: string, userMessage: string) {
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
@@ -158,8 +128,7 @@ async function callOpenAIAPI(systemPrompt: string, userMessage: string) {
   return data.choices[0].message.content;
 }
 
-// Apply auth + per-BU rate limiting to authenticated chat
-chatRouter.post("/", authMiddleware, buRateLimiter, async (req: AuthenticatedRequest, res) => {
+chatRouter.post("/", authMiddleware, async (req: AuthenticatedRequest, res) => {
   const { messages } = req.body as { messages: ChatMessage[] };
   const businessUnit = req.businessUnit;
 
@@ -174,7 +143,6 @@ chatRouter.post("/", authMiddleware, buRateLimiter, async (req: AuthenticatedReq
   try {
     const userMessage = messages[messages.length - 1]?.content || "";
 
-    // Check if it's a greeting
     if (isGreeting(userMessage)) {
       return res.json({
         reply: await getGreetingResponse(businessUnit)
@@ -184,7 +152,6 @@ chatRouter.post("/", authMiddleware, buRateLimiter, async (req: AuthenticatedReq
     const buName = await getBusinessUnitLabel(businessUnit);
     const buAbbr = businessUnit;
 
-    // Build context: RAG first, keyword fallback, Google in parallel
     const context = await buildContextForQuery(userMessage, businessUnit, {
       userId: req.userId,
       userDepartment: req.department
@@ -224,7 +191,6 @@ IMPORTANT INSTRUCTIONS:
         }
         return res.json({ reply: finalReply });
       } catch (error) {
-        // Fallback: render context directly
         let response = context.hybridContextString;
         if (hasExternalSources) response += "\n\n" + context.googleFooter;
         response += `\n\n**Need More Help?**\n• Contact HR & Compliance for policy questions`;
@@ -232,7 +198,6 @@ IMPORTANT INSTRUCTIONS:
       }
     }
 
-    // No context found
     const noMatchSystemPrompt = `You are Nexa AI, a helpful assistant for ${buName} (${buAbbr}), a business unit of UACN, powered by GPT-5. If asked which model or AI you use, say you are Nexa AI powered by GPT-5.
 
 The user asked a question that doesn't have specific information in company documents OR external sources.
@@ -261,7 +226,6 @@ Be helpful and professional.`;
   }
 });
 
-// Public chat endpoint - no authentication required (for landing page chatbot)
 chatRouter.post("/public", async (req, res) => {
   const { messages } = req.body as { messages: ChatMessage[] };
 
@@ -275,7 +239,6 @@ chatRouter.post("/public", async (req, res) => {
     console.log(`[Chat/Public] ========== NEW REQUEST ==========`);
     console.log(`[Chat/Public] User message: "${userMessage}"`);
 
-    // Search for relevant information from Google (hybrid approach for public)
     console.log(`[Chat/Public] Starting Google search...`);
     const googleResults = await searchGoogle(userMessage, 3);
     
@@ -284,7 +247,6 @@ chatRouter.post("/public", async (req, res) => {
     const allBUs = await getAllBusinessUnits();
     const businessUnitsList = allBUs.map(bu => `- ${bu.label}`).join("\n");
 
-    // System prompt for public chatbot with Google context
     let systemPrompt = `You are Nexa AI, a friendly and helpful assistant for UACN (United African Capital Limited), powered by GPT-5. If asked which model or AI you use, say you are Nexa AI powered by GPT-5.
 
 UACN is a conglomerate with several business units including:
@@ -296,7 +258,6 @@ About UACN:
 - Operates across multiple sectors of the Nigerian economy
 - Committed to creating sustainable value for stakeholders`;
 
-    // Add external sources context if available
     if (googleResults.success && googleResults.results && googleResults.results.length > 0) {
       const externalContext = googleResults.results
         .map((r, i) => `[${i + 1}] ${r.title}: ${r.snippet} (${r.link})`)
@@ -322,7 +283,6 @@ Always maintain a professional tone and be helpful to potential customers, inves
     try {
       const reply = await callOpenAIAPI(systemPrompt, userMessage);
       
-      // Append external sources footer if available
       let finalReply = reply;
       if (googleResults.success && googleResults.results && googleResults.results.length > 0) {
         const externalSourcesFooter = formatSearchResultsForChat(googleResults.results);
@@ -352,8 +312,6 @@ Always maintain a professional tone and be helpful to potential customers, inves
   }
 });
 
-// Streaming chat endpoint - for real-time response display
-// Sends response as Server-Sent Events (SSE) as it's generated by OpenAI
 chatRouter.post("/public/stream", async (req, res) => {
   const { messages, model: rawModel } = req.body as { messages: ChatMessage[]; model?: string };
 
@@ -372,10 +330,8 @@ chatRouter.post("/public/stream", async (req, res) => {
     res.setHeader("Connection", "keep-alive");
     res.setHeader("Access-Control-Allow-Origin", "*");
 
-    // Build minimal system prompt for speed
-    // Public endpoint: no BU-scoped policy search — unauthenticated callers must not
-    // be able to query internal documents by passing an arbitrary businessUnit in the body.
-    // Stream response from selected model
+    // No BU-scoped policy search here — unauthenticated callers must not be able to query
+    // internal documents by passing an arbitrary businessUnit in the body.
     const model = parseModel(rawModel);
     const modelLabel = model === "claude" ? "Claude Opus 4.7" : "GPT-5";
     const systemPrompt = `You are Nexa AI, a helpful assistant for the UACN Group, powered by ${modelLabel}. Keep responses concise and well-formatted. For detailed policy information, direct users to log in. If asked which model or AI you use, say you are Nexa AI powered by ${modelLabel}.`;
@@ -388,7 +344,6 @@ chatRouter.post("/public/stream", async (req, res) => {
         systemPrompt
       );
 
-      // Send each chunk as it arrives
       let fullResponse = "";
       for await (const chunk of stream) {
         fullResponse += chunk;
@@ -398,7 +353,6 @@ chatRouter.post("/public/stream", async (req, res) => {
         })}\n\n`);
       }
 
-      // Send completion signal
       res.write(`data: ${JSON.stringify({
         type: "done",
         content: ""

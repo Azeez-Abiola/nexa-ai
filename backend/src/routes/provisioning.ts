@@ -15,7 +15,6 @@ import { sendTenantCredentialsEmail, sendAccessRequestRejected } from "../servic
 
 export const provisioningRouter = express.Router();
 
-// Logo upload
 const logosDir = path.join(__dirname, "..", "..", "..", "public", "logos");
 if (!fs.existsSync(logosDir)) fs.mkdirSync(logosDir, { recursive: true });
 
@@ -66,9 +65,6 @@ async function detectDuplicateLogo(uploadedFile: Express.Multer.File): Promise<
   return { duplicate: null, freedHash: logoHash };
 }
 
-// ─── TENANT MANAGEMENT ────────────────────────────────────────────────────────
-
-// GET /provisioning/tenants — list all tenants
 provisioningRouter.get("/tenants", superAdminMiddleware, async (_req: AuthenticatedRequest, res: Response) => {
   try {
     const tenants = await BusinessUnit.find().sort({ createdAt: -1 }).lean();
@@ -88,7 +84,6 @@ provisioningRouter.get("/tenants", superAdminMiddleware, async (_req: Authentica
   }
 });
 
-// POST /provisioning/tenants — create a new tenant
 provisioningRouter.post(
   "/tenants",
   superAdminMiddleware,
@@ -101,12 +96,10 @@ provisioningRouter.post(
         return res.status(400).json({ error: "name, label and slug are required" });
       }
 
-      // Slug validation
       if (!/^[a-z0-9-]+$/.test(slug)) {
         return res.status(400).json({ error: "Slug must be lowercase letters, numbers and hyphens only" });
       }
 
-      // Uniqueness checks
       const [nameTaken, slugTaken] = await Promise.all([
         BusinessUnit.findOne({ name }),
         BusinessUnit.findOne({ slug })
@@ -135,18 +128,17 @@ provisioningRouter.post(
         logoHash,
         contactEmail: contactEmail || undefined,
         colorCode: colorCode || "#ed0000",
-        /** Inactive until a super-admin activates the tenant (employees cannot register until then). */
+        // Inactive until a super-admin activates the tenant — employees cannot register until then.
         isActive: false
       });
 
-      // If contactEmail is provided, auto-create an Admin account
       let autoAdmin = null;
       if (contactEmail) {
         const existingAdmin = await AdminUser.findOne({ email: contactEmail.toLowerCase() });
         if (!existingAdmin) {
-          const autoPassword = crypto.randomBytes(6).toString("hex"); // e.g. "a1b2c3d4e5f6"
+          const autoPassword = crypto.randomBytes(6).toString("hex");
           const hashedPassword = await bcryptjs.hash(autoPassword, 10);
-          
+
           await AdminUser.create({
             email: contactEmail.toLowerCase(),
             fullName: label + " Administrator",
@@ -156,7 +148,6 @@ provisioningRouter.post(
             mustChangePassword: true
           });
 
-          // Send email with credentials
           try {
             const { sendTenantCredentialsEmail } = require("../services/emailService");
             await sendTenantCredentialsEmail(
@@ -192,7 +183,6 @@ provisioningRouter.post(
 );
 
 
-// PUT /provisioning/tenants/:id — update tenant
 provisioningRouter.put(
   "/tenants/:id",
   superAdminMiddleware,
@@ -246,9 +236,6 @@ provisioningRouter.put(
   }
 );
 
-// ─── ADMIN INVITE ──────────────────────────────────────────────────────────────
-
-// POST /provisioning/invite — SUPERADMIN invites a BU admin
 provisioningRouter.post("/invite", superAdminMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { email, fullName, businessUnit } = req.body;
@@ -257,33 +244,30 @@ provisioningRouter.post("/invite", superAdminMiddleware, async (req: Authenticat
       return res.status(400).json({ error: "email, fullName and businessUnit are required" });
     }
 
-    // Resolve tenant
     const tenant = await BusinessUnit.findOne({ name: businessUnit });
     if (!tenant) {
       return res.status(404).json({ error: `Business unit "${businessUnit}" not found. Create the tenant first.` });
     }
 
-    // Don't invite if admin already exists with this email
     const existing = await AdminUser.findOne({ email: email.toLowerCase() });
     if (existing) {
       return res.status(409).json({ error: "An admin account already exists with this email" });
     }
 
-    // Auto-generate a secure random password
-    const autoPassword = crypto.randomBytes(6).toString("hex"); // e.g. "a1b2c3d4e5f6"
+    const autoPassword = crypto.randomBytes(6).toString("hex");
     const hashedPassword = await bcryptjs.hash(autoPassword, 10);
 
-    // Create the admin account directly — status is active immediately
+    // Created directly and active immediately — there's no separate accept step for this flow.
     const admin = await AdminUser.create({
       email: email.toLowerCase(),
       fullName,
       businessUnit,
       password: hashedPassword,
-      emailVerified: true, // Superadmin-created accounts are pre-verified
+      emailVerified: true,
       mustChangePassword: true
     });
 
-    // Also create an AdminInvite record for auditing/logging (status: accepted)
+    // Logged here even though already accepted, so it shows up in the same audit trail as pending invites.
     await AdminInvite.create({
       email: email.toLowerCase(),
       fullName,
@@ -291,11 +275,10 @@ provisioningRouter.post("/invite", superAdminMiddleware, async (req: Authenticat
       tenantId: tenant.tenantId,
       status: "accepted",
       invitedBy: req.email!,
-      expiresAt: new Date(), // Already accepted
+      expiresAt: new Date(),
       token: "DIRECT-PROVISIONED"
     });
 
-    // Send the credentials email with the auto-generated password
     try {
       await sendTenantCredentialsEmail(
         email.toLowerCase(),
@@ -305,9 +288,8 @@ provisioningRouter.post("/invite", superAdminMiddleware, async (req: Authenticat
       );
     } catch (emailError) {
       console.error("Failed to send credentials email:", emailError);
-      // We don't roll back the user creation here as the account is already active, 
-      // but we inform the superadmin so they can manually reset or track.
-      return res.status(500).json({ 
+      // The account is already active — don't roll it back, just inform the superadmin to follow up.
+      return res.status(500).json({
         message: `Admin account created for ${email}, but credentials email failed.`,
         error: "Failed to send email. You may need to manually reset the password."
       });
@@ -329,7 +311,6 @@ provisioningRouter.post("/invite", superAdminMiddleware, async (req: Authenticat
   }
 });
 
-// GET /provisioning/invites — list all invites (SUPERADMIN)
 provisioningRouter.get("/invites", superAdminMiddleware, async (_req: AuthenticatedRequest, res: Response) => {
   try {
     const invites = await AdminInvite.find().sort({ createdAt: -1 }).lean();
@@ -340,7 +321,6 @@ provisioningRouter.get("/invites", superAdminMiddleware, async (_req: Authentica
   }
 });
 
-// DELETE /provisioning/invites/:id — revoke a pending invite
 provisioningRouter.delete("/invites/:id", superAdminMiddleware, async (_req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = _req.params;
@@ -358,9 +338,6 @@ provisioningRouter.delete("/invites/:id", superAdminMiddleware, async (_req: Aut
   }
 });
 
-// ─── INVITE ACCEPTANCE ────────────────────────────────────────────────────────
-
-// GET /provisioning/invite/verify?token=xxx — validate token before showing set-password form
 provisioningRouter.get("/invite/verify", async (req, res) => {
   try {
     const { token } = req.query as { token: string };
@@ -388,7 +365,6 @@ provisioningRouter.get("/invite/verify", async (req, res) => {
   }
 });
 
-// POST /provisioning/invite/accept — invited admin sets their password
 provisioningRouter.post("/invite/accept", async (req, res) => {
   try {
     const { token, password } = req.body;
@@ -410,7 +386,7 @@ provisioningRouter.post("/invite/accept", async (req, res) => {
       return res.status(400).json({ error: "Invite link is invalid or has expired" });
     }
 
-    // Check no admin account was created already (race condition guard)
+    // Guards against a race where two requests accept the same invite concurrently.
     const existing = await AdminUser.findOne({ email: invite.email });
     if (existing) {
       invite.status = "accepted";
@@ -420,7 +396,7 @@ provisioningRouter.post("/invite/accept", async (req, res) => {
 
     const hashedPassword = await bcryptjs.hash(password, 10);
 
-    // Create the admin account — pre-verified (no OTP needed, SUPERADMIN already vouched)
+    // Pre-verified — no OTP needed since a superadmin already vouched for this account via the invite.
     const admin = new AdminUser({
       email: invite.email,
       fullName: invite.fullName,
@@ -431,7 +407,6 @@ provisioningRouter.post("/invite/accept", async (req, res) => {
 
     await admin.save();
 
-    // Mark invite as accepted
     invite.status = "accepted";
     await invite.save();
 
@@ -446,9 +421,6 @@ provisioningRouter.post("/invite/accept", async (req, res) => {
   }
 });
 
-// ─── ACCESS REQUESTS ──────────────────────────────────────────────────────────
-
-// GET /provisioning/access-requests — list all access requests (filterable by status)
 provisioningRouter.get("/access-requests", superAdminMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { status } = req.query as { status?: string };
@@ -464,7 +436,6 @@ provisioningRouter.get("/access-requests", superAdminMiddleware, async (req: Aut
   }
 });
 
-// PATCH /provisioning/access-requests/:id/reject — mark rejected and notify requester
 provisioningRouter.patch("/access-requests/:id/reject", superAdminMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { note } = req.body as { note?: string };
@@ -489,9 +460,8 @@ provisioningRouter.patch("/access-requests/:id/reject", superAdminMiddleware, as
   }
 });
 
-// POST /provisioning/access-requests/:id/provision
 // One-step: create tenant + admin account + send credentials, then mark request as provisioned.
-// Works from "pending" or "approved" status so super-admin can skip the separate approve step.
+// Works from "pending" or "approved" status so a super-admin can skip the separate approve step.
 provisioningRouter.post("/access-requests/:id/provision", superAdminMiddleware, logoUpload.single("logo"), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const request = await TenantRequest.findById(req.params.id);
@@ -500,24 +470,22 @@ provisioningRouter.post("/access-requests/:id/provision", superAdminMiddleware, 
       return res.status(400).json({ error: `Request is already ${request.status}` });
     }
 
-    // Allow caller to override label/slug/colorCode; fall back to sensible defaults from the request
+    // Caller may override label/slug/colorCode; otherwise fall back to the request's own values.
     const label: string = String(req.body.label || request.companyName).trim();
     const colorCode: string = String(req.body.colorCode || "#ed0000").trim();
 
-    // Generate a slug from the company name — lowercase, spaces/special chars → hyphens
     const baseSlug = request.companyName
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-+|-+$/g, "");
 
-    // Resolve a unique slug (append -2, -3, … on collision)
+    // Append -2, -3, … on collision until a unique slug is found.
     let slug = baseSlug;
     let suffix = 2;
     while (await BusinessUnit.findOne({ slug })) {
       slug = `${baseSlug}-${suffix++}`;
     }
 
-    // Also guard against duplicate tenant name
     const nameTaken = await BusinessUnit.findOne({ name: request.companyName });
     if (nameTaken) {
       return res.status(409).json({
@@ -538,7 +506,7 @@ provisioningRouter.post("/access-requests/:id/provision", superAdminMiddleware, 
       logoHash = dedupe.freedHash;
     }
 
-    // Create the tenant — activate immediately since the request has already been vetted
+    // Active immediately — unlike POST /tenants, this request has already been vetted.
     const tenant = await BusinessUnit.create({
       name: request.companyName,
       label,
@@ -550,12 +518,10 @@ provisioningRouter.post("/access-requests/:id/provision", superAdminMiddleware, 
       isActive: true
     });
 
-    // Auto-generate admin credentials
     const autoPassword = crypto.randomBytes(6).toString("hex");
     const hashedPassword = await bcryptjs.hash(autoPassword, 10);
     const adminFullName = `${request.companyName} Administrator`;
 
-    // Prevent duplicate admin account
     const existingAdmin = await AdminUser.findOne({ email: request.workEmail });
     let admin;
     if (!existingAdmin) {
@@ -568,7 +534,6 @@ provisioningRouter.post("/access-requests/:id/provision", superAdminMiddleware, 
         mustChangePassword: true
       });
 
-      // Audit record
       await AdminInvite.create({
         email: request.workEmail,
         fullName: adminFullName,
@@ -581,7 +546,6 @@ provisioningRouter.post("/access-requests/:id/provision", superAdminMiddleware, 
       });
     }
 
-    // Send credentials email — if it fails the tenant + admin still exist; super-admin is informed
     try {
       await sendTenantCredentialsEmail(
         request.workEmail,
@@ -591,7 +555,7 @@ provisioningRouter.post("/access-requests/:id/provision", superAdminMiddleware, 
       );
     } catch (emailError) {
       console.error("Credentials email failed after provisioning:", emailError);
-      // Mark request provisioned even on email failure — don't roll back the DB writes
+      // Still marked provisioned — the tenant + admin already exist, so don't roll back the DB writes.
       request.status = "provisioned";
       request.reviewedBy = req.email!;
       request.reviewedAt = new Date();
@@ -605,7 +569,6 @@ provisioningRouter.post("/access-requests/:id/provision", superAdminMiddleware, 
       });
     }
 
-    // Mark request as provisioned and link to the new tenant
     request.status = "provisioned";
     request.reviewedBy = req.email!;
     request.reviewedAt = new Date();

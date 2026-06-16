@@ -10,14 +10,7 @@ import {
 
 export const conversationSharingRouter = express.Router();
 
-/**
- * POST /api/v1/conversations/:id/share
- *
- * Share a conversation group with another user.
- * Body: { recipientEmail: string }
- *
- * Enforces: sender.businessUnit === recipient.businessUnit
- */
+// Enforces sender.businessUnit === recipient.businessUnit — see shareConversation.
 conversationSharingRouter.post(
   "/:id/share",
   authMiddleware,
@@ -52,12 +45,6 @@ conversationSharingRouter.post(
   }
 );
 
-/**
- * POST /api/v1/conversations/:groupId/messages/:idx/share
- *
- * Share a single AI response within a conversation.
- * Body: { recipientEmail: string }
- */
 conversationSharingRouter.post(
   "/:groupId/messages/:idx/share",
   authMiddleware,
@@ -98,9 +85,6 @@ conversationSharingRouter.post(
   }
 );
 
-/**
- * GET /api/v1/conversations/shared-with-me
- */
 conversationSharingRouter.get(
   "/shared-with-me",
   authMiddleware,
@@ -115,9 +99,6 @@ conversationSharingRouter.get(
   }
 );
 
-/**
- * DELETE /api/v1/conversations/shared/:shareId
- */
 conversationSharingRouter.delete(
   "/shared/:shareId",
   authMiddleware,
@@ -138,9 +119,6 @@ conversationSharingRouter.delete(
   }
 );
 
-/**
- * POST /api/v1/conversations/:groupId/share-link
- */
 conversationSharingRouter.post(
   "/:groupId/share-link",
   authMiddleware,
@@ -163,9 +141,6 @@ conversationSharingRouter.post(
   }
 );
 
-/**
- * GET /api/v1/conversations/share-link/:token
- */
 conversationSharingRouter.get(
   "/share-link/:token",
   authMiddleware,

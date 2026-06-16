@@ -42,7 +42,6 @@ import {
   resolveUserDirectoryBusinessUnit
 } from "../utils/tenantResolution";
 
-// Logo upload — store in public/logos/
 const logosDir = path.join(__dirname, "..", "..", "..", "public", "logos");
 if (!fs.existsSync(logosDir)) fs.mkdirSync(logosDir, { recursive: true });
 
@@ -179,7 +178,6 @@ function generateToken(token: string): string {
   return crypto.createHash("sha256").update(token).digest("hex");
 }
 
-// Admin Login — embeds tenantId + slug in JWT
 adminAuthRouter.post("/login", async (req: Request<{}, {}, AdminAuthRequest>, res: Response) => {
   try {
     const { email, password } = req.body;
@@ -206,7 +204,6 @@ adminAuthRouter.post("/login", async (req: Request<{}, {}, AdminAuthRequest>, re
       return res.status(401).json({ error: "Invalid email or password" });
     }
 
-    // Fetch tenant info to embed in token
     let tenantId: string | undefined;
     let tenantSlug: string | undefined;
     let tenantLogo: string | undefined;
@@ -237,7 +234,6 @@ adminAuthRouter.post("/login", async (req: Request<{}, {}, AdminAuthRequest>, re
       { expiresIn: "7d" }
     );
 
-    // Fetch BU document again for full branding info
     let tenantColor: string | undefined;
     let tenantLabel: string | undefined;
     if (admin.businessUnit !== "SUPERADMIN") {
@@ -319,7 +315,6 @@ adminAuthRouter.post("/change-password-first-login", adminAuthMiddleware, async 
   }
 });
 
-// Verify Email
 adminAuthRouter.post("/verify-email", async (req: Request<{}, {}, { email: string; otp: string }>, res: Response) => {
   try {
     const { email, otp } = req.body;
@@ -356,7 +351,6 @@ adminAuthRouter.post("/verify-email", async (req: Request<{}, {}, { email: strin
   }
 });
 
-// Resend Verification
 adminAuthRouter.post("/resend-verification", async (req: Request<{}, {}, { email: string }>, res: Response) => {
   try {
     const { email } = req.body;
@@ -393,7 +387,6 @@ adminAuthRouter.post("/resend-verification", async (req: Request<{}, {}, { email
   }
 });
 
-// Forgot Password
 adminAuthRouter.post("/forgot-password", async (req: Request<{}, {}, { email: string }>, res: Response) => {
   try {
     const { email } = req.body;
@@ -423,7 +416,6 @@ adminAuthRouter.post("/forgot-password", async (req: Request<{}, {}, { email: st
   }
 });
 
-// Reset Password
 adminAuthRouter.post("/reset-password", async (req: Request<{}, {}, { token: string; newPassword: string; email: string }>, res: Response) => {
   try {
     const { token, newPassword, email } = req.body;
@@ -457,7 +449,6 @@ adminAuthRouter.post("/reset-password", async (req: Request<{}, {}, { token: str
   }
 });
 
-// Get all BU admins — SUPERADMIN only
 adminAuthRouter.get("/admins", superAdminMiddleware, async (_req: AuthenticatedRequest, res: Response) => {
   try {
     const admins = await AdminUser.find({}, { password: 0 }).sort({ createdAt: -1 });
@@ -494,7 +485,6 @@ adminAuthRouter.get("/users", adminAuthMiddleware, async (req: AuthenticatedRequ
   }
 });
 
-// Get pending employee invites for the BU
 adminAuthRouter.get("/pending-invites", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const requestedBU = req.query.businessUnit as string | undefined;
@@ -512,7 +502,6 @@ adminAuthRouter.get("/pending-invites", adminAuthMiddleware, async (req: Authent
   }
 });
 
-// Re-invite employee — expire old pending invite and send a fresh one
 adminAuthRouter.post("/reinvite-employee", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { businessUnit, isSuperAdmin, email: inviterEmail, fullName: inviterName } = req;
@@ -536,7 +525,6 @@ adminAuthRouter.post("/reinvite-employee", adminAuthMiddleware, async (req: Auth
     const tenant = await BusinessUnitModel.findOne({ name: businessUnit });
     if (!tenant) return res.status(404).json({ error: "Business unit not found." });
 
-    // Expire the old invite and issue a fresh one
     existing.status = "expired";
     await existing.save();
 
@@ -565,7 +553,6 @@ adminAuthRouter.post("/reinvite-employee", adminAuthMiddleware, async (req: Auth
   }
 });
 
-// Create User — BU admins can create users for their BU
 adminAuthRouter.post("/users", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { email, password, firstName, lastName, fullName: fullNameLegacy, department } = req.body;
@@ -626,7 +613,6 @@ adminAuthRouter.post("/users", adminAuthMiddleware, async (req: AuthenticatedReq
   }
 });
 
-// Single-user fetch — for the user detail page.
 adminAuthRouter.get("/users/:id", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
@@ -648,8 +634,7 @@ adminAuthRouter.get("/users/:id", adminAuthMiddleware, async (req: Authenticated
   }
 });
 
-// Update user — BU admin can change a user's department (and other safe fields).
-// Email + password + businessUnit aren't editable here on purpose; those need their
+// Email + password + businessUnit aren't editable here on purpose — those need their
 // own dedicated flows (re-invite, password reset, tenant move).
 adminAuthRouter.patch("/users/:id", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -692,7 +677,7 @@ adminAuthRouter.patch("/users/:id", adminAuthMiddleware, async (req: Authenticat
 
 const EMPLOYEE_INVITE_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000;
 
-// Invite employee — BU admins only; signed token email (business unit cannot be forged).
+// Token is signed so the business unit on the invite cannot be forged by the recipient.
 adminAuthRouter.post("/invite-employee", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { businessUnit, isSuperAdmin, email: inviterEmail, fullName: inviterName } = req;
@@ -795,7 +780,6 @@ adminAuthRouter.post("/invite-employee", adminAuthMiddleware, async (req: Authen
   }
 });
 
-// Bulk invite employees — BU admins only; processes up to 200 rows, returns per-row results
 adminAuthRouter.post("/invite-employees-bulk", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { businessUnit, isSuperAdmin, email: inviterEmail, fullName: inviterName } = req;
@@ -887,7 +871,6 @@ adminAuthRouter.post("/invite-employees-bulk", adminAuthMiddleware, async (req: 
   }
 });
 
-// Bulk-create chat users from CSV — BU admins only (same business unit as token)
 adminAuthRouter.post(
   "/users/bulk-csv",
   adminAuthMiddleware,
@@ -1021,7 +1004,6 @@ adminAuthRouter.post(
   }
 );
 
-// Delete User — BU admins can delete users from their BU
 adminAuthRouter.delete("/users/:id", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
@@ -1042,7 +1024,6 @@ adminAuthRouter.delete("/users/:id", adminAuthMiddleware, async (req: Authentica
   }
 });
 
-// Toggle user active/inactive — BU admins can deactivate users in their BU.
 // Deactivated users keep their data and group memberships; their license slot
 // frees up and they cannot sign in until reactivated.
 adminAuthRouter.patch("/users/:id/toggle-status", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
@@ -1080,7 +1061,6 @@ adminAuthRouter.patch("/users/:id/toggle-status", adminAuthMiddleware, async (re
   }
 });
 
-// Chat sessions summary for a user — admins can review session activity
 adminAuthRouter.get("/users/:id/conversations", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
@@ -1118,7 +1098,6 @@ adminAuthRouter.get("/users/:id/conversations", adminAuthMiddleware, async (req:
   }
 });
 
-// Update Profile — BU admins can update their BU logo, label, or color
 adminAuthRouter.put(
   "/profile",
   adminAuthMiddleware,
@@ -1246,7 +1225,6 @@ adminAuthRouter.put(
       throw saveErr;
     }
 
-    // Personal identity update
     let updatedAdmin = null;
     if (fullName && String(fullName).trim() !== "") {
       if (!mongoose.Types.ObjectId.isValid(adminId)) {
@@ -1269,7 +1247,6 @@ adminAuthRouter.put(
   }
 });
 
-// Change Password — Admin can change their own password
 adminAuthRouter.put("/change-password", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { adminId } = req;
@@ -1297,7 +1274,6 @@ adminAuthRouter.put("/change-password", adminAuthMiddleware, async (req: Authent
   }
 });
 
-// Invite / provision another administrator for the same business unit (BU admins only).
 // All admins of a BU share the same scope and powers — there is no "primary" vs "peer".
 adminAuthRouter.post("/invite-peer-admin", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -1380,7 +1356,6 @@ adminAuthRouter.post("/invite-peer-admin", adminAuthMiddleware, async (req: Auth
   }
 });
 
-// Toggle Admin Status — SUPERADMIN only
 adminAuthRouter.patch("/:id/toggle-status", superAdminMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
@@ -1401,7 +1376,6 @@ adminAuthRouter.patch("/:id/toggle-status", superAdminMiddleware, async (req: Au
   }
 });
 
-// Create Admin Direct — SUPERADMIN only
 adminAuthRouter.post("/create-direct", superAdminMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { email, password, fullName, businessUnit } = req.body;
@@ -1431,7 +1405,6 @@ adminAuthRouter.post("/create-direct", superAdminMiddleware, async (req: Authent
   }
 });
 
-// Email Domain Mappings — SUPERADMIN only
 adminAuthRouter.get("/email-domains", superAdminMiddleware, async (_req: AuthenticatedRequest, res: Response) => {
   try {
     const domains = await BusinessUnitEmailMapping.find().sort({ emailDomain: 1 });
@@ -1469,49 +1442,9 @@ adminAuthRouter.delete("/email-domains/:id", superAdminMiddleware, async (req: A
   }
 });
 
-// Email Domain Mappings — SUPERADMIN only
-adminAuthRouter.get("/email-domains", superAdminMiddleware, async (_req: AuthenticatedRequest, res: Response) => {
-  try {
-    const domains = await BusinessUnitEmailMapping.find().sort({ emailDomain: 1 });
-    res.json({ domains: domains.map(d => ({ _id: d._id, domain: d.emailDomain, businessUnit: d.businessUnit })) });
-  } catch (error) {
-    res.status(500).json({ error: "Failed to fetch domains" });
-  }
-});
-
-adminAuthRouter.post("/email-domains", superAdminMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const { domain, businessUnit } = req.body;
-    if (!domain || !businessUnit) return res.status(400).json({ error: "Domain and Business Unit required" });
-
-    const existing = await BusinessUnitEmailMapping.findOne({ emailDomain: domain.toLowerCase() });
-    if (existing) return res.status(409).json({ error: "Domain is already mapped" });
-
-    await BusinessUnitEmailMapping.create({
-      businessUnit,
-      emailDomain: domain.toLowerCase()
-    });
-    res.status(201).json({ message: "Domain mapping created" });
-  } catch (error) {
-    res.status(500).json({ error: "Failed to create domain mapping" });
-  }
-});
-
-adminAuthRouter.delete("/email-domains/:id", superAdminMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const { id } = req.params;
-    await BusinessUnitEmailMapping.findByIdAndDelete(id);
-    res.json({ message: "Domain mapping deleted" });
-  } catch (error) {
-    res.status(500).json({ error: "Failed to delete domain mapping" });
-  }
-});
-
-// ─── Document categories (BU admins only) ────────────────────────────────────
 // Each BU gets the universal built-ins (policy, report, etc.) plus any custom
 // categories admins have created. Built-ins live as a constant so the universal
-// set can evolve without per-tenant migrations; custom ones persist in
-// DocumentCategory.
+// set can evolve without per-tenant migrations; custom ones persist in DocumentCategory.
 
 adminAuthRouter.get("/categories", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -1604,7 +1537,6 @@ adminAuthRouter.delete("/categories/:id", adminAuthMiddleware, async (req: Authe
       return res.status(403).json({ error: "Access denied" });
     }
 
-    // Refuse delete if any document in the BU still uses this category.
     const inUse = await RagDocument.countDocuments({ businessUnit: cat.businessUnit, documentType: cat.name });
     if (inUse > 0) {
       return res.status(409).json({
@@ -1620,17 +1552,13 @@ adminAuthRouter.delete("/categories/:id", adminAuthMiddleware, async (req: Authe
   }
 });
 
-// ─── Department management (BU admins only) ───────────────────────────────────
-
 adminAuthRouter.get("/departments", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { businessUnit, isSuperAdmin } = req;
     const filter = isSuperAdmin ? {} : { businessUnit };
     const departments = await Department.find(filter).sort({ name: 1 }).lean();
 
-    // Stack one count query per dimension (employees + documents) so the cards on the
-    // Departments page can render with no extra round-trips. Both queries scope to the
-    // BU on department name to mirror how soft-gate retrieval matches.
+    // Both count queries scope to BU + department name to mirror how soft-gate retrieval matches.
     const enriched = await Promise.all(
       departments.map(async (d) => {
         const [employeeCount, documentCount] = await Promise.all([
@@ -1648,8 +1576,6 @@ adminAuthRouter.get("/departments", adminAuthMiddleware, async (req: Authenticat
   }
 });
 
-// Single-department detail — includes the active employees in the dept and the
-// RagDocuments tagged with it. Powers the Department detail page.
 adminAuthRouter.get("/departments/:id", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { businessUnit, isSuperAdmin } = req;
@@ -1683,8 +1609,7 @@ adminAuthRouter.get("/departments/:id", adminAuthMiddleware, async (req: Authent
   }
 });
 
-// Bulk-assign users to a department. Sets User.department = dept.name on each id
-// passed in. Users outside the admin's BU are silently skipped via the filter.
+// Users outside the admin's BU are silently skipped via the filter, not rejected.
 adminAuthRouter.patch("/departments/:id/users", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { businessUnit, isSuperAdmin } = req;
@@ -1718,9 +1643,7 @@ adminAuthRouter.patch("/departments/:id/users", adminAuthMiddleware, async (req:
   }
 });
 
-// Bulk-assign documents to a department. Sets RagDocument.department = dept.name on
-// each id passed in. Documents not in the admin's BU are silently skipped (the BU
-// scope is enforced via the filter, not a per-doc 403).
+// Documents outside the admin's BU are silently skipped via the filter, not rejected per-doc.
 adminAuthRouter.patch("/departments/:id/documents", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { businessUnit, isSuperAdmin } = req;
@@ -1813,7 +1736,6 @@ adminAuthRouter.patch("/departments/:id", adminAuthMiddleware, async (req: Authe
       return res.json({ department: dept });
     }
 
-    // Check for name collision
     const collision = await Department.findOne({ name: rawName, businessUnit: dept.businessUnit });
     if (collision) {
       return res.status(409).json({ error: "A department with this name already exists in your organization" });

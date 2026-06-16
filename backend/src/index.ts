@@ -26,6 +26,7 @@ import { adminKnowledgeGroupsRouter } from "./routes/adminKnowledgeGroups";
 import { adminAuditLogsRouter } from "./routes/adminAuditLogs";
 import { BusinessUnit } from "./models/BusinessUnit";
 import { tenantMiddleware } from "./middleware/tenant";
+import { authLimiter, aiLimiter, aiHourlyLimiter, generalLimiter } from "./middleware/rateLimiter";
 import logger from "./utils/logger";
 import { sendContactFormInquiry, sendAccessRequestNotification, sendAccessRequestReceived } from "./services/emailService";
 import { TenantRequest } from "./models/TenantRequest";
@@ -38,10 +39,10 @@ import { notifySuperAdminsAccessRequest } from "./services/notificationService";
 
 const app = express();
 
-// CORS configuration - allow all origins for flexibility across multiple deployments
+// origin: true allows all origins — needed since tenants are served from different subdomains.
 app.use(
   cors({
-    origin: true, // Allow all origins
+    origin: true,
     credentials: true,
   })
 );
@@ -49,6 +50,10 @@ app.use(json());
 
 // Resolve tenant from subdomain on every request (e.g. ufl.nexa.ai → tenantId, businessUnit)
 app.use(tenantMiddleware);
+
+// Trust first proxy hop (Railway / nginx) so req.ip reflects the real client IP
+app.set("trust proxy", 1);
+app.use("/api/v1", generalLimiter);
 
 // Serve frontend static files from the built dist folder
 // When compiled, __dirname is backend/dist — we need to go up two levels
@@ -59,7 +64,6 @@ const publicFolder = path.join(__dirname, '..', '..', 'public');
 logger.info(`Frontend dist path: ${frontendDist}`);
 logger.info(`Public folder path: ${publicFolder}`);
 
-// Serve static files with proper MIME types
 app.use('/assets', express.static(path.join(frontendDist, 'assets'), {
   maxAge: '1d',
   etag: false,
@@ -75,10 +79,8 @@ app.use('/assets', express.static(path.join(frontendDist, 'assets'), {
 app.use(express.static(frontendDist));
 app.use(express.static(publicFolder));
 
-// Serve tenant logos
 app.use('/logos', express.static(path.join(publicFolder, 'logos')));
 
-// Frontend routes - serve index.html for SPA
 const frontendIndex = path.join(frontendDist, 'index.html');
 const cPanelFile = path.join(publicFolder, 'c-panel.html');
 app.get('/', (_req, res) => res.sendFile(frontendIndex));
@@ -92,7 +94,6 @@ app.get("/health", (_req, res) => {
   res.json({ status: "ok" });
 });
 
-// ─── Swagger API Docs ─────────────────────────────────────────────────────────
 app.use("/api/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
   customSiteTitle: "Nexa AI API Docs",
   swaggerOptions: { persistAuthorization: true }
@@ -102,17 +103,17 @@ app.get("/api/docs.json", (_req, res) => {
   res.send(swaggerSpec);
 });
 
-app.use("/api/v1/auth", authRouter);
-app.use("/api/v1/admin/auth", adminAuthRouter);
+app.use("/api/v1/auth", authLimiter, authRouter);
+app.use("/api/v1/admin/auth", authLimiter, adminAuthRouter);
 // Specific-path routers MUST be mounted before conversationRouter because
 // conversationRouter contains GET /:id which catches any unmatched path and
 // returns 404, preventing the sharing/mention routes from ever being reached.
-app.use("/api/v1/conversations", conversationSharingRouter);
-app.use("/api/v1/conversations", conversationAccessRouter);
-app.use("/api/v1/conversations", conversationMentionsRouter);
-app.use("/api/v1/conversations", conversationRouter);
-app.use("/api/v1/conversations", userDocumentsRouter);
-app.use("/api/v1/chat", chatRouter);
+app.use("/api/v1/conversations", aiHourlyLimiter, aiLimiter, conversationSharingRouter);
+app.use("/api/v1/conversations", aiHourlyLimiter, aiLimiter, conversationAccessRouter);
+app.use("/api/v1/conversations", aiHourlyLimiter, aiLimiter, conversationMentionsRouter);
+app.use("/api/v1/conversations", aiHourlyLimiter, aiLimiter, conversationRouter);
+app.use("/api/v1/conversations", aiHourlyLimiter, aiLimiter, userDocumentsRouter);
+app.use("/api/v1/chat", aiHourlyLimiter, aiLimiter, chatRouter);
 app.use("/api/v1/admin/policies", adminPoliciesRouter);
 app.use("/api/v1/admin/documents", adminDocumentsRouter);
 app.use("/api/v1/admin/user-groups", adminKnowledgeGroupsRouter);
@@ -124,13 +125,10 @@ app.use("/api/v1/employee-invite", employeeInviteRouter);
 app.use("/api/v1", documentGenerationRouter);
 app.use("/api/v1/notifications", notificationsRouter);
 
-// Public endpoint for fetching business units (no auth required)
 app.get("/api/v1/public/business-units", async (_req, res) => {
   try {
-    // Fetch all business units from MongoDB
     const businessUnitsFromDB = await BusinessUnit.find().sort("name").lean();
-    
-    // Map to expected format
+
     const businessUnits = businessUnitsFromDB.map((bu: any) => ({
       value: bu.name,
       label: bu.label,
@@ -144,7 +142,6 @@ app.get("/api/v1/public/business-units", async (_req, res) => {
   }
 });
 
-// Public contact form (landing page)
 app.post("/api/v1/public/contact", async (req, res) => {
   try {
     const { name, email, company, message, intent } = req.body as Record<string, string | undefined>;
@@ -169,7 +166,7 @@ app.post("/api/v1/public/contact", async (req, res) => {
   }
 });
 
-// Public endpoint: business access request (no account created — super-admin reviews and provisions)
+// No account is created here — a super-admin reviews the request and provisions the tenant separately.
 app.post("/api/v1/public/request-access", async (req, res) => {
   try {
     const { companyName, workEmail, phone, employeeCount } = req.body as Record<string, string | number | undefined>;
@@ -231,7 +228,7 @@ app.post("/api/v1/public/request-access", async (req, res) => {
   }
 });
 
-// Get business unit names only (for C-Panel sidebar)
+// Powers the C-Panel sidebar, which only needs names — not full BU records.
 app.get("/api/v1/public/business-unit-names", async (_req, res) => {
   try {
     const buses = await BusinessUnit.find().select("name");
@@ -250,18 +247,14 @@ app.get("/api/v1/public/business-unit-names", async (_req, res) => {
 app.get('*', (req, res, next) => {
   if (req.method !== 'GET') return next();
   if (req.path.startsWith('/api/')) return next();
-  // Don't serve index.html for asset files
   if (req.path.startsWith('/assets') || req.path.includes('.')) return next();
   res.sendFile(frontendIndex);
 });
 
 
 
-// Only listen on a port if running as standalone (PORT env var set without being mounted)
 const mongoUri = process.env.MONGODB_URI!;
 
-
-// Initialize MongoDB connection options for better resilience
 const mongooseOptions = {
   connectTimeoutMS: 30000,
   socketTimeoutMS: 45000,
@@ -270,11 +263,9 @@ const mongooseOptions = {
   maxPoolSize: 10
 };
 
-// Initialize MongoDB connection
 mongoose.connect(mongoUri, mongooseOptions)
   .then(async () => {
     logger.info("MongoDB connected successfully");
-    // Check Redis availability before starting workers
     const { redisConnection } = require("./queue/connection");
     redisConnection.ping()
       .then(() => {

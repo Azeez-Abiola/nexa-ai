@@ -1,8 +1,3 @@
-/**
- * Google Search Service - Hybrid approach for enriched information
- * Uses SerpAPI to search Google and combine with company policies
- */
-
 interface SearchResult {
   title: string;
   link: string;
@@ -15,14 +10,7 @@ interface SearchResponse {
   error?: string;
 }
 
-/**
- * Search for information from Google using SerpAPI
- * Complements company policies with external information
- * 
- * Requires:
- * - SEARCH_API_PROVIDER=serpapi
- * - SEARCH_API_KEY=your_serpapi_key (from https://serpapi.com)
- */
+// Requires SEARCH_API_PROVIDER=serpapi and SEARCH_API_KEY (from https://serpapi.com).
 export async function searchGoogle(
   query: string,
   limit: number = 3
@@ -35,7 +23,6 @@ export async function searchGoogle(
       };
     }
 
-    // Check if SerpAPI is configured
     const provider = process.env.SEARCH_API_PROVIDER;
     const apiKey = process.env.SEARCH_API_KEY;
 
@@ -46,7 +33,6 @@ export async function searchGoogle(
       };
     }
 
-    // Handle SerpAPI integration
     if (provider.toLowerCase() === "serpapi") {
       return await searchWithSerpAPI(query, apiKey, limit);
     }
@@ -63,9 +49,6 @@ export async function searchGoogle(
   }
 }
 
-/**
- * Search using SerpAPI (https://serpapi.com)
- */
 async function searchWithSerpAPI(
   query: string,
   apiKey: string,
@@ -102,9 +85,9 @@ async function searchWithSerpAPI(
       };
     }
 
-    // Extract organic results from SerpAPI response
     const results: SearchResult[] = [];
-    
+
+
     if (data.organic_results && Array.isArray(data.organic_results)) {
       for (const result of data.organic_results.slice(0, limit)) {
         results.push({
@@ -146,7 +129,6 @@ async function fetchPageText(url: string, maxChars = 3000): Promise<string> {
     clearTimeout(timeout);
     if (!res.ok) return "";
     const html = await res.text();
-    // Strip scripts, styles, HTML tags, then collapse whitespace
     const text = html
       .replace(/<script[\s\S]*?<\/script>/gi, "")
       .replace(/<style[\s\S]*?<\/style>/gi, "")
@@ -178,10 +160,6 @@ export async function enrichResultsWithPageContent(results: SearchResult[]): Pro
   return enriched;
 }
 
-/**
- * Format search results for display in chat response
- * Clearly labels results as external sources
- */
 export function formatSearchResultsForChat(results: SearchResult[]): string {
   if (results.length === 0) {
     return "";
@@ -197,17 +175,12 @@ export function formatSearchResultsForChat(results: SearchResult[]): string {
   return formatted;
 }
 
-/**
- * Prepare hybrid context for OpenAI combining policies and external search
- * Both sources are clearly labeled for the AI to distinguish them
- */
 export function buildHybridContext(
   policies: any[],
   externalResults: SearchResult[]
 ): string {
   let context = "";
 
-  // Company policies section
   if (policies && policies.length > 0) {
     context += "📋 **COMPANY POLICIES & INTERNAL DOCUMENTS:**\n";
     context += "=" + "=".repeat(40) + "\n";
@@ -219,7 +192,6 @@ export function buildHybridContext(
     });
   }
 
-  // External search results section
   if (externalResults && externalResults.length > 0) {
     context += "\n🌐 **EXTERNAL SOURCES (Google Search):**\n";
     context += "=" + "=".repeat(40) + "\n";
@@ -234,9 +206,6 @@ export function buildHybridContext(
   return context;
 }
 
-/**
- * Get search-enhanced response with both policies and Google results
- */
 export async function enhanceResponseWithSearch(
   userQuery: string,
   policyResults: string | null,
@@ -257,7 +226,6 @@ export async function enhanceResponseWithSearch(
       }
     } catch (error) {
       console.warn("Failed to enhance response with search:", error);
-      // Continue without search results
     }
   }
 

@@ -29,7 +29,6 @@ async function redactMessagesForRecipient(
   messages: ChatMessage[],
   recipient: { _id: mongoose.Types.ObjectId; businessUnit: string }
 ): Promise<RedactedMessage[]> {
-  // Collect every source documentId referenced across the conversation in one pass.
   const docIds = new Set<string>();
   for (const m of messages) {
     if (m.role !== "assistant" || !m.sources) continue;
@@ -39,8 +38,6 @@ async function redactMessagesForRecipient(
   }
   if (docIds.size === 0) return messages;
 
-  // Resolve each cited doc's allowed groups (and BU) and the recipient's group memberships
-  // in two batched queries.
   const validIds = Array.from(docIds).filter((id) => mongoose.Types.ObjectId.isValid(id));
   const [docs, recipientGroups] = await Promise.all([
     RagDocument.find({ _id: { $in: validIds } })
@@ -116,12 +113,10 @@ export async function shareConversation(
   recipientEmail: string,
   messageIndex?: number
 ): Promise<ShareResult | ShareError> {
-  // 1. Validate ObjectId format to avoid DB errors
   if (!mongoose.Types.ObjectId.isValid(conversationGroupId)) {
     return { success: false, status: 400, error: "Invalid conversation ID" };
   }
 
-  // 2. Verify the conversation group belongs to the sender
   const senderConversations = await Conversation.findOne({
     userId: new mongoose.Types.ObjectId(senderUserId)
   });
@@ -158,7 +153,6 @@ export async function shareConversation(
     }
   }
 
-  // 3. Look up the recipient
   const recipient = await User.findOne({
     email: recipientEmail.toLowerCase().trim()
   }).select("_id email businessUnit fullName");
@@ -167,12 +161,10 @@ export async function shareConversation(
     return { success: false, status: 404, error: "Recipient user not found" };
   }
 
-  // Prevent sharing with yourself
   if (recipient._id.toString() === senderUserId) {
     return { success: false, status: 400, error: "You cannot share a conversation with yourself" };
   }
 
-  // 4. Business-unit access control — core security check
   if (senderBusinessUnit !== recipient.businessUnit) {
     logEvent("conversation_share_denied", {
       userId: senderUserId,
@@ -194,7 +186,7 @@ export async function shareConversation(
     };
   }
 
-  // 5. Prevent duplicate shares (per-conversation OR per-message — keyed independently)
+  // Per-conversation and per-message shares are keyed independently, so duplicates of each are checked separately.
   const normalizedIndex =
     typeof messageIndex === "number" && Number.isInteger(messageIndex) ? messageIndex : null;
 
@@ -215,7 +207,6 @@ export async function shareConversation(
     };
   }
 
-  // 6. Create the share record
   const share = await SharedConversation.create({
     conversationGroupId: new mongoose.Types.ObjectId(conversationGroupId),
     sharedByUserId: new mongoose.Types.ObjectId(senderUserId),
@@ -224,7 +215,7 @@ export async function shareConversation(
     messageIndex: normalizedIndex
   });
 
-  // 7. Audit log (fire-and-forget — never blocks the response)
+  // Fire-and-forget — never blocks the response.
   logEvent("conversation_shared", {
     userId: senderUserId,
     businessUnit: senderBusinessUnit,
@@ -243,9 +234,9 @@ export async function shareConversation(
     }
   });
 
-  // Fire-and-forget email — never block the share response on delivery
   const senderUser = await User.findById(senderUserId).select("fullName email").lean();
   const senderLabel = senderUser?.fullName || senderUser?.email || "A colleague";
+  // Not awaited — delivery failures should never block the share response.
   sendConversationSharedEmail(
     recipient.email,
     recipient.fullName || recipient.email,
@@ -283,7 +274,6 @@ export async function getConversationsSharedWithMe(recipientUserId: string) {
 
   const results = await Promise.all(
     shares.map(async (share) => {
-      // Load the owner's conversation document to read the group content
       const ownerConversations = await Conversation.findOne({
         userId: share.sharedByUserId
       }).lean();
@@ -296,7 +286,6 @@ export async function getConversationsSharedWithMe(recipientUserId: string) {
 
       if (!group) return null;
 
-      // Load sharer's display name
       const sharedByUser = await User.findById(share.sharedByUserId)
         .select("fullName email")
         .lean();
@@ -363,7 +352,6 @@ export async function revokeShare(
     return { success: false, status: 404, error: "Share record not found" };
   }
 
-  // Only the original sharer may revoke
   if (share.sharedByUserId.toString() !== requestingUserId) {
     return { success: false, status: 403, error: "You are not authorized to revoke this share" };
   }
@@ -385,10 +373,8 @@ export async function revokeShare(
   return { success: true };
 }
 
-// ─── Tokenised share-link flow ───────────────────────────────────────────────
-// Generates a per-conversation (or per-message) random token. Anyone with the
-// token who is authenticated AND in the sharer's business unit can open the
-// link and see the conversation — subject to the same per-source redaction.
+// Tokenised share links: anyone authenticated AND in the sharer's business unit who
+// holds the token can open it — subject to the same per-source redaction as direct shares.
 
 export interface ShareLinkResult {
   success: true;

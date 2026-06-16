@@ -23,13 +23,10 @@ const RETRY_BASE_DELAY_MS  = 1_000; // delays: 1 s, 2 s for attempts 2 and 3
 // The SOFT_CONTEXT_CEILING is the real upper bound; this just prevents over-allocating.
 const MAX_RESPONSE_TOKENS_OVERRIDE = 16_384;
 
-// ─── Light-mode constants ─────────────────────────────────────────────────────
 // Used when isSimpleQuery() is true: minimal instruction payload + strict output
 // cap keeps TTFT under 1 s for greetings and conversational filler.
 const LIGHT_PROMPT           = "You are Nexa AI, a friendly assistant powered by GPT-5. Respond naturally and briefly. If asked which model or AI you use, say you are Nexa AI powered by GPT-5.";
 const LIGHT_MAX_OUTPUT_TOKENS = 1_000;
-
-// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Message {
   role: "user" | "assistant" | "system";
@@ -52,8 +49,6 @@ export interface ImageAttachment {
 
 type InputMessage      = OpenAI.Responses.EasyInputMessage;
 type InputContentPart  = OpenAI.Responses.ResponseInputContent;
-
-// ─── Token Utilities ──────────────────────────────────────────────────────────
 
 function estimateTokens(text: string): number {
   try {
@@ -81,8 +76,6 @@ function computeMaxTokens(usedTokens: number): number {
   return Math.min(MAX_RESPONSE_TOKENS_OVERRIDE, Math.max(available, 200));
 }
 
-// ─── Response Extraction ──────────────────────────────────────────────────────
-
 function extractOutputText(response: OpenAI.Responses.Response): string {
   return (
     response.output_text ||
@@ -95,8 +88,6 @@ function extractOutputText(response: OpenAI.Responses.Response): string {
 function formatResponse(text: string): string {
   return text.trim();
 }
-
-// ─── Error Classification Utilities ──────────────────────────────────────────
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -135,10 +126,12 @@ function extractErrorMeta(err: unknown): Record<string, unknown> {
   return { message: err instanceof Error ? err.message : String(err) };
 }
 
-// ─── Prompt Utilities ─────────────────────────────────────────────────────────
-
-export function buildSystemPrompt(correctBUName: string, policyContext: string, hasPolicies: boolean, activeModel: "gpt" | "claude" = "gpt"): string {
-  const modelLabel = activeModel === "claude" ? "Claude Opus 4.7" : "GPT-5";
+export function buildSystemPrompt(correctBUName: string, policyContext: string, hasPolicies: boolean, activeModel: "gpt" | "claude" | "kimi" | "deepseek" = "gpt"): string {
+  const modelLabel =
+    activeModel === "claude"    ? "Claude Opus 4.7" :
+    activeModel === "kimi"      ? "Kimi k2.5" :
+    activeModel === "deepseek"  ? "DeepSeek v4" :
+    "GPT-5";
   const basePrompt = `You are Nexa AI, ${correctBUName}'s Policy Assistant, powered by ${modelLabel}. If asked which model or AI you use, say you are Nexa AI powered by ${modelLabel}.`;
   const formattingGuide = `Format responses with: **bold** for key terms, *italics* for emphasis, ### headers, numbered/bullet lists, --- separators, and code blocks for examples.`;
 
@@ -161,8 +154,6 @@ function buildPolicyContext(policies: PolicyContext[]): { policyContext: string;
   });
   return { policyContext, hasPolicies: true };
 }
-
-// ─── Adaptive request builder ─────────────────────────────────────────────────
 
 interface RequestParams {
   instructions:     string;
@@ -200,7 +191,6 @@ function buildRequestParams(
     (imageAttachments?.length ?? 0) +
     trimmedHistory.reduce((sum, m) => sum + (m.imageUrls?.length ?? 0), 0);
 
-  // Light mode: no images + trivial text content
   if (isSimpleQuery(userMessage) && imageCount === 0) {
     return {
       instructions:    LIGHT_PROMPT,
@@ -212,7 +202,6 @@ function buildRequestParams(
     };
   }
 
-  // Full mode: build the complete instruction payload
   const correctBUName = buLabel || "your organization";
   const { policyContext, hasPolicies } = buildPolicyContext(policies);
   const instructions  = customSystemPrompt ?? buildSystemPrompt(correctBUName, policyContext, hasPolicies);
@@ -232,8 +221,6 @@ function buildRequestParams(
     imageCount,
   };
 }
-
-// ─── Input Builder ────────────────────────────────────────────────────────────
 
 function buildInputMessages(
   trimmedHistory: Message[],
@@ -256,7 +243,6 @@ function buildInputMessages(
       return { role: msg.role as "user" | "assistant", content: msg.content };
     });
 
-  // Current user turn — optionally multimodal.
   let userContent: string | InputContentPart[];
   if (imageAttachments && imageAttachments.length > 0) {
     userContent = [
@@ -273,8 +259,6 @@ function buildInputMessages(
 
   return [...historyMessages, { role: "user", content: userContent }];
 }
-
-// ─── generateAIResponse ───────────────────────────────────────────────────────
 
 export async function generateAIResponse(
   userMessage: string,
@@ -315,8 +299,6 @@ export async function generateAIResponse(
   }
 }
 
-// ─── streamAIResponse ────────────────────────────────────────────────────────
-
 export async function* streamAIResponse(
   userMessage: string,
   policies: PolicyContext[],
@@ -356,7 +338,6 @@ export async function* streamAIResponse(
   let lastError:   unknown = null;
   const totalStart = Date.now();
 
-  // ── Retry loop (stream attempts) ─────────────────────────────────────────────
   for (let attempt = 0; attempt < STREAM_MAX_ATTEMPTS; attempt++) {
     if (attempt > 0) {
       const delayMs = RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1); // 1 s, 2 s
@@ -465,7 +446,7 @@ export async function* streamAIResponse(
         seenEventTypes,
       });
 
-      lastError = null; // success
+      lastError = null;
       break;
 
     } catch (err) {
@@ -504,13 +485,12 @@ export async function* streamAIResponse(
     }
   }
 
-  // ── gpt-5 "done" event path: text delivered only via the done event ───────────
+  // gpt-5 may deliver text only via the "done" event path, with no per-character deltas.
   if (!hasYielded && doneFallback.trim() && !lastError) {
     yield doneFallback.trim();
     return;
   }
 
-  // ── Non-streaming fallback after all stream attempts exhausted ───────────────
   if (!hasYielded && lastError) {
     logger.warn("[OpenAI/Stream] All stream attempts failed — falling back to non-streaming", {
       totalElapsedMs: Date.now() - totalStart,
@@ -551,8 +531,6 @@ export async function* streamAIResponse(
     }
   }
 }
-
-// ─── generateConversationTitle ────────────────────────────────────────────────
 
 export async function generateConversationTitle(userMessage: string): Promise<string> {
   const fallback = () => {

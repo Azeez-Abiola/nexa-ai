@@ -16,7 +16,6 @@ import logger from "../utils/logger";
 
 export const adminDocumentsRouter = express.Router();
 
-// multer uses memory storage — buffer is then streamed to Cloudinary
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 30 * 1024 * 1024 }, // 30MB
@@ -56,7 +55,6 @@ function normalizeTitleForMatching(title: string): string {
     .trim();
 }
 
-// ─── List documents ────────────────────────────────────────────────────────────
 adminDocumentsRouter.get("/", async (req: AuthenticatedRequest, res) => {
   try {
     const { businessUnit, isSuperAdmin } = req;
@@ -87,7 +85,6 @@ adminDocumentsRouter.get("/", async (req: AuthenticatedRequest, res) => {
   }
 });
 
-// ─── Processing status summary ─────────────────────────────────────────────────
 adminDocumentsRouter.get("/status/summary", async (req: AuthenticatedRequest, res) => {
   try {
     const { businessUnit, isSuperAdmin } = req;
@@ -108,7 +105,6 @@ adminDocumentsRouter.get("/status/summary", async (req: AuthenticatedRequest, re
   }
 });
 
-// ─── Get single document ───────────────────────────────────────────────────────
 adminDocumentsRouter.get("/:id", async (req: AuthenticatedRequest, res) => {
   try {
     const { id } = req.params;
@@ -127,7 +123,6 @@ adminDocumentsRouter.get("/:id", async (req: AuthenticatedRequest, res) => {
   }
 });
 
-// ─── Upload new document ───────────────────────────────────────────────────────
 adminDocumentsRouter.post("/", upload.single("file"), async (req: AuthenticatedRequest, res) => {
   try {
     const { title, documentType, sensitivityLevel, content, department } = req.body;
@@ -275,7 +270,6 @@ adminDocumentsRouter.post("/", upload.single("file"), async (req: AuthenticatedR
       fileSize = uploadBuffer.length;
     }
 
-    // Upload to Cloudinary
     const { publicId, secureUrl } = await uploadDocument(
       uploadBuffer,
       originalFilename,
@@ -283,7 +277,6 @@ adminDocumentsRouter.post("/", upload.single("file"), async (req: AuthenticatedR
       mimeType
     );
 
-    // Create RagDocument record
     const trimmedDepartment = typeof department === "string" ? department.trim() : "";
     const doc = await RagDocument.create({
       title,
@@ -332,11 +325,8 @@ adminDocumentsRouter.post("/", upload.single("file"), async (req: AuthenticatedR
       );
     } catch (queueErr) {
       logger.error("[AdminDocuments] Queue error — rolling back", { error: (queueErr as Error).message });
-      // Delete the document record so it doesn't appear as a ghost "pending" entry
       await RagDocument.findByIdAndDelete(doc._id).catch(() => {});
-      // Delete the file from Cloudinary
       await deleteDocument(publicId).catch(() => {});
-      // Restore superseded document if this was a replacement
       if (supersedesId) {
         await RagDocument.findByIdAndUpdate(supersedesId, {
           processingStatus: "completed",
@@ -413,7 +403,7 @@ adminDocumentsRouter.post("/", upload.single("file"), async (req: AuthenticatedR
   }
 });
 
-// ─── Edit access (user groups) — no reprocess needed, chunks are cascaded ─────
+// Group access changes don't require reprocessing — chunk access is cascaded below instead.
 adminDocumentsRouter.patch("/:id/access", async (req: AuthenticatedRequest, res) => {
   try {
     const { id } = req.params;
@@ -470,7 +460,6 @@ adminDocumentsRouter.patch("/:id/access", async (req: AuthenticatedRequest, res)
   }
 });
 
-// ─── Reprocess a failed/completed document ────────────────────────────────────
 adminDocumentsRouter.post("/:id/reprocess", async (req: AuthenticatedRequest, res) => {
   try {
     const { id } = req.params;
@@ -487,10 +476,8 @@ adminDocumentsRouter.post("/:id/reprocess", async (req: AuthenticatedRequest, re
 
     const groupStrings = (doc.allowedGroupIds || []).map((g) => g.toString());
 
-    // Remove old chunks
     await cleanupDocumentChunks(id);
 
-    // Reset status
     await RagDocument.findByIdAndUpdate(id, {
       processingStatus: "pending",
       processingError: null,
@@ -523,7 +510,6 @@ adminDocumentsRouter.post("/:id/reprocess", async (req: AuthenticatedRequest, re
   }
 });
 
-// ─── Delete document ───────────────────────────────────────────────────────────
 adminDocumentsRouter.delete("/:id", async (req: AuthenticatedRequest, res) => {
   try {
     const { id } = req.params;
@@ -535,7 +521,6 @@ adminDocumentsRouter.delete("/:id", async (req: AuthenticatedRequest, res) => {
       return res.status(403).json({ error: "Access denied" });
     }
 
-    // Delete chunks, Cloudinary file, and DB record in parallel
     await Promise.all([
       cleanupDocumentChunks(id),
       deleteDocument(doc.cloudinaryPublicId)

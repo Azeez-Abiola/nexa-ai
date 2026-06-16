@@ -79,18 +79,15 @@ async function tenantProfileForBu(businessUnit: string | undefined): Promise<{
   return mapTenantFromBuDoc(buDoc);
 }
 
-// Helper function to generate 6-digit OTP
 function generateOTP(): string {
   // TODO: restore random OTP once email service (Resend) is configured
   return "123456";
 }
 
-// Helper function to generate token hash for password reset
 function generateToken(token: string): string {
   return crypto.createHash("sha256").update(token).digest("hex");
 }
 
-// Verify Email endpoint
 authRouter.post("/verify-email", async (req: Request<{}, {}, { email: string; otp: string }>, res: Response) => {
   try {
     const { email, otp } = req.body;
@@ -99,7 +96,6 @@ authRouter.post("/verify-email", async (req: Request<{}, {}, { email: string; ot
       return res.status(400).json({ error: "Email and OTP are required" });
     }
 
-    // Find user with valid OTP
     const user = await User.findOne({
       email: email.toLowerCase(),
       emailVerificationOTP: otp,
@@ -110,13 +106,11 @@ authRouter.post("/verify-email", async (req: Request<{}, {}, { email: string; ot
       return res.status(400).json({ error: "Invalid or expired OTP" });
     }
 
-    // Mark email as verified and clear OTP
     user.emailVerified = true;
     user.emailVerificationOTP = undefined;
     user.emailVerificationOTPExpiry = undefined;
     await user.save();
 
-    // Fetch BU branding for the welcome email
     let tenantInfo: { label?: string; logo?: string; colorCode?: string; slug?: string } | undefined;
     if (user.businessUnit && user.businessUnit !== "SUPERADMIN") {
       const buDoc = await BusinessUnitModel.findOne({
@@ -132,7 +126,6 @@ authRouter.post("/verify-email", async (req: Request<{}, {}, { email: string; ot
       }
     }
 
-    // Send welcome email tailored to the user's business unit
     try {
       await sendWelcomeEmail(user.email, user.fullName, user.businessUnit, tenantInfo);
     } catch (emailError) {
@@ -175,7 +168,6 @@ authRouter.post("/verify-email", async (req: Request<{}, {}, { email: string; ot
   }
 });
 
-// Resend Verification Email endpoint
 authRouter.post("/resend-verification", async (req: Request<{}, {}, { email: string }>, res: Response) => {
   try {
     const { email } = req.body;
@@ -184,7 +176,6 @@ authRouter.post("/resend-verification", async (req: Request<{}, {}, { email: str
       return res.status(400).json({ error: "Email is required" });
     }
 
-    // Find user
     const user = await User.findOne({ email: email.toLowerCase() });
     if (!user) {
       return res.status(200).json({
@@ -192,26 +183,22 @@ authRouter.post("/resend-verification", async (req: Request<{}, {}, { email: str
       });
     }
 
-    // If already verified
     if (user.emailVerified) {
       return res.status(200).json({
         message: "This email is already verified. You can login now."
       });
     }
 
-    // Generate new OTP
     const otp = generateOTP();
 
     user.emailVerificationOTP = otp;
     user.emailVerificationOTPExpiry = new Date(Date.now() + 10 * 60 * 1000);
     await user.save();
 
-    // Fetch BU brand color for the email
     const buDocForColor = await BusinessUnitModel.findOne({
       name: { $regex: new RegExp(`^${user.businessUnit.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') }
     });
 
-    // Send verification email with new OTP
     try {
       await sendVerificationEmail(user.email, otp, user.fullName, user.businessUnit, buDocForColor?.colorCode);
     } catch (emailError) {
@@ -228,7 +215,7 @@ authRouter.post("/resend-verification", async (req: Request<{}, {}, { email: str
   }
 });
 
-// Login endpoint (supports both standard Users and AdminUsers)
+// Looks up both the User and AdminUser collections — this single endpoint serves both account types.
 authRouter.post("/login", async (req: Request<{}, {}, AuthRequest>, res: Response) => {
   try {
     const { email, password } = req.body;
@@ -237,12 +224,10 @@ authRouter.post("/login", async (req: Request<{}, {}, AuthRequest>, res: Respons
       return res.status(400).json({ error: "Email and password are required" });
     }
 
-    // Try finding in User model first
     let user: any = await User.findOne({ email: email.toLowerCase() });
     let isAdminAccount = false;
 
     if (!user) {
-      // Try AdminUser table
       user = await AdminUser.findOne({ email: email.toLowerCase() });
       if (user) isAdminAccount = true;
     }
@@ -259,7 +244,6 @@ authRouter.post("/login", async (req: Request<{}, {}, AuthRequest>, res: Respons
       });
     }
 
-    // Check if email is verified
     if (!user.emailVerified && user.businessUnit !== "SUPERADMIN") {
       return res.status(403).json({ 
         error: "Please verify your email before logging in",
@@ -269,7 +253,6 @@ authRouter.post("/login", async (req: Request<{}, {}, AuthRequest>, res: Respons
       });
     }
 
-    // Compare password
     const passwordMatch = await bcryptjs.compare(password, user.password);
     if (!passwordMatch) {
       return res.status(401).json({ error: "Invalid email or password" });
@@ -342,7 +325,6 @@ authRouter.post("/logout", authMiddleware, (req: AuthenticatedRequest, res: Resp
   res.json({ message: "Logged out" });
 });
 
-// Forgot Password endpoint
 authRouter.post("/forgot-password", async (req: Request<{}, {}, { email: string }>, res: Response) => {
   try {
     const { email } = req.body;
@@ -351,25 +333,21 @@ authRouter.post("/forgot-password", async (req: Request<{}, {}, { email: string 
       return res.status(400).json({ error: "Email is required" });
     }
 
-    // Find user
     const user = await User.findOne({ email: email.toLowerCase() });
     if (!user) {
-      // Don't reveal if user exists (security best practice)
+      // Don't reveal whether an account exists for this email.
       return res.status(200).json({
         message: "If an account exists with this email, a reset link will be sent shortly"
       });
     }
 
-    // Generate reset token
     const resetTokenRaw = crypto.randomBytes(32).toString("hex");
     const resetToken = generateToken(resetTokenRaw);
 
-    // Set token expiry to 1 hour from now
     user.resetToken = resetToken;
     user.resetTokenExpiry = new Date(Date.now() + 60 * 60 * 1000);
     await user.save();
 
-    // Send password reset email
     try {
       await sendPasswordResetEmail(user.email, resetTokenRaw, user.fullName);
     } catch (emailError) {
@@ -386,7 +364,6 @@ authRouter.post("/forgot-password", async (req: Request<{}, {}, { email: string 
   }
 });
 
-// Reset Password endpoint
 authRouter.post("/reset-password", async (req: Request<{}, {}, { token: string; newPassword: string; email: string }>, res: Response) => {
   try {
     const { token, newPassword, email } = req.body;
@@ -395,15 +372,12 @@ authRouter.post("/reset-password", async (req: Request<{}, {}, { token: string; 
       return res.status(400).json({ error: "Token, email, and new password are required" });
     }
 
-    // Validate password strength
     if (newPassword.length < 6) {
       return res.status(400).json({ error: "Password must be at least 6 characters long" });
     }
 
-    // Hash the token to compare with stored hash
     const resetTokenHash = generateToken(token);
 
-    // Find user with valid reset token
     const user = await User.findOne({
       email: email.toLowerCase(),
       resetToken: resetTokenHash,
@@ -414,10 +388,8 @@ authRouter.post("/reset-password", async (req: Request<{}, {}, { token: string; 
       return res.status(400).json({ error: "Reset token is invalid or has expired" });
     }
 
-    // Hash new password
     const hashedPassword = await bcryptjs.hash(newPassword, 10);
 
-    // Update password and clear reset token
     user.password = hashedPassword;
     user.resetToken = undefined;
     user.resetTokenExpiry = undefined;

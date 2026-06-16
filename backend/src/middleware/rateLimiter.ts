@@ -1,0 +1,113 @@
+import { Redis } from "ioredis";
+import rateLimit from "express-rate-limit";
+import RedisStore from "rate-limit-redis";
+import jwt from "jsonwebtoken";
+import { Request } from "express";
+import logger from "../utils/logger";
+
+// Dedicated Redis client — separate from the BullMQ connection which requires
+// maxRetriesPerRequest: null (a BullMQ-specific option that causes short-lived
+// rate-limit commands to hang instead of failing fast).
+const rateLimitRedis = process.env.REDIS_URL
+  ? new Redis(process.env.REDIS_URL, {
+      enableReadyCheck: false,
+      connectTimeout: 10000,
+      lazyConnect: true,
+    })
+  : new Redis({
+      host: process.env.REDIS_HOST || "127.0.0.1",
+      port: parseInt(process.env.REDIS_PORT || "6379", 10),
+      password: process.env.REDIS_PASSWORD || undefined,
+      enableReadyCheck: false,
+      connectTimeout: 10000,
+      lazyConnect: true,
+    });
+
+rateLimitRedis.on("error", (err) => {
+  logger.warn("[RateLimit Redis] Connection error", { message: err.message });
+});
+rateLimitRedis.on("connect", () => {
+  logger.info("[RateLimit Redis] Connected");
+});
+
+function makeStore(prefix: string) {
+  return new RedisStore({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    sendCommand: (...args: string[]) => rateLimitRedis.call(...(args as [string, ...string[]])) as any,
+    prefix,
+  });
+}
+
+// Extract userId from a bearer token without signature verification — used only
+// for rate-limit bucketing. Authorization is still enforced by authMiddleware downstream.
+function extractUserId(req: Request): string | null {
+  try {
+    const token = req.headers.authorization?.split(" ")[1];
+    if (!token) return null;
+    const decoded = jwt.decode(token) as Record<string, unknown> | null;
+    const id = decoded?.userId ?? decoded?.adminId;
+    return typeof id === "string" ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+function aiKeyGenerator(req: Request): string {
+  const userId = extractUserId(req);
+  return userId ? `user:${userId}` : (req.ip ?? "unknown");
+}
+
+const sharedOptions = {
+  standardHeaders: "draft-7" as const,
+  legacyHeaders: false,
+  skip: (req: Request) => req.method === "OPTIONS",
+} as const;
+
+const AUTH_LIMIT = parseInt(process.env.RATE_LIMIT_AUTH ?? "10", 10);
+const AI_LIMIT_PER_MINUTE = parseInt(process.env.RATE_LIMIT_AI_PER_MINUTE ?? "60", 10);
+const AI_LIMIT_PER_HOUR = parseInt(process.env.RATE_LIMIT_AI_PER_HOUR ?? "100", 10);
+const GENERAL_LIMIT = parseInt(process.env.RATE_LIMIT_GENERAL ?? "200", 10);
+
+// Brute-force protection on auth endpoints — AUTH_LIMIT req per 15 min per IP
+export const authLimiter = rateLimit({
+  ...sharedOptions,
+  windowMs: 15 * 60 * 1000,
+  limit: AUTH_LIMIT,
+  keyGenerator: (req) => req.ip ?? "unknown",
+  message: { error: "Too many login attempts. Please try again in 15 minutes." },
+  store: makeStore("rl:auth:"),
+});
+
+// AI burst control — AI_LIMIT_PER_MINUTE req per minute per user
+export const aiLimiter = rateLimit({
+  ...sharedOptions,
+  windowMs: 60 * 1000,
+  limit: AI_LIMIT_PER_MINUTE,
+  keyGenerator: aiKeyGenerator,
+  message: { error: "Too many requests. Please wait a moment before sending another message." },
+  store: makeStore("rl:ai:"),
+});
+
+// AI hourly cap — AI_LIMIT_PER_HOUR req per hour per user
+export const aiHourlyLimiter = rateLimit({
+  ...sharedOptions,
+  windowMs: 60 * 60 * 1000,
+  limit: AI_LIMIT_PER_HOUR,
+  keyGenerator: aiKeyGenerator,
+  store: makeStore("rl:ai-hourly:"),
+  handler: (_req, res) => {
+    res.status(429).json({
+      error: "You've reached your hourly message limit. Please try again in an hour.",
+    });
+  },
+});
+
+// General catch-all for all /api/v1 traffic — GENERAL_LIMIT req per minute per IP
+export const generalLimiter = rateLimit({
+  ...sharedOptions,
+  windowMs: 60 * 1000,
+  limit: GENERAL_LIMIT,
+  keyGenerator: (req) => req.ip ?? "unknown",
+  message: { error: "Too many requests. Please slow down." },
+  store: makeStore("rl:general:"),
+});
