@@ -42,7 +42,7 @@ analyticsRouter.get("/dashboard", adminAuthMiddleware, async (req: Authenticated
       Conversation.countDocuments(buFilter),
       Policy.countDocuments(buFilter),
       BusinessUnit.countDocuments(isSuperAdmin ? {} : { name: effectiveBU }),
-      import("../models/RagDocument").then(m => m.RagDocument.countDocuments(buFilter)),
+      RagDocument.countDocuments(buFilter),
       Conversation.countDocuments({
         ...buFilter,
         conversationGroups: {
