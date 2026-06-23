@@ -22,6 +22,12 @@ export function encrypt(plaintext: string): string {
   return PREFIX + iv.toString("hex") + ":" + tag.toString("hex") + ":" + encrypted.toString("hex");
 }
 
+export function decryptMessages(messages: Array<{ content: string; [key: string]: unknown }>): void {
+  for (const m of messages) {
+    if (typeof m.content === "string") m.content = decrypt(m.content);
+  }
+}
+
 export function decrypt(value: string): string {
   // Graceful fallback: return plaintext values (pre-encryption legacy messages)
   if (!value.startsWith(PREFIX)) return value;

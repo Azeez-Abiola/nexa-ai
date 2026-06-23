@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import mongoose from "mongoose";
+import { decryptMessages } from "../utils/encryption";
 import { User } from "../models/User";
 import { Conversation, ChatMessage } from "../models/Conversation";
 import { SharedConversation } from "../models/SharedConversation";
@@ -304,6 +305,7 @@ export async function getConversationsSharedWithMe(recipientUserId: string) {
       // Per-message share: scope the visible messages to the focused AI reply
       // plus the immediately-preceding user question (so the recipient has the
       // context for what was asked). Whole-conversation shares pass through.
+      decryptMessages(group.messages as Array<{ content: string; [key: string]: unknown }>);
       let scopedMessages = group.messages;
       const isSingleMessageShare =
         typeof share.messageIndex === "number" && share.messageIndex !== null;
@@ -495,6 +497,7 @@ export async function getConversationByShareLink(token: string, viewerUserId: st
   }
 
   // Slice for single-message links; redact for everyone.
+  decryptMessages(group.messages as Array<{ content: string; [key: string]: unknown }>);
   let scopedMessages = group.messages;
   const isSingleMessage = typeof link.messageIndex === "number" && link.messageIndex !== null;
   if (isSingleMessage) {

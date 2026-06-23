@@ -82,7 +82,7 @@ const MessageSchema = new Schema<ChatMessage>(
     senderId: { type: String, default: undefined },
     senderName: { type: String, default: undefined },
   },
-  { _id: false }
+  { _id: false, toJSON: { getters: true }, toObject: { getters: true } }
 );
 
 const ConversationGroupSchema = new Schema<ConversationGroup>(

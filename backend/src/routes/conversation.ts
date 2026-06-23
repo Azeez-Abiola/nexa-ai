@@ -41,6 +41,7 @@ import {
 import { randomUUID } from "crypto";
 import { ConversationFolder } from "../models/ConversationFolder";
 import { syncToCollaborators } from "../utils/syncCollaboration";
+import { decryptMessages } from "../utils/encryption";
 
 // ─── Ephemeral document cache (avoids Cloudinary for AI-generated files) ──────
 
@@ -538,14 +539,17 @@ conversationRouter.get("/", authMiddleware, async (req: AuthenticatedRequest, re
       return res.json({ conversations: [], total: 0, hasMore: false });
     }
 
-    const conversations = result.conversationGroups.map((group: any) => ({
-      _id: group._id,
-      userId: req.userId,
-      title: group.title,
-      messages: group.messages,
-      createdAt: group.createdAt,
-      updatedAt: group.updatedAt
-    }));
+    const conversations = result.conversationGroups.map((group: any) => {
+      decryptMessages(group.messages);
+      return {
+        _id: group._id,
+        userId: req.userId,
+        title: group.title,
+        messages: group.messages,
+        createdAt: group.createdAt,
+        updatedAt: group.updatedAt
+      };
+    });
 
     res.json({ conversations, total: result.total, hasMore: result.total > offset + limit });
   } catch (error) {
