@@ -6,8 +6,8 @@ import logger from "../utils/logger";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-const MODEL                = process.env.OPEN_AI_MODEL || "gpt-5";
-const tokenEncoder         = encodingForModel("gpt-4o"); // gpt-5 uses the same o200k_base tokenizer
+const MODEL                = process.env.OPEN_AI_MODEL || "gpt-4.1";
+const tokenEncoder         = encodingForModel("gpt-4o"); // gpt-4.1 uses the same o200k_base tokenizer
 
 const SOFT_CONTEXT_CEILING = 200_000;
 const HISTORY_TOKEN_BUDGET = 4_000;
@@ -26,7 +26,7 @@ const MAX_RESPONSE_TOKENS_OVERRIDE = 16_384;
 // ─── Light-mode constants ─────────────────────────────────────────────────────
 // Used when isSimpleQuery() is true: minimal instruction payload + strict output
 // cap keeps TTFT under 1 s for greetings and conversational filler.
-const LIGHT_PROMPT           = "You are Nexa AI, a friendly assistant powered by GPT-5. Respond naturally and briefly. If asked which model or AI you use, say you are Nexa AI powered by GPT-5.";
+const LIGHT_PROMPT           = "You are Nexa AI, a friendly assistant. Respond naturally and briefly.";
 const LIGHT_MAX_OUTPUT_TOKENS = 1_000;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -138,7 +138,7 @@ function extractErrorMeta(err: unknown): Record<string, unknown> {
 // ─── Prompt Utilities ─────────────────────────────────────────────────────────
 
 export function buildSystemPrompt(correctBUName: string, policyContext: string, hasPolicies: boolean, activeModel: "gpt" | "claude" = "gpt"): string {
-  const modelLabel = activeModel === "claude" ? "Claude Opus 4.7" : "GPT-5";
+  const modelLabel = activeModel === "claude" ? "Claude Opus 4.7" : "GPT-4.1";
   const basePrompt = `You are Nexa AI, ${correctBUName}'s Policy Assistant, powered by ${modelLabel}. If asked which model or AI you use, say you are Nexa AI powered by ${modelLabel}.`;
   const formattingGuide = `Format responses with: **bold** for key terms, *italics* for emphasis, ### headers, numbered/bullet lists, --- separators, and code blocks for examples.`;
 

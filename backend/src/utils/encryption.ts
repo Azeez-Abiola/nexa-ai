@@ -28,6 +28,21 @@ export function decryptMessages(messages: Array<{ content: string; [key: string]
   }
 }
 
+/**
+ * Converts Mongoose message subdocuments (or plain objects) into serializable plain
+ * objects with decrypted content. Needed because Mongoose's nested toJSON getter
+ * options don't propagate when subdocuments are embedded in a hand-built response
+ * object and serialized by Express. Safe to call on both Mongoose docs and lean objects.
+ */
+export function serializeMessages(messages: any[]): any[] {
+  return messages.map(m => {
+    const plain: { content: string; [key: string]: unknown } =
+      typeof m.toObject === "function" ? m.toObject() : { ...m };
+    if (typeof plain.content === "string") plain.content = decrypt(plain.content);
+    return plain;
+  });
+}
+
 export function decrypt(value: string): string {
   // Graceful fallback: return plaintext values (pre-encryption legacy messages)
   if (!value.startsWith(PREFIX)) return value;

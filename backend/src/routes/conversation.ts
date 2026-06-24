@@ -41,7 +41,7 @@ import {
 import { randomUUID } from "crypto";
 import { ConversationFolder } from "../models/ConversationFolder";
 import { syncToCollaborators } from "../utils/syncCollaboration";
-import { decryptMessages } from "../utils/encryption";
+import { decryptMessages, serializeMessages } from "../utils/encryption";
 
 // ─── Ephemeral document cache (avoids Cloudinary for AI-generated files) ──────
 
@@ -367,7 +367,7 @@ function buildSystemPrompt(
   activeModel: "gpt" | "claude" = "gpt"
 ): string {
   const today = new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
-  const modelLabel = activeModel === "claude" ? "Claude Opus 4.7" : "GPT-5";
+  const modelLabel = activeModel === "claude" ? "Claude Opus 4.7" : "GPT-4.1";
   const sections: string[] = [
     `You are Nexa AI, a helpful AI assistant for ${businessUnit}, a business unit of UACN, powered by ${modelLabel}. Today's date is ${today}. If asked which model or AI you use, say you are Nexa AI powered by ${modelLabel}. Users can switch between models at any time — if the model differs from a previous message, do not apologize or treat it as an error; simply state the current model naturally.`
   ];
@@ -620,7 +620,7 @@ conversationRouter.get("/:id", authMiddleware, async (req: AuthenticatedRequest,
       _id: group._id,
       userId: req.userId,
       title: group.title,
-      messages: group.messages,
+      messages: serializeMessages(group.messages as any[]),
       createdAt: group.createdAt,
       updatedAt: group.updatedAt
     };
@@ -688,7 +688,7 @@ conversationRouter.post("/:id/note", authMiddleware, async (req: AuthenticatedRe
       conversation: {
         _id: group._id,
         title: group.title,
-        messages: group.messages,
+        messages: serializeMessages(group.messages as any[]),
         createdAt: group.createdAt,
         updatedAt: group.updatedAt,
       }
@@ -728,7 +728,7 @@ conversationRouter.put("/:id", authMiddleware, async (req: AuthenticatedRequest,
       _id: group._id,
       userId: req.userId,
       title: group.title,
-      messages: group.messages,
+      messages: serializeMessages(group.messages as any[]),
       createdAt: group.createdAt,
       updatedAt: group.updatedAt
     };
@@ -826,7 +826,7 @@ conversationRouter.post("/:id/message", authMiddleware, async (req: Authenticate
           _id: group._id,
           userId,
           title: group.title,
-          messages: group.messages,
+          messages: serializeMessages(group.messages as any[]),
           createdAt: group.createdAt,
           updatedAt: group.updatedAt
         }
@@ -862,7 +862,7 @@ conversationRouter.post("/:id/message", authMiddleware, async (req: Authenticate
           _id: group._id,
           userId,
           title: group.title,
-          messages: group.messages,
+          messages: serializeMessages(group.messages as any[]),
           createdAt: group.createdAt,
           updatedAt: group.updatedAt
         }
@@ -964,7 +964,7 @@ conversationRouter.post("/:id/message", authMiddleware, async (req: Authenticate
       _id: group._id,
       userId,
       title: group.title,
-      messages: group.messages,
+      messages: serializeMessages(group.messages as any[]),
       createdAt: group.createdAt,
       updatedAt: group.updatedAt
     };
@@ -1043,7 +1043,7 @@ conversationRouter.post("/:id/message/:index/edit", authMiddleware, async (req: 
           _id: group._id,
           userId,
           title: group.title,
-          messages: group.messages,
+          messages: serializeMessages(group.messages as any[]),
           createdAt: group.createdAt,
           updatedAt: group.updatedAt
         }
@@ -1105,7 +1105,7 @@ conversationRouter.post("/:id/message/:index/edit", authMiddleware, async (req: 
       _id: group._id,
       userId,
       title: group.title,
-      messages: group.messages,
+      messages: serializeMessages(group.messages as any[]),
       createdAt: group.createdAt,
       updatedAt: group.updatedAt
     };
@@ -1265,7 +1265,7 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
         _id: group._id,
         userId,
         title: group.title,
-        messages: group.messages,
+        messages: serializeMessages(group.messages as any[]),
         createdAt: group.createdAt,
         updatedAt: group.updatedAt
       };
@@ -1353,7 +1353,7 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
       );
 
       const conversation = {
-        _id: group._id, userId, title: group.title, messages: group.messages,
+        _id: group._id, userId, title: group.title, messages: serializeMessages(group.messages as any[]),
         createdAt: group.createdAt, updatedAt: group.updatedAt
       };
       res.write(`data: ${JSON.stringify({ done: true, fullResponse: deniedContent, conversation })}\n\n`);
@@ -1499,7 +1499,7 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
         _id: group._id,
         userId,
         title: group.title,
-        messages: group.messages,
+        messages: serializeMessages(group.messages as any[]),
         createdAt: group.createdAt,
         updatedAt: group.updatedAt
       };
@@ -1567,7 +1567,7 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
           { $set: { "conversationGroups.$.messages": group.messages } }
         ).catch(() => {});
         const conversation = {
-          _id: group._id, userId, title: group.title, messages: group.messages,
+          _id: group._id, userId, title: group.title, messages: serializeMessages(group.messages as any[]),
           createdAt: group.createdAt, updatedAt: group.updatedAt
         };
         res.write(`data: ${JSON.stringify({ done: true, fullResponse: fallbackContent, generatedDocument: generatedDocOnError, conversation })}\n\n`);
