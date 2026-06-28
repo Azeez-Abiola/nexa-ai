@@ -15,8 +15,19 @@ export default defineConfig({
       "/api": {
         target: backendUrl,
         changeOrigin: true,
+        configure: (proxy) => {
+          proxy.on("proxyRes", (proxyRes) => {
+            if (proxyRes.headers["content-type"]?.includes("text/event-stream")) {
+              proxyRes.socket?.setNoDelay(true);
+            }
+          });
+        },
       },
       "/logos": {
+        target: backendUrl,
+        changeOrigin: true,
+      },
+      "/health": {
         target: backendUrl,
         changeOrigin: true,
       }

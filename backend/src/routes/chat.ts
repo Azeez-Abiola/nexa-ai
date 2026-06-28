@@ -167,7 +167,7 @@ chatRouter.post("/", authMiddleware, async (req: AuthenticatedRequest, res) => {
     const hasExternalSources = context.googleResults.length > 0;
 
     if (hasContext) {
-      const systemPrompt = `You are Nexa AI, a helpful assistant for ${buName} (${buAbbr}), a business unit of UACN, powered by GPT-5. If asked which model or AI you use, say you are Nexa AI powered by GPT-5.
+      const systemPrompt = `You are Nexa AI, a helpful assistant for ${buName} (${buAbbr}), a business unit of UACN, powered by GPT-4.1. If asked which model or AI you use, say you are Nexa AI powered by GPT-4.1.
 
 You have been provided with information from company documents and/or external sources:
 
@@ -198,7 +198,7 @@ IMPORTANT INSTRUCTIONS:
       }
     }
 
-    const noMatchSystemPrompt = `You are Nexa AI, a helpful assistant for ${buName} (${buAbbr}), a business unit of UACN, powered by GPT-5. If asked which model or AI you use, say you are Nexa AI powered by GPT-5.
+    const noMatchSystemPrompt = `You are Nexa AI, a helpful assistant for ${buName} (${buAbbr}), a business unit of UACN, powered by GPT-4.1. If asked which model or AI you use, say you are Nexa AI powered by GPT-4.1.
 
 The user asked a question that doesn't have specific information in company documents OR external sources.
 
@@ -247,7 +247,7 @@ chatRouter.post("/public", async (req, res) => {
     const allBUs = await getAllBusinessUnits();
     const businessUnitsList = allBUs.map(bu => `- ${bu.label}`).join("\n");
 
-    let systemPrompt = `You are Nexa AI, a friendly and helpful assistant for UACN (United African Capital Limited), powered by GPT-5. If asked which model or AI you use, say you are Nexa AI powered by GPT-5.
+    let systemPrompt = `You are Nexa AI, a friendly and helpful assistant for UACN (United African Capital Limited), powered by GPT-4.1. If asked which model or AI you use, say you are Nexa AI powered by GPT-4.1.
 
 UACN is a conglomerate with several business units including:
 ${businessUnitsList}
@@ -333,7 +333,7 @@ chatRouter.post("/public/stream", async (req, res) => {
     // No BU-scoped policy search here — unauthenticated callers must not be able to query
     // internal documents by passing an arbitrary businessUnit in the body.
     const model = parseModel(rawModel);
-    const modelLabel = model === "claude" ? "Claude Opus 4.7" : "GPT-5";
+    const modelLabel = model === "claude" ? "Claude Opus 4.7" : "GPT-4.1";
     const systemPrompt = `You are Nexa AI, a helpful assistant for the UACN Group, powered by ${modelLabel}. Keep responses concise and well-formatted. For detailed policy information, direct users to log in. If asked which model or AI you use, say you are Nexa AI powered by ${modelLabel}.`;
     try {
       const stream = getStreamAIResponse(model)(

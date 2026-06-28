@@ -36,3 +36,19 @@ export function decrypt(value: string): string {
   decipher.setAuthTag(tag);
   return decipher.update(ciphertext).toString("utf8") + decipher.final("utf8");
 }
+
+export function decryptMessages(messages: Array<{ content: string; [key: string]: unknown }>): void {
+  for (const m of messages) {
+    if (typeof m.content === "string") m.content = decrypt(m.content);
+  }
+}
+
+export function serializeMessages(messages: any[] | null | undefined): any[] {
+  if (!messages) return [];
+  return messages.map(m => {
+    const plain: { content: string; [key: string]: unknown } =
+      typeof m.toObject === "function" ? m.toObject() : { ...m };
+    if (typeof plain.content === "string") plain.content = decrypt(plain.content);
+    return plain;
+  });
+}

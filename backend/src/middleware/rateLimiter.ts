@@ -63,9 +63,9 @@ const sharedOptions = {
   skip: (req: Request) => req.method === "OPTIONS",
 } as const;
 
-const AUTH_LIMIT = parseInt(process.env.RATE_LIMIT_AUTH ?? "10", 10);
-const AI_LIMIT_PER_MINUTE = parseInt(process.env.RATE_LIMIT_AI_PER_MINUTE ?? "60", 10);
-const AI_LIMIT_PER_HOUR = parseInt(process.env.RATE_LIMIT_AI_PER_HOUR ?? "100", 10);
+const AUTH_LIMIT = parseInt(process.env.RATE_LIMIT_AUTH ?? "50", 10);
+const AI_LIMIT_PER_MINUTE = parseInt(process.env.RATE_LIMIT_AI_PER_MINUTE ?? "300", 10);
+const AI_LIMIT_PER_HOUR = parseInt(process.env.RATE_LIMIT_AI_PER_HOUR ?? "1000", 10);
 const GENERAL_LIMIT = parseInt(process.env.RATE_LIMIT_GENERAL ?? "200", 10);
 
 // Brute-force protection on auth endpoints — AUTH_LIMIT req per 15 min per IP

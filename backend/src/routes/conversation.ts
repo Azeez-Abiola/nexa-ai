@@ -41,6 +41,7 @@ import {
 import { randomUUID } from "crypto";
 import { ConversationFolder } from "../models/ConversationFolder";
 import { syncToCollaborators } from "../utils/syncCollaboration";
+import { serializeMessages } from "../utils/encryption";
 
 const DOC_TTL_MS = 24 * 60 * 60 * 1000;
 
@@ -348,7 +349,7 @@ function buildSystemPrompt(
     activeModel === "claude"   ? "Claude Opus 4.7" :
     activeModel === "kimi"     ? "Kimi k2.5" :
     activeModel === "deepseek" ? "DeepSeek v4" :
-    "GPT-5";
+    "GPT-4.1";
   const sections: string[] = [
     `You are Nexa AI, a helpful AI assistant for ${businessUnit}, a business unit of UACN, powered by ${modelLabel}. Today's date is ${today}. If asked which model or AI you use, say you are Nexa AI powered by ${modelLabel}. Users can switch between models at any time — if the model differs from a previous message, do not apologize or treat it as an error; simply state the current model naturally.`
   ];
@@ -520,7 +521,7 @@ conversationRouter.get("/", authMiddleware, async (req: AuthenticatedRequest, re
       _id: group._id,
       userId: req.userId,
       title: group.title,
-      messages: group.messages,
+      messages: serializeMessages(group.messages as any[]),
       createdAt: group.createdAt,
       updatedAt: group.updatedAt
     }));
@@ -592,7 +593,7 @@ conversationRouter.get("/:id", authMiddleware, async (req: AuthenticatedRequest,
       _id: group._id,
       userId: req.userId,
       title: group.title,
-      messages: group.messages,
+      messages: serializeMessages(group.messages as any[]),
       createdAt: group.createdAt,
       updatedAt: group.updatedAt
     };
@@ -613,15 +614,17 @@ conversationRouter.delete("/:id", authMiddleware, async (req: AuthenticatedReque
       return res.status(404).json({ error: "Conversation not found" });
     }
 
-    const indexToDelete = userConversations.conversationGroups.findIndex(
+    const exists = userConversations.conversationGroups.some(
       (g) => g._id.toString() === id
     );
-    if (indexToDelete === -1) {
+    if (!exists) {
       return res.status(404).json({ error: "Conversation not found" });
     }
 
-    userConversations.conversationGroups.splice(indexToDelete, 1);
-    await userConversations.save();
+    await Conversation.updateOne(
+      { userId: req.userId },
+      { $pull: { conversationGroups: { _id: new Types.ObjectId(id) } } }
+    );
 
     res.json({ success: true });
   } catch (error) {
@@ -658,7 +661,7 @@ conversationRouter.post("/:id/note", authMiddleware, async (req: AuthenticatedRe
       conversation: {
         _id: group._id,
         title: group.title,
-        messages: group.messages,
+        messages: serializeMessages(group.messages as any[]),
         createdAt: group.createdAt,
         updatedAt: group.updatedAt,
       }
@@ -697,7 +700,7 @@ conversationRouter.put("/:id", authMiddleware, async (req: AuthenticatedRequest,
       _id: group._id,
       userId: req.userId,
       title: group.title,
-      messages: group.messages,
+      messages: serializeMessages(group.messages as any[]),
       createdAt: group.createdAt,
       updatedAt: group.updatedAt
     };
@@ -789,7 +792,7 @@ conversationRouter.post("/:id/message", authMiddleware, async (req: Authenticate
           _id: group._id,
           userId,
           title: group.title,
-          messages: group.messages,
+          messages: serializeMessages(group.messages as any[]),
           createdAt: group.createdAt,
           updatedAt: group.updatedAt
         }
@@ -822,7 +825,7 @@ conversationRouter.post("/:id/message", authMiddleware, async (req: Authenticate
           _id: group._id,
           userId,
           title: group.title,
-          messages: group.messages,
+          messages: serializeMessages(group.messages as any[]),
           createdAt: group.createdAt,
           updatedAt: group.updatedAt
         }
@@ -918,7 +921,7 @@ conversationRouter.post("/:id/message", authMiddleware, async (req: Authenticate
       _id: group._id,
       userId,
       title: group.title,
-      messages: group.messages,
+      messages: serializeMessages(group.messages as any[]),
       createdAt: group.createdAt,
       updatedAt: group.updatedAt
     };
@@ -996,7 +999,7 @@ conversationRouter.post("/:id/message/:index/edit", authMiddleware, async (req: 
           _id: group._id,
           userId,
           title: group.title,
-          messages: group.messages,
+          messages: serializeMessages(group.messages as any[]),
           createdAt: group.createdAt,
           updatedAt: group.updatedAt
         }
@@ -1057,7 +1060,7 @@ conversationRouter.post("/:id/message/:index/edit", authMiddleware, async (req: 
       _id: group._id,
       userId,
       title: group.title,
-      messages: group.messages,
+      messages: serializeMessages(group.messages as any[]),
       createdAt: group.createdAt,
       updatedAt: group.updatedAt
     };
@@ -1125,6 +1128,8 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
     res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders();
     // Images go to the model as in-memory base64 (zero latency). The Cloudinary upload below
     // is persistence-only (needed for follow-up turns) and runs in parallel, off the critical path.
     const imageAttachments: ImageAttachment[] = imageFiles.map(f => ({
@@ -1207,7 +1212,7 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
         _id: group._id,
         userId,
         title: group.title,
-        messages: group.messages,
+        messages: serializeMessages(group.messages as any[]),
         createdAt: group.createdAt,
         updatedAt: group.updatedAt
       };
@@ -1291,7 +1296,7 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
       );
 
       const conversation = {
-        _id: group._id, userId, title: group.title, messages: group.messages,
+        _id: group._id, userId, title: group.title, messages: serializeMessages(group.messages as any[]),
         createdAt: group.createdAt, updatedAt: group.updatedAt
       };
       res.write(`data: ${JSON.stringify({ done: true, fullResponse: deniedContent, conversation })}\n\n`);
@@ -1432,7 +1437,7 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
         _id: group._id,
         userId,
         title: group.title,
-        messages: group.messages,
+        messages: serializeMessages(group.messages as any[]),
         createdAt: group.createdAt,
         updatedAt: group.updatedAt
       };
@@ -1499,7 +1504,7 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
           { $set: { "conversationGroups.$.messages": group.messages } }
         ).catch(() => {});
         const conversation = {
-          _id: group._id, userId, title: group.title, messages: group.messages,
+          _id: group._id, userId, title: group.title, messages: serializeMessages(group.messages as any[]),
           createdAt: group.createdAt, updatedAt: group.updatedAt
         };
         res.write(`data: ${JSON.stringify({ done: true, fullResponse: fallbackContent, generatedDocument: generatedDocOnError, conversation })}\n\n`);

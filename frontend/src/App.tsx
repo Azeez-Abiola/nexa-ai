@@ -1664,8 +1664,8 @@ export const App: React.FC = () => {
       onChange={(e) => setSelectedModel(e.target.value as "gpt" | "claude" | "kimi" | "deepseek")}
       aria-label="AI Model"
     >
-      <option value="gpt">GPT-5</option>
-      <option value="claude">Claude Opus 4.7</option>
+      <option value="gpt">GPT-4.1</option>
+      {/* <option value="claude">Claude Opus 4.7</option> */}
       <option value="kimi">Kimi k2.5</option>
       <option value="deepseek">DeepSeek v4</option>
     </select>

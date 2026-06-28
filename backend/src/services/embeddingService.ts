@@ -91,7 +91,7 @@ function l1Set(key: string, embedding: number[]) {
 }
 
 // ── L2: Redis (shared across instances, survives restarts) ───────────────────
-const REDIS_EMBED_PREFIX = "emb:v2:";
+const REDIS_EMBED_PREFIX = "emb:v3:";
 const REDIS_EMBED_TTL_S = 10 * 60;
 
 async function l2Get(key: string): Promise<number[] | null> {
