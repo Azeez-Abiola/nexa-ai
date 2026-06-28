@@ -30,9 +30,6 @@ async function sendEmail(to: string, subject: string, html: string): Promise<voi
   }
 }
 
-/**
- * Send email verification OTP
- */
 export async function sendVerificationEmail(
   email: string,
   otp: string,
@@ -57,9 +54,6 @@ export async function sendVerificationEmail(
   }
 }
 
-/**
- * Send password reset link
- */
 export async function sendPasswordResetEmail(
   email: string,
   resetToken: string,
@@ -76,9 +70,6 @@ export async function sendPasswordResetEmail(
   }
 }
 
-/**
- * Send admin invite email from SUPERADMIN
- */
 export async function sendAdminInviteEmail(
   email: string,
   fullName: string,
@@ -97,7 +88,6 @@ export async function sendAdminInviteEmail(
   }
 }
 
-/** BU admin — signed link for employee self-serve signup (no forged business unit). */
 function escapeHtml(s: string): string {
   return String(s)
     .replace(/&/g, "&amp;")
@@ -106,7 +96,6 @@ function escapeHtml(s: string): string {
     .replace(/"/g, "&quot;");
 }
 
-/** Public marketing / contact form — delivered to CONTACT_INBOX_EMAIL or info@1879techub.com */
 export async function sendContactFormInquiry(payload: {
   name: string;
   email: string;
@@ -152,7 +141,6 @@ export async function sendEmployeeInviteEmail(
   }
 }
 
-/** Notify a user they were @mentioned in a conversation. */
 export async function sendConversationMentionEmail(opts: {
   mentionedEmail: string;
   mentionedName: string;
@@ -180,7 +168,6 @@ export async function sendConversationMentionEmail(opts: {
   }
 }
 
-/** Send access-request email to the sharer with Accept / Decline links. */
 export async function sendConversationAccessRequestEmail(opts: {
   sharerEmail: string;
   sharerName: string;
@@ -203,7 +190,6 @@ export async function sendConversationAccessRequestEmail(opts: {
   }
 }
 
-/** Notify the requester that their access request was accepted. */
 export async function sendAccessRequestAcceptedEmail(opts: {
   requesterEmail: string;
   requesterName: string;
@@ -226,7 +212,6 @@ export async function sendAccessRequestAcceptedEmail(opts: {
   }
 }
 
-/** Notify the requester that their access request was declined. */
 export async function sendAccessRequestDeclinedEmail(opts: {
   requesterEmail: string;
   requesterName: string;
@@ -242,7 +227,7 @@ export async function sendAccessRequestDeclinedEmail(opts: {
   }
 }
 
-/** Notify a user that a colleague shared a conversation with them. Fire-and-forget. */
+// Fire-and-forget — errors are logged, never thrown, so callers don't need to await/catch.
 export async function sendConversationSharedEmail(
   recipientEmail: string,
   recipientName: string,
@@ -264,10 +249,7 @@ export async function sendConversationSharedEmail(
   }
 }
 
-/**
- * Notify a single employee that a new document is available in their knowledge base.
- * Called in a fire-and-forget loop — never throws (errors are swallowed and logged).
- */
+// Called in a fire-and-forget loop — never throws, errors are swallowed and logged.
 export async function sendDocumentAddedNotification(
   email: string,
   fullName: string,
@@ -292,9 +274,6 @@ export async function sendDocumentAddedNotification(
   }
 }
 
-/**
- * Send welcome email after successful email verification
- */
 export async function sendWelcomeEmail(
   email: string,
   fullName: string,
@@ -327,9 +306,7 @@ export async function sendWelcomeEmail(
     throw error;
   }
 }
-/**
- * Notify super-admin of a new business access request
- */
+
 export async function sendAccessRequestNotification(payload: {
   companyName: string;
   workEmail: string;
@@ -348,9 +325,6 @@ export async function sendAccessRequestNotification(payload: {
   }
 }
 
-/**
- * Confirm to the requester that their access request was received
- */
 export async function sendAccessRequestReceived(
   workEmail: string,
   companyName: string
@@ -367,9 +341,6 @@ export async function sendAccessRequestReceived(
   }
 }
 
-/**
- * Notify the requester that their access request was rejected
- */
 export async function sendAccessRequestRejected(
   workEmail: string,
   companyName: string,
@@ -387,9 +358,6 @@ export async function sendAccessRequestRejected(
   }
 }
 
-/**
- * Send welcome email with auto-generated credentials to new BU admin
- */
 export async function sendTenantCredentialsEmail(
   email: string,
   fullName: string,

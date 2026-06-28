@@ -1,7 +1,6 @@
 import express, { Response } from "express";
 import mongoose from "mongoose";
 import { authMiddleware, AuthenticatedRequest } from "../middleware/auth";
-import { decryptMessages } from "../utils/encryption";
 import { ConversationMention } from "../models/ConversationMention";
 import { ConversationCollaboration } from "../models/ConversationCollaboration";
 import { Conversation } from "../models/Conversation";
@@ -52,7 +51,6 @@ conversationMentionsRouter.get(
       const result = mentions.map(m => {
         const group = myConvs?.conversationGroups.find(g => g._id.toString() === m.forkedGroupId);
         if (!group) return null;
-        decryptMessages(group.messages as Array<{ content: string; [key: string]: unknown }>);
         return {
           mentionId: m._id,
           mentionerName: m.mentionerName,

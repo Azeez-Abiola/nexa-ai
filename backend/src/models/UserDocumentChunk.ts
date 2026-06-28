@@ -7,7 +7,7 @@ export interface UserDocumentChunkDocument extends Document {
   chunkIndex: number;
   content: string;
   tokenCount: number;
-  // flat array of 1536 floats; indexed by MongoDB Atlas Vector Search
+  // flat array of 512 floats (voyage-3-lite); indexed by MongoDB Atlas Vector Search
   embedding: number[];
   metadata: {
     documentTitle: string;

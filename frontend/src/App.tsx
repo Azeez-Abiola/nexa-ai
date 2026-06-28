@@ -286,7 +286,7 @@ export const App: React.FC = () => {
   const [isHomeRecentCollapsed, setIsHomeRecentCollapsed] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
-  const [selectedModel, setSelectedModel] = useState<"gpt" | "claude">("gpt");
+  const [selectedModel, setSelectedModel] = useState<"gpt" | "claude" | "kimi" | "deepseek">("gpt");
   const [webcamOpen, setWebcamOpen] = useState(false);
   const [copiedMessageIndex, setCopiedMessageIndex] = useState<number | null>(null);
   const [isRecording, setIsRecording] = useState(false);
@@ -1186,7 +1186,7 @@ export const App: React.FC = () => {
   };
 
   // Helper function to stream AI response
-  const streamResponse = async (conversationId: string, userContent: string, files?: File[], model: "gpt" | "claude" = "gpt"): Promise<Conversation | null> => {
+  const streamResponse = async (conversationId: string, userContent: string, files?: File[], model: "gpt" | "claude" | "kimi" | "deepseek" = "gpt"): Promise<Conversation | null> => {
     const apiBase = import.meta.env.VITE_API_URL || '';
     const hasFiles = files && files.length > 0;
 
@@ -1661,11 +1661,13 @@ export const App: React.FC = () => {
     <select
       className="model-select"
       value={selectedModel}
-      onChange={(e) => setSelectedModel(e.target.value as "gpt" | "claude")}
+      onChange={(e) => setSelectedModel(e.target.value as "gpt" | "claude" | "kimi" | "deepseek")}
       aria-label="AI Model"
     >
-      <option value="gpt">GPT-5</option>
-      <option value="claude">Claude Opus 4.7</option>
+      <option value="gpt">GPT-4.1</option>
+      {/* <option value="claude">Claude Opus 4.7</option> */}
+      <option value="kimi">Kimi k2.5</option>
+      <option value="deepseek">DeepSeek v4</option>
     </select>
   );
 

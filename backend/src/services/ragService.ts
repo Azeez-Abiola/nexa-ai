@@ -97,11 +97,6 @@ async function ragCacheSet(key: string, chunks: RetrievedChunk[]): Promise<void>
 }
 
 /**
- * Invalidate all RAG cache entries for a business unit.
- * Call this when a document finishes processing so users get fresh results
- * without waiting for the 2-min TTL.
- */
-/**
  * Flush all RAG result cache entries. Call when a document finishes processing
  * so users don't wait up to 2 min for fresh results.
  */
@@ -172,7 +167,6 @@ export async function retrieveRelevantChunks(query: RAGQuery): Promise<RAGResult
 
   const queryEmbeddingLatencyMs = Date.now() - embeddingStart;
 
-  // Step 2b: Atlas Vector Search with pre-filter
   const retrievalStart = Date.now();
 
   // Atlas $vectorSearch pre-filter only supports scalar comparisons — array operators like

@@ -1,6 +1,8 @@
 import OpenAI from "openai";
 import { DocxContent, XlsxContent, PptxContent } from "./documentGeneratorService";
 import { generateJsonContent as claudeGenerateJsonContent } from "./claudeService";
+import { generateJsonContent as kimiGenerateJsonContent } from "./kimiService";
+import { generateJsonContent as deepseekGenerateJsonContent } from "./deepseekService";
 import { AIModel } from "./aiRouter";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -69,6 +71,12 @@ Rules:
 async function callJsonModel(system: string, userPrompt: string, model: AIModel = "gpt"): Promise<string> {
   if (model === "claude") {
     return claudeGenerateJsonContent(system, userPrompt);
+  }
+  if (model === "kimi") {
+    return kimiGenerateJsonContent(system, userPrompt);
+  }
+  if (model === "deepseek") {
+    return deepseekGenerateJsonContent(system, userPrompt);
   }
   // Use gpt-4o specifically — JSON mode requires Chat Completions API which gpt-5 does not support
   const response = await openai.chat.completions.create({

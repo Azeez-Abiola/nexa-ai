@@ -16,7 +16,6 @@ import bcrypt from "bcryptjs";
 
 export const analyticsRouter = express.Router();
 
-// Overall dashboard stats — any admin can view
 analyticsRouter.get("/dashboard", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { businessUnit, isSuperAdmin } = req;
@@ -43,7 +42,7 @@ analyticsRouter.get("/dashboard", adminAuthMiddleware, async (req: Authenticated
       Conversation.countDocuments(buFilter),
       Policy.countDocuments(buFilter),
       BusinessUnit.countDocuments(isSuperAdmin ? {} : { name: effectiveBU }),
-      import("../models/RagDocument").then(m => m.RagDocument.countDocuments(buFilter)),
+      RagDocument.countDocuments(buFilter),
       Conversation.countDocuments({
         ...buFilter,
         conversationGroups: {
@@ -75,12 +74,10 @@ analyticsRouter.get("/dashboard", adminAuthMiddleware, async (req: Authenticated
   }
 });
 
-// Stats by business unit — any admin can view, but filtered for non-superadmins
 analyticsRouter.get("/business-units", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { businessUnit, isSuperAdmin } = req;
-    
-    // Get list of BUs allowed for this user
+
     let buNames: string[] = [];
     if (isSuperAdmin) {
       const busFromDB = await BusinessUnit.find().select("name").lean();
@@ -111,7 +108,6 @@ analyticsRouter.get("/business-units", adminAuthMiddleware, async (req: Authenti
   }
 });
 
-// Popular policies — scoped to BU for non-SUPERADMIN
 analyticsRouter.get("/popular-policies", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { businessUnit, isSuperAdmin } = req;
@@ -130,7 +126,6 @@ analyticsRouter.get("/popular-policies", adminAuthMiddleware, async (req: Authen
   }
 });
 
-// Chat activity metrics — any admin
 analyticsRouter.get("/chat-activity", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { businessUnit, isSuperAdmin } = req;
@@ -138,25 +133,21 @@ analyticsRouter.get("/chat-activity", adminAuthMiddleware, async (req: Authentic
 
     const query: Record<string, any> = {};
 
-    // Date range filter
     if (startDate || endDate) {
       query.createdAt = {};
       if (startDate) query.createdAt.$gte = new Date(startDate as string);
       if (endDate) query.createdAt.$lte = new Date(endDate as string);
     } else {
-      // Default to last 7 days if no dates provided
       const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
       query.createdAt = { $gte: sevenDaysAgo };
     }
 
-    // BU filter
     if (isSuperAdmin) {
       if (bu) query.businessUnit = bu;
     } else {
       query.businessUnit = businessUnit;
     }
 
-    // User filter
     if (user) {
       query.userId = user;
     }
@@ -179,20 +170,18 @@ analyticsRouter.get("/chat-activity", adminAuthMiddleware, async (req: Authentic
   }
 });
 
-// Top users by engagement — any admin, scoped to BU for non-superadmins
 analyticsRouter.get("/top-users", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { businessUnit, isSuperAdmin } = req;
     const { limit = 5 } = req.query;
-    
+
     const filter = isSuperAdmin ? {} : { businessUnit };
-    
+
     const topUsers = await Conversation.aggregate([
       { $match: filter },
       { $group: { _id: "$userId", count: { $sum: 1 } } },
       { $sort: { count: -1 } },
       { $limit: Number(limit) },
-      // Join with Users to get metadata
       {
         $lookup: {
           from: "users",
@@ -218,15 +207,15 @@ analyticsRouter.get("/top-users", adminAuthMiddleware, async (req: Authenticated
   }
 });
 
-// Audit activity metrics — for the intensity chart
 analyticsRouter.get("/audit-activity", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { businessUnit, isSuperAdmin } = req;
     const { AuditLog } = await import("../models/AuditLog");
-    
+
     const filter = isSuperAdmin ? {} : { businessUnit };
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    
+
+
     const stats = await AuditLog.aggregate([
       { 
         $match: { 
@@ -243,7 +232,6 @@ analyticsRouter.get("/audit-activity", adminAuthMiddleware, async (req: Authenti
       { $sort: { _id: 1 } }
     ]);
 
-    // Format for frontend (Mon, Tue...)
     const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     const formattedStats = stats.map(s => {
       const date = new Date(s._id);
@@ -261,7 +249,6 @@ analyticsRouter.get("/audit-activity", adminAuthMiddleware, async (req: Authenti
   }
 });
 
-// Usage by BU — SUPERADMIN only
 analyticsRouter.get("/usage-by-bu", superAdminMiddleware, async (_req: AuthenticatedRequest, res: Response) => {
   try {
     const busFromDB = await BusinessUnit.find().select("name").lean();
@@ -281,7 +268,6 @@ analyticsRouter.get("/usage-by-bu", superAdminMiddleware, async (_req: Authentic
   }
 });
 
-// Reset user password — SUPERADMIN only
 analyticsRouter.post("/reset-password", superAdminMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { userId, newPassword } = req.body;
@@ -309,7 +295,6 @@ analyticsRouter.post("/reset-password", superAdminMiddleware, async (req: Authen
   }
 });
 
-// Get all business units — any admin
 analyticsRouter.get("/business-units-list", adminAuthMiddleware, async (_req: AuthenticatedRequest, res: Response) => {
   try {
     const buses = await BusinessUnit.find({ isActive: { $ne: false } }).select("name label").sort("name");
@@ -325,7 +310,6 @@ analyticsRouter.get("/business-units-list", adminAuthMiddleware, async (_req: Au
   }
 });
 
-// Add new business unit — SUPERADMIN only
 analyticsRouter.post("/business-units", superAdminMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { name, label, contactEmail } = req.body;
@@ -352,7 +336,6 @@ analyticsRouter.post("/business-units", superAdminMiddleware, async (req: Authen
   }
 });
 
-// Update business unit — SUPERADMIN only
 analyticsRouter.put("/business-units/:id", superAdminMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
@@ -384,7 +367,6 @@ analyticsRouter.put("/business-units/:id", superAdminMiddleware, async (req: Aut
   }
 });
 
-// Delete business unit — SUPERADMIN only
 analyticsRouter.delete("/business-units/:id", superAdminMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
@@ -413,7 +395,6 @@ analyticsRouter.delete("/business-units/:id", superAdminMiddleware, async (req: 
   }
 });
 
-// Get all email domain mappings — SUPERADMIN only
 analyticsRouter.get("/email-domains", superAdminMiddleware, async (_req: AuthenticatedRequest, res: Response) => {
   try {
     const domains = await BusinessUnitEmailMapping.find().sort({ businessUnit: 1 });
@@ -424,7 +405,6 @@ analyticsRouter.get("/email-domains", superAdminMiddleware, async (_req: Authent
   }
 });
 
-// Create or update email domain mapping — SUPERADMIN only
 analyticsRouter.post("/email-domain", superAdminMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { businessUnit, emailDomain } = req.body;
@@ -451,7 +431,6 @@ analyticsRouter.post("/email-domain", superAdminMiddleware, async (req: Authenti
   }
 });
 
-// Delete email domain mapping — SUPERADMIN only
 analyticsRouter.delete("/email-domain/:id", superAdminMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
