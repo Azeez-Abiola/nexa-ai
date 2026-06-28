@@ -3,4 +3,3 @@ backend/.env
 dist/
 frontend/dist/
 backend/dist/
-config.bat
