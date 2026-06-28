@@ -47,7 +47,6 @@ app.use(
   })
 );
 app.use(json());
-app.use((req, _res, next) => { logger.info(`${req.method} ${req.path}`); next(); });
 
 // Resolve tenant from subdomain on every request (e.g. ufl.nexa.ai → tenantId, businessUnit)
 app.use(tenantMiddleware);
