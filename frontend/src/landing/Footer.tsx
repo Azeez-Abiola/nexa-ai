@@ -30,11 +30,11 @@ const Footer = () => (
           </p>
           <div className="flex flex-wrap items-center gap-3">
             <a
-              href="mailto:hi@1879techub.com"
+              href="mailto:info@1879techhub.com"
               className="inline-flex max-w-full items-center gap-2 rounded-full border border-border/40 bg-[#F8F9FF] px-4 py-2 text-sm font-bold text-[#1A1A1A] transition-all hover:border-primary/20"
             >
               <Mail size={16} className="shrink-0 text-primary" />
-              <span className="truncate">hi@1879techub.com</span>
+              <span className="truncate">info@1879techhub.com</span>
               <ArrowRight size={14} className="ml-1 shrink-0 opacity-40" />
             </a>
           </div>
