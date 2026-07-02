@@ -26,7 +26,7 @@ import { adminKnowledgeGroupsRouter } from "./routes/adminKnowledgeGroups";
 import { adminAuditLogsRouter } from "./routes/adminAuditLogs";
 import { BusinessUnit } from "./models/BusinessUnit";
 import { tenantMiddleware } from "./middleware/tenant";
-import { authLimiter, aiLimiter, aiHourlyLimiter, generalLimiter } from "./middleware/rateLimiter";
+import { authLimiter, aiLimiter, aiHourlyLimiter } from "./middleware/rateLimiter";
 import logger from "./utils/logger";
 import { sendContactFormInquiry, sendAccessRequestNotification, sendAccessRequestReceived } from "./services/emailService";
 import { TenantRequest } from "./models/TenantRequest";
@@ -53,7 +53,6 @@ app.use(tenantMiddleware);
 
 // Trust first proxy hop (Railway / nginx) so req.ip reflects the real client IP
 app.set("trust proxy", 1);
-app.use("/api/v1", generalLimiter);
 
 // Serve frontend static files from the built dist folder
 // When compiled, __dirname is backend/dist — we need to go up two levels

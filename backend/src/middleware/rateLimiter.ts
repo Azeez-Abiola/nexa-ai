@@ -63,10 +63,27 @@ const sharedOptions = {
   skip: (req: Request) => req.method === "OPTIONS",
 } as const;
 
+// The only requests that should count against the AI message quota: actual
+// message generations. Everything else on the conversations/chat routers
+// (listing conversations, folders, mentions, sharing, suggestions, reads) must
+// NOT consume the budget, otherwise simply opening the app exhausts the limit.
+const AI_MESSAGE_PATHS: RegExp[] = [
+  /^\/api\/v1\/chat\/?$/,
+  /^\/api\/v1\/chat\/public(\/stream)?\/?$/,
+  /^\/api\/v1\/conversations\/[^/]+\/message(-stream)?\/?$/,
+  /^\/api\/v1\/conversations\/[^/]+\/message\/[^/]+\/edit\/?$/,
+];
+
+// Skip the AI limiters unless this is a POST to a message-generating endpoint.
+function skipNonAiMessage(req: Request): boolean {
+  if (req.method !== "POST") return true;
+  const pathname = req.originalUrl.split("?")[0];
+  return !AI_MESSAGE_PATHS.some((re) => re.test(pathname));
+}
+
 const AUTH_LIMIT = parseInt(process.env.RATE_LIMIT_AUTH ?? "10", 10);
 const AI_LIMIT_PER_MINUTE = parseInt(process.env.RATE_LIMIT_AI_PER_MINUTE ?? "60", 10);
 const AI_LIMIT_PER_HOUR = parseInt(process.env.RATE_LIMIT_AI_PER_HOUR ?? "100", 10);
-const GENERAL_LIMIT = parseInt(process.env.RATE_LIMIT_GENERAL ?? "200", 10);
 
 // Brute-force protection on auth endpoints — AUTH_LIMIT req per 15 min per IP
 export const authLimiter = rateLimit({
@@ -78,36 +95,28 @@ export const authLimiter = rateLimit({
   store: makeStore("rl:auth:"),
 });
 
-// AI burst control — AI_LIMIT_PER_MINUTE req per minute per user
+// AI burst control — AI_LIMIT_PER_MINUTE messages per minute per user
 export const aiLimiter = rateLimit({
   ...sharedOptions,
   windowMs: 60 * 1000,
   limit: AI_LIMIT_PER_MINUTE,
   keyGenerator: aiKeyGenerator,
+  skip: skipNonAiMessage,
   message: { error: "Too many requests. Please wait a moment before sending another message." },
   store: makeStore("rl:ai:"),
 });
 
-// AI hourly cap — AI_LIMIT_PER_HOUR req per hour per user
+// AI hourly cap — AI_LIMIT_PER_HOUR messages per hour per user
 export const aiHourlyLimiter = rateLimit({
   ...sharedOptions,
   windowMs: 60 * 60 * 1000,
   limit: AI_LIMIT_PER_HOUR,
   keyGenerator: aiKeyGenerator,
+  skip: skipNonAiMessage,
   store: makeStore("rl:ai-hourly:"),
   handler: (_req, res) => {
     res.status(429).json({
       error: "You've reached your hourly message limit. Please try again in an hour.",
     });
   },
-});
-
-// General catch-all for all /api/v1 traffic — GENERAL_LIMIT req per minute per IP
-export const generalLimiter = rateLimit({
-  ...sharedOptions,
-  windowMs: 60 * 1000,
-  limit: GENERAL_LIMIT,
-  keyGenerator: (req) => req.ip ?? "unknown",
-  message: { error: "Too many requests. Please slow down." },
-  store: makeStore("rl:general:"),
 });
