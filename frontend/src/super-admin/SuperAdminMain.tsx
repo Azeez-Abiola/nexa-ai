@@ -22,7 +22,8 @@ import {
   Settings,
   Moon,
   Sun,
-  Search
+  Search,
+  MessageSquare
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
@@ -55,6 +56,7 @@ import UsersManagement from './pages/UsersManagement';
 import BusinessProfile from './pages/BusinessProfile';
 import AdminUserGroupsPage from './pages/AdminUserGroupsPage';
 import Analytics from './pages/Analytics';
+import AskNexa from './pages/AskNexa';
 import { hexToHslSpace, DEFAULT_RING_HSL } from '@/lib/brandCss';
 import { ChatGptStyleMenuIcon } from '@/components/ChatGptStyleMenuIcon';
 
@@ -156,6 +158,7 @@ const SuperAdminMain: React.FC<SuperAdminMainProps> = ({ theme, toggleTheme }) =
   ] : [
     { name: 'Dashboard', path: '/admin/dashboard', icon: LayoutDashboard },
     { name: 'Knowledge Base', path: '/admin/knowledge', icon: BookOpen },
+    { name: 'Ask Nexa', path: '/admin/ask-nexa', icon: MessageSquare },
     { name: 'Users', path: '/admin/users', icon: Users },
     { name: 'Departments', path: '/admin/departments', icon: Layers },
     { name: 'Categories', path: '/admin/categories', icon: FolderTree },
@@ -223,7 +226,7 @@ const SuperAdminMain: React.FC<SuperAdminMainProps> = ({ theme, toggleTheme }) =
           <div>
             {isSidebarOpen && <p className={cn("px-4 text-[10px] tracking-[0.05em] font-bold mb-4", theme === 'dark' ? "text-gray-600" : "text-slate-400")}>Core management</p>}
             <div className="space-y-1.5">
-              {menuItems.slice(0, isSuperAdminContext ? 3 : 5).map((item) => (
+              {menuItems.slice(0, isSuperAdminContext ? 3 : 6).map((item) => (
                 <SidebarItem
                   key={item.name}
                   item={item}
@@ -240,7 +243,7 @@ const SuperAdminMain: React.FC<SuperAdminMainProps> = ({ theme, toggleTheme }) =
           <div>
             {isSidebarOpen && <p className={cn("px-4 text-[10px] tracking-[0.05em] font-bold mb-4", theme === 'dark' ? "text-gray-600" : "text-slate-400")}>System settings</p>}
             <div className="space-y-1.5">
-              {menuItems.slice(isSuperAdminContext ? 3 : 5).map((item) => (
+              {menuItems.slice(isSuperAdminContext ? 3 : 6).map((item) => (
                 <SidebarItem
                   key={item.name}
                   item={item}
@@ -425,6 +428,7 @@ const SuperAdminMain: React.FC<SuperAdminMainProps> = ({ theme, toggleTheme }) =
                   <Route path="/admin/access-requests" element={<Navigate to="/super-admin/access-requests" replace />} />
                   <Route path="/admin/analytics" element={<Analytics />} />
                   <Route path="/admin/knowledge" element={<KnowledgeBase />} />
+                  <Route path="/admin/ask-nexa" element={<AskNexa />} />
                   <Route path="/admin/user-groups" element={<AdminUserGroupsPage />} />
                   <Route path="/admin/knowledge-groups" element={<Navigate to="/admin/user-groups" replace />} />
                   <Route path="/admin/users" element={<UsersManagement />} />

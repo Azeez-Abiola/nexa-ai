@@ -1229,9 +1229,18 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
       return;
     }
 
+    // Persist attached document filenames as a 📎-prefixed line on the stored message so the
+    // attachment chip survives in chat history after the optimistic client message is replaced
+    // by the saved conversation. Images render from imageUrls, so only document files get a chip.
+    // The clean `content`/`aiUserMessage` is what's sent to the model — this label never reaches it
+    // (history uses group.messages.slice(0, -1), excluding this message).
+    const attachmentLabel =
+      documentFiles.length > 0
+        ? `${content ? "\n" : ""}📎 ${documentFiles.map((f) => f.originalname).join(", ")}`
+        : "";
     const userMessage = {
       role: "user" as const,
-      content,
+      content: content + attachmentLabel,
       timestamp: new Date(),
       senderId: String(userId),
       senderName: (req as AuthenticatedRequest).fullName || (req as AuthenticatedRequest).email || "User",

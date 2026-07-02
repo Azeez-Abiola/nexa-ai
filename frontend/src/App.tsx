@@ -9,7 +9,7 @@ import {
   BiPaperclip, BiMicrophone, BiMoon, BiSun, BiCamera, BiCopy, BiCheck
 } from "react-icons/bi";
 import { MdPushPin, MdAutoAwesome, MdCreateNewFolder, MdFolder, MdFolderOpen } from "react-icons/md";
-import { FiLogOut, FiDownload, FiTrash2, FiExternalLink } from "react-icons/fi";
+import { FiLogOut, FiDownload, FiTrash2, FiExternalLink, FiFileText } from "react-icons/fi";
 import { useLocation, useNavigate } from "react-router-dom";
 import { ChatGptStyleMenuIcon } from "./components/ChatGptStyleMenuIcon";
 import { WebcamCaptureModal } from "./components/WebcamCaptureModal";
@@ -498,9 +498,19 @@ export const App: React.FC = () => {
             if (!localStorage.getItem("nexa-avatar")) {
               setShowAvatarPicker(true);
             }
+          } else if (window.location.pathname.startsWith("/user-chat")) {
+            // Admin actively using the chat (e.g. the embedded "Ask Nexa" panel) — their
+            // conversations are stored under the admin id (authMiddleware maps adminId→userId),
+            // so load them back on refresh just like a regular user. We still skip /auth/me,
+            // which 401s for admin tokens and would trip the interceptor that clears the session.
+            loadingStartTimeRef.current = Date.now();
+            loadConversations(savedToken, false);
+            fetchFolders(savedToken);
+            fetchMentionedConversations(savedToken);
+            fetchBuUsers(savedToken);
           } else {
-            // If admin, we don't force redirect on load anymore
-            // The navbar will provide access to the control panel
+            // Admin elsewhere (e.g. the dashboard shell) — nothing to load here.
+            // The navbar will provide access to the control panel.
             setIsConversationsLoading(false);
           }
         } else {
@@ -2556,6 +2566,73 @@ export const App: React.FC = () => {
                             {isOwn ? 'You' : senderInitials}
                           </div>
                         )}
+                        {(() => {
+                          // Attachment cards render ABOVE the message bubble, matching the reference
+                          // design: a red icon tile with the filename + file type beside it.
+                          const docFileNames = (m.content || "")
+                            .split("\n")
+                            .filter((l) => l.startsWith("📎"))
+                            .flatMap((l) =>
+                              l.replace(/^📎\s*/, "").split(",").map((n) => n.trim()).filter(Boolean)
+                            );
+                          if (docFileNames.length === 0) return null;
+                          const isDark = theme === "dark";
+                          return (
+                            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 8 }}>
+                              {docFileNames.map((fname, fIdx) => {
+                                const ext = (fname.split(".").pop() || "file").toUpperCase();
+                                return (
+                                  <div
+                                    key={fIdx}
+                                    style={{
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: 12,
+                                      padding: "10px 14px",
+                                      borderRadius: 14,
+                                      maxWidth: 320,
+                                      background: isDark ? "rgba(255,255,255,0.04)" : "#f4f4f5",
+                                      border: `1px solid ${isDark ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.08)"}`,
+                                    }}
+                                  >
+                                    <div
+                                      style={{
+                                        width: 40,
+                                        height: 40,
+                                        flexShrink: 0,
+                                        borderRadius: 10,
+                                        background: "#ed0000",
+                                        display: "flex",
+                                        alignItems: "center",
+                                        justifyContent: "center",
+                                      }}
+                                    >
+                                      <FiFileText size={20} color="#fff" />
+                                    </div>
+                                    <div style={{ minWidth: 0 }}>
+                                      <div
+                                        style={{
+                                          fontWeight: 700,
+                                          fontSize: 14,
+                                          lineHeight: 1.3,
+                                          color: isDark ? "#fff" : "#18181b",
+                                          whiteSpace: "nowrap",
+                                          overflow: "hidden",
+                                          textOverflow: "ellipsis",
+                                        }}
+                                      >
+                                        {fname}
+                                      </div>
+                                      <div style={{ fontSize: 12, color: isDark ? "rgba(255,255,255,0.55)" : "#71717a" }}>
+                                        {ext}
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          );
+                        })()}
                         <div className="message-bubble-v2">
                           {m.imageUrls && m.imageUrls.length > 0 ? (
                             <div className="message-image-grid-v2">
@@ -2566,49 +2643,19 @@ export const App: React.FC = () => {
                               ))}
                             </div>
                           ) : null}
-                          {m.content
-                            ? (() => {
-                                // Split content into text lines and document attachment lines (📎)
-                                const lines = m.content.split("\n");
-                                const textLines = lines.filter(l => !l.startsWith("📎"));
-                                const docLines = lines.filter(l => l.startsWith("📎"));
+                          {(() => {
+                                // Only the text lines render inside the bubble; 📎 attachment lines
+                                // are rendered as cards above the bubble (see above).
+                                const textLines = (m.content || "").split("\n").filter(l => !l.startsWith("📎"));
+                                if (!textLines.some(l => l.trim())) return null;
                                 return (
-                                  <>
-                                    {textLines.length > 0 && textLines.some(l => l.trim()) && (
-                                      <div>
-                                        {textLines.map((line, lIdx) => (
-                                          <p key={lIdx}>{parseMarkdown(line)}</p>
-                                        ))}
-                                      </div>
-                                    )}
-                                    {docLines.length > 0 && (
-                                      <div className="message-doc-attachments">
-                                        {docLines.map((line, dIdx) => {
-                                          // Extract file names: "📎 file1.pdf, file2.docx"
-                                          const filesPart = line.replace(/^📎\s*/, "").trim();
-                                          const fileNames = filesPart.split(",").map(n => n.trim()).filter(Boolean);
-                                          return fileNames.map((fname, fIdx) => {
-                                            const ext = fname.split(".").pop()?.toLowerCase() || "";
-                                            const iconMap: Record<string, string> = {
-                                              pdf: "📄", docx: "📝", doc: "📝", xlsx: "📊",
-                                              xls: "📊", csv: "📊", pptx: "📋", ppt: "📋", txt: "📃"
-                                            };
-                                            const icon = iconMap[ext] || "📎";
-                                            return (
-                                              <div key={`${dIdx}-${fIdx}`} className="message-doc-chip">
-                                                <span className="doc-chip-icon">{icon}</span>
-                                                <span className="doc-chip-name">{fname}</span>
-                                                <span className="doc-chip-ext">{ext.toUpperCase()}</span>
-                                              </div>
-                                            );
-                                          });
-                                        })}
-                                      </div>
-                                    )}
-                                  </>
+                                  <div>
+                                    {textLines.map((line, lIdx) => (
+                                      <p key={lIdx}>{parseMarkdown(line)}</p>
+                                    ))}
+                                  </div>
                                 );
-                              })()
-                            : null}
+                              })()}
                           {m.role === "assistant" && m.sources && m.sources.length > 0 ? (
                             <div className="message-sources-v2">
                               <span className="message-sources-label-v2">Sources</span>
