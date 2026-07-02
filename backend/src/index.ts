@@ -44,6 +44,9 @@ app.use(
   cors({
     origin: true,
     credentials: true,
+    // Expose draft-7 rate-limit headers so the frontend can show remaining
+    // message quota and a countdown to when the limit refreshes.
+    exposedHeaders: ["RateLimit", "RateLimit-Policy", "Retry-After"],
   })
 );
 app.use(json());
@@ -107,12 +110,12 @@ app.use("/api/v1/admin/auth", authLimiter, adminAuthRouter);
 // Specific-path routers MUST be mounted before conversationRouter because
 // conversationRouter contains GET /:id which catches any unmatched path and
 // returns 404, preventing the sharing/mention routes from ever being reached.
-app.use("/api/v1/conversations", aiHourlyLimiter, aiLimiter, conversationSharingRouter);
-app.use("/api/v1/conversations", aiHourlyLimiter, aiLimiter, conversationAccessRouter);
-app.use("/api/v1/conversations", aiHourlyLimiter, aiLimiter, conversationMentionsRouter);
-app.use("/api/v1/conversations", aiHourlyLimiter, aiLimiter, conversationRouter);
-app.use("/api/v1/conversations", aiHourlyLimiter, aiLimiter, userDocumentsRouter);
-app.use("/api/v1/chat", aiHourlyLimiter, aiLimiter, chatRouter);
+app.use("/api/v1/conversations", aiLimiter, aiHourlyLimiter, conversationSharingRouter);
+app.use("/api/v1/conversations", aiLimiter, aiHourlyLimiter, conversationAccessRouter);
+app.use("/api/v1/conversations", aiLimiter, aiHourlyLimiter, conversationMentionsRouter);
+app.use("/api/v1/conversations", aiLimiter, aiHourlyLimiter, conversationRouter);
+app.use("/api/v1/conversations", aiLimiter, aiHourlyLimiter, userDocumentsRouter);
+app.use("/api/v1/chat", aiLimiter, aiHourlyLimiter, chatRouter);
 app.use("/api/v1/admin/policies", adminPoliciesRouter);
 app.use("/api/v1/admin/documents", adminDocumentsRouter);
 app.use("/api/v1/admin/user-groups", adminKnowledgeGroupsRouter);

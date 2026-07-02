@@ -28,6 +28,7 @@ import SuperAdminLogin from "./super-admin/pages/SuperAdminLogin";
 import { parseMarkdown } from "./utils/parseMarkdown";
 import LoginLoadingScreen from "./components/LoginLoadingScreen";
 import { exportConversationToDocx, exportConversationToPdf, generateExportFilename } from "./utils/chatExport";
+import RateLimitBanner, { type RateLimitInfo } from "./chat/RateLimitBanner";
 import { hexToHslSpace, DEFAULT_RING_HSL, normalizeHexToRrggbb } from "./lib/brandCss";
 import { cn } from "@/lib/utils";
 import {
@@ -215,6 +216,7 @@ export const App: React.FC = () => {
     el.style.overflowY = el.scrollHeight > maxPx ? "auto" : "hidden";
   };
   const [loading, setLoading] = useState(false);
+  const [rateLimit, setRateLimit] = useState<RateLimitInfo | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [conversationToDelete, setConversationToDelete] = useState<string | null>(null);
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
@@ -1185,6 +1187,27 @@ export const App: React.FC = () => {
     }
   };
 
+  // Parse the draft-7 `RateLimit` header (e.g. "limit=50, remaining=7, reset=340")
+  // and update the banner state. Falls back to `Retry-After` for the reset window.
+  const captureRateLimit = (headers: Headers) => {
+    const raw = headers.get("RateLimit") ?? headers.get("ratelimit");
+    if (!raw) return;
+    const parts: Record<string, number> = {};
+    raw.split(",").forEach((seg) => {
+      const [k, v] = seg.split("=").map((s) => s.trim());
+      if (k && v !== undefined) parts[k] = Number(v);
+    });
+    const resetSecs = Number.isFinite(parts.reset)
+      ? parts.reset
+      : Number(headers.get("Retry-After"));
+    if (!Number.isFinite(parts.remaining) || !Number.isFinite(resetSecs)) return;
+    setRateLimit({
+      remaining: parts.remaining,
+      limit: Number.isFinite(parts.limit) ? parts.limit : 0,
+      resetAt: Date.now() + resetSecs * 1000,
+    });
+  };
+
   // Helper function to stream AI response
   const streamResponse = async (conversationId: string, userContent: string, files?: File[], model: "gpt" | "claude" | "kimi" | "deepseek" = "gpt"): Promise<Conversation | null> => {
     const apiBase = import.meta.env.VITE_API_URL || '';
@@ -1210,6 +1233,15 @@ export const App: React.FC = () => {
       `${apiBase}/api/v1/conversations/${conversationId}/message-stream`,
       { method: "POST", headers, body }
     );
+
+    // Always record the latest quota so the banner can warn as it runs low.
+    captureRateLimit(response.headers);
+
+    if (response.status === 429) {
+      const err = new Error("RATE_LIMITED") as Error & { rateLimited?: boolean };
+      err.rateLimited = true;
+      throw err;
+    }
 
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -1415,10 +1447,14 @@ export const App: React.FC = () => {
     }
   };
 
+  // Hard block: hourly/minute quota exhausted and not yet refreshed.
+  const isRateLimited = !!rateLimit && rateLimit.remaining <= 0 && rateLimit.resetAt > Date.now();
+
   const handleSend = async () => {
     const trimmed = input.trim();
     if (!trimmed && attachedFiles.length === 0) return;
     if (loading || !token) return;
+    if (isRateLimited) return;
 
     // If the message contains @mentions and nothing else of substance, send as a
     // notification-only note — no AI response generated.
@@ -1495,7 +1531,10 @@ export const App: React.FC = () => {
         }
       } catch (error) {
         console.error("Send message error:", error);
-        alert("Error sending message. Please try again.");
+        // Rate-limit hits are surfaced by the RateLimitBanner, not an alert.
+        if (!(error as { rateLimited?: boolean })?.rateLimited) {
+          alert("Error sending message. Please try again.");
+        }
       } finally {
         setLoading(false);
       }
@@ -2345,6 +2384,8 @@ export const App: React.FC = () => {
                   ))}
                 </div>
 
+                <RateLimitBanner info={rateLimit} onExpire={() => setRateLimit(null)} />
+
                 <div className="main-input-container-v2">
                   {/* Attached Files Preview */}
                   {attachedFiles.length > 0 && (
@@ -2408,7 +2449,7 @@ export const App: React.FC = () => {
                     <button
                       className="send-btn-v2"
                       onClick={handleSend}
-                      disabled={(!input.trim() && attachedFiles.length === 0) || loading}
+                      disabled={(!input.trim() && attachedFiles.length === 0) || loading || isRateLimited}
                     >
                       <BiUpArrowAlt size={24} />
                     </button>
@@ -2612,6 +2653,7 @@ export const App: React.FC = () => {
 
           {((currentConversation?.messages?.length ?? 0) > 0 || loading) && !currentConversation?.isShared && (
             <footer className="footer-input-v2" onClick={(e) => e.stopPropagation()}>
+              <RateLimitBanner info={rateLimit} onExpire={() => setRateLimit(null)} />
               {attachedFiles.length > 0 && (
                 <div className="footer-attached-preview">
                   {attachedFiles.map((file, i) => (
@@ -2697,7 +2739,7 @@ export const App: React.FC = () => {
                 <button
                   className="footer-send-btn-v2"
                   onClick={handleSend}
-                  disabled={(!input.trim() && attachedFiles.length === 0) || loading}
+                  disabled={(!input.trim() && attachedFiles.length === 0) || loading || isRateLimited}
                 >
                   <BiUpArrowAlt size={20} />
                 </button>
