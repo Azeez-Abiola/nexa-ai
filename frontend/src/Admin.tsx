@@ -5,6 +5,7 @@ import { AdminLogin } from "./AdminLogin";
 import { AdminHome } from "./AdminHome";
 import { PrivacyPolicy } from "./components/PrivacyPolicy";
 import { FAQSection } from "./components/FAQSection";
+import AdminTestChat from "./components/AdminTestChat";
 import LoginLoadingScreen from "./components/LoginLoadingScreen";
 import styles from "./styles/admin-dashboard.module.css";
 
@@ -80,6 +81,7 @@ export const Admin: React.FC = () => {
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [showPrivacyPolicy, setShowPrivacyPolicy] = useState(false);
   const [isInitializing, setIsInitializing] = useState(!!localStorage.getItem("adminToken"));
+  const [activeTab, setActiveTab] = useState<"knowledge" | "test-nexa">("knowledge");
 
   // Memoized loadDocuments function
   const loadDocuments = useCallback(async () => {
@@ -369,14 +371,44 @@ export const Admin: React.FC = () => {
         </div>
       </header>
 
+      {/* Tab bar */}
+      <div style={{
+        display: "flex", gap: 0, borderBottom: "1px solid rgba(255,255,255,0.1)",
+        background: "rgba(0,0,0,0.3)", padding: "0 2rem", flexShrink: 0
+      }}>
+        {(["knowledge", "test-nexa"] as const).map((tab) => {
+          const label = tab === "knowledge" ? "📚 Knowledge Base" : "🤖 Test Nexa";
+          const isActive = activeTab === tab;
+          return (
+            <button
+              key={tab}
+              type="button"
+              onClick={() => setActiveTab(tab)}
+              style={{
+                padding: "12px 20px", fontSize: 13, fontWeight: 700,
+                background: "transparent", border: "none",
+                borderBottom: isActive ? "2px solid #ed0000" : "2px solid transparent",
+                color: isActive ? "#ed0000" : "rgba(255,255,255,0.5)",
+                cursor: "pointer", transition: "color 0.2s",
+                letterSpacing: "0.02em"
+              }}
+            >
+              {label}
+            </button>
+          );
+        })}
+      </div>
+
       {/* Main Content */}
       <div className={styles.dashboardContent}>
-        <div className={styles.contentHeader}>
-          <h1 className={styles.contentTitle}>Knowledge Base</h1>
-          <p className={styles.contentSubtitle}>
-            Upload company documents (Policies, HSE, SOPs, HR documents, Manuals, etc.) for {adminUser?.businessUnit}
-          </p>
-        </div>
+        {activeTab === "knowledge" ? (
+          <>
+            <div className={styles.contentHeader}>
+              <h1 className={styles.contentTitle}>Knowledge Base</h1>
+              <p className={styles.contentSubtitle}>
+                Upload company documents (Policies, HSE, SOPs, HR documents, Manuals, etc.) for {adminUser?.businessUnit}
+              </p>
+            </div>
 
         <div className={styles.dashboardLayout}>
           {/* Form Section */}
@@ -636,6 +668,25 @@ export const Admin: React.FC = () => {
             </button>
           </div>
         </div>
+      </>
+    ) : (
+          /* Test Nexa tab */
+          <div style={{ height: "calc(100vh - 180px)", display: "flex", flexDirection: "column", gap: 0 }}>
+            <div className={styles.contentHeader} style={{ marginBottom: "1rem" }}>
+              <h1 className={styles.contentTitle}>Test Nexa AI</h1>
+              <p className={styles.contentSubtitle}>
+                Prompt Nexa as an employee of <strong>{adminUser?.businessUnit}</strong> to verify your knowledge base is working correctly.
+              </p>
+            </div>
+            <div style={{ flex: 1, minHeight: 0 }}>
+              <AdminTestChat
+                adminToken={adminToken!}
+                businessUnit={adminUser?.businessUnit || ""}
+                theme={theme}
+              />
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Logout Confirmation Modal */}

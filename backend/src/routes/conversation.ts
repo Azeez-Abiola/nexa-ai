@@ -1376,33 +1376,46 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
       }
 
       // Resolve cited RAG chunks back to parent documents so the UI can render clickable source
-      // pills. De-duplicates by documentId, keeping each document's highest-scoring chunk.
+      // pills. Only attach sources when RAG actually found and used relevant documents —
+      // not for general-knowledge/conversational replies (keyword, google_only, none sources).
+      // De-duplicates by documentId, keeping the highest-scoring chunk per document,
+      // then filters to a minimum relevance score and caps at the top 5.
+      const MIN_SOURCE_SCORE = 0.72;
+      const MAX_SOURCES = 5;
       let sources: { documentId: string; title: string; documentType: string; version?: number; url?: string }[] = [];
-      const chunkByDocId = new Map<string, typeof globalContext.ragChunks[number]>();
-      for (const c of globalContext.ragChunks) {
-        if (!c.documentId) continue;
-        const prev = chunkByDocId.get(c.documentId);
-        if (!prev || (prev.score ?? 0) < (c.score ?? 0)) chunkByDocId.set(c.documentId, c);
-      }
-      if (chunkByDocId.size > 0) {
-        const ids = Array.from(chunkByDocId.keys()).filter((id) => mongoose.Types.ObjectId.isValid(id));
-        if (ids.length > 0) {
-          const docs = await RagDocument.find({ _id: { $in: ids } })
-            .select("_id title documentType version cloudinaryUrl")
-            .lean();
-          const docMap = new Map(docs.map((d: any) => [String(d._id), d]));
-          sources = Array.from(chunkByDocId.keys())
-            .map((id) => {
-              const c = chunkByDocId.get(id)!;
-              const d: any = docMap.get(id);
-              return {
-                documentId: id,
-                title: d?.title || c.documentTitle || "Untitled",
-                documentType: d?.documentType || c.documentType || "other",
-                version: d?.version ?? c.version,
-                url: d?.cloudinaryUrl
-              };
-            });
+
+      // Only build source pills when the global context came from RAG (not web search, keyword, or nothing)
+      if (globalContext.source === "rag") {
+        const chunkByDocId = new Map<string, typeof globalContext.ragChunks[number]>();
+        for (const c of globalContext.ragChunks) {
+          if (!c.documentId) continue;
+          // Filter low-relevance chunks before they become source pills
+          if ((c.score ?? 0) < MIN_SOURCE_SCORE) continue;
+          const prev = chunkByDocId.get(c.documentId);
+          if (!prev || (prev.score ?? 0) < (c.score ?? 0)) chunkByDocId.set(c.documentId, c);
+        }
+        if (chunkByDocId.size > 0) {
+          const ids = Array.from(chunkByDocId.keys()).filter((id) => mongoose.Types.ObjectId.isValid(id));
+          if (ids.length > 0) {
+            const docs = await RagDocument.find({ _id: { $in: ids } })
+              .select("_id title documentType version cloudinaryUrl")
+              .lean();
+            const docMap = new Map(docs.map((d: any) => [String(d._id), d]));
+            sources = Array.from(chunkByDocId.entries())
+              // Sort by score descending so the most relevant sources appear first
+              .sort(([, a], [, b]) => (b.score ?? 0) - (a.score ?? 0))
+              .slice(0, MAX_SOURCES)
+              .map(([id, c]) => {
+                const d: any = docMap.get(id);
+                return {
+                  documentId: id,
+                  title: d?.title || c.documentTitle || "Untitled",
+                  documentType: d?.documentType || c.documentType || "other",
+                  version: d?.version ?? c.version,
+                  url: d?.cloudinaryUrl
+                };
+              });
+          }
         }
       }
 

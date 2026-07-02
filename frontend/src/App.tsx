@@ -864,6 +864,15 @@ export const App: React.FC = () => {
       navigate("/user-chat");
     }
 
+    // If the current conversation already exists and is empty, don't create a duplicate —
+    // just make sure we're on the chat page and focus the input.
+    if (currentConversation && (currentConversation.messages?.length ?? 0) === 0) {
+      if (location.pathname !== "/user-chat") navigate("/user-chat");
+      setTimeout(() => textareaRef.current?.focus(), 50);
+      if (typeof window !== "undefined" && window.innerWidth <= 768) setSidebarOpen(false);
+      return;
+    }
+
     try {
       const { data } = await axios.post<{ conversation: Conversation }>(
         "/api/v1/conversations",
@@ -871,12 +880,13 @@ export const App: React.FC = () => {
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
-      setConversations([data.conversation, ...conversations]);
+      setConversations((prev) => [data.conversation, ...prev]);
       setCurrentConversation(data.conversation);
       setInput("");
       if (typeof window !== "undefined" && window.innerWidth <= 768) {
         setSidebarOpen(false);
       }
+      setTimeout(() => textareaRef.current?.focus(), 50);
     } catch (error) {
       console.error("Create conversation error:", error);
     }
@@ -1508,19 +1518,23 @@ export const App: React.FC = () => {
         {},
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      setCurrentConversation(createData.data.conversation);
-      setConversations([createData.data.conversation, ...conversations]);
+      const newConv = createData.data.conversation;
+      // Use functional updater to avoid stale-closure duplication when state hasn't flushed yet
+      setConversations((prev) => {
+        const alreadyExists = prev.some((c) => c._id === newConv._id);
+        return alreadyExists ? prev : [newConv, ...prev];
+      });
 
       const fileLabel = filesToSend.length > 0 ? `\n📎 ${filesToSend.map(f => f.name).join(', ')}` : '';
       const userMsg: Message = { role: "user", content: (trimmed || '') + fileLabel, timestamp: new Date() };
-      const updatedConv = { ...createData.data.conversation, messages: [userMsg] };
+      const updatedConv = { ...newConv, messages: [userMsg] };
       setCurrentConversation(updatedConv);
       setLoading(true);
 
       // Stream AI response
       try {
-        const finalConversation = await streamResponse(createData.data.conversation._id, trimmed, filesToSend, selectedModel);
-        applyPendingMentions(createData.data.conversation._id);
+        const finalConversation = await streamResponse(newConv._id, trimmed, filesToSend, selectedModel);
+        applyPendingMentions(newConv._id);
 
         // Use the final conversation data from the stream response
         if (finalConversation) {
@@ -2553,9 +2567,47 @@ export const App: React.FC = () => {
                             </div>
                           ) : null}
                           {m.content
-                            ? m.content.split("\n").map((line, lIdx) => (
-                                <p key={lIdx}>{parseMarkdown(line)}</p>
-                              ))
+                            ? (() => {
+                                // Split content into text lines and document attachment lines (📎)
+                                const lines = m.content.split("\n");
+                                const textLines = lines.filter(l => !l.startsWith("📎"));
+                                const docLines = lines.filter(l => l.startsWith("📎"));
+                                return (
+                                  <>
+                                    {textLines.length > 0 && textLines.some(l => l.trim()) && (
+                                      <div>
+                                        {textLines.map((line, lIdx) => (
+                                          <p key={lIdx}>{parseMarkdown(line)}</p>
+                                        ))}
+                                      </div>
+                                    )}
+                                    {docLines.length > 0 && (
+                                      <div className="message-doc-attachments">
+                                        {docLines.map((line, dIdx) => {
+                                          // Extract file names: "📎 file1.pdf, file2.docx"
+                                          const filesPart = line.replace(/^📎\s*/, "").trim();
+                                          const fileNames = filesPart.split(",").map(n => n.trim()).filter(Boolean);
+                                          return fileNames.map((fname, fIdx) => {
+                                            const ext = fname.split(".").pop()?.toLowerCase() || "";
+                                            const iconMap: Record<string, string> = {
+                                              pdf: "📄", docx: "📝", doc: "📝", xlsx: "📊",
+                                              xls: "📊", csv: "📊", pptx: "📋", ppt: "📋", txt: "📃"
+                                            };
+                                            const icon = iconMap[ext] || "📎";
+                                            return (
+                                              <div key={`${dIdx}-${fIdx}`} className="message-doc-chip">
+                                                <span className="doc-chip-icon">{icon}</span>
+                                                <span className="doc-chip-name">{fname}</span>
+                                                <span className="doc-chip-ext">{ext.toUpperCase()}</span>
+                                              </div>
+                                            );
+                                          });
+                                        })}
+                                      </div>
+                                    )}
+                                  </>
+                                );
+                              })()
                             : null}
                           {m.role === "assistant" && m.sources && m.sources.length > 0 ? (
                             <div className="message-sources-v2">
@@ -4865,6 +4917,55 @@ export const App: React.FC = () => {
           border: 1px solid #e5e7eb;
           color: #111827;
           border-bottom-left-radius: 2px;
+        }
+
+        /* Document attachment chips — rendered in chat history for 📎-prefixed lines */
+        .message-doc-attachments {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 6px;
+          margin-top: 8px;
+        }
+        .message-doc-chip {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 5px 10px 5px 8px;
+          border-radius: 8px;
+          background: rgba(0, 0, 0, 0.04);
+          border: 1px solid rgba(0, 0, 0, 0.08);
+          font-size: 12px;
+          max-width: 260px;
+          transition: background 0.15s;
+        }
+        .dark-theme .message-doc-chip {
+          background: rgba(255, 255, 255, 0.06);
+          border-color: rgba(255, 255, 255, 0.1);
+        }
+        .doc-chip-icon {
+          font-size: 14px;
+          flex-shrink: 0;
+        }
+        .doc-chip-name {
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          max-width: 180px;
+          font-weight: 500;
+          color: #374151;
+        }
+        .dark-theme .doc-chip-name {
+          color: #d1d5db;
+        }
+        .doc-chip-ext {
+          font-size: 10px;
+          font-weight: 700;
+          letter-spacing: 0.05em;
+          color: var(--brand-color, #ed0000);
+          background: color-mix(in srgb, var(--brand-color, #ed0000) 10%, transparent);
+          padding: 1px 5px;
+          border-radius: 4px;
+          flex-shrink: 0;
         }
 
         .message-sources-v2 {
