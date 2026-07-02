@@ -6,6 +6,7 @@ import { ConversationCollaboration } from "../models/ConversationCollaboration";
 import { Conversation } from "../models/Conversation";
 import { User } from "../models/User";
 import { sendConversationMentionEmail } from "../services/emailService";
+import { serializeMessages } from "../utils/encryption";
 
 export const conversationMentionsRouter = express.Router();
 
@@ -58,7 +59,8 @@ conversationMentionsRouter.get(
           conversation: {
             _id: group._id,
             title: group.title,
-            messages: group.messages,
+            // .lean() read bypasses the model decrypt getter — decrypt explicitly.
+            messages: serializeMessages(group.messages as any[]),
             createdAt: group.createdAt,
             updatedAt: group.updatedAt,
           },

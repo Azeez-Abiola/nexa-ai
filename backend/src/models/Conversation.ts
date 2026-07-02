@@ -73,7 +73,10 @@ const MessageSchema = new Schema<ChatMessage>(
       type: String,
       required: true,
       get: (v: string) => decrypt(v),
-      set: (v: string) => encrypt(v),
+      // Idempotent: never re-encrypt content that's already ciphertext. Copy
+      // flows (sharing, collaboration sync) can feed encrypted values back in,
+      // and double-encryption is what leaked `enc:` to the frontend.
+      set: (v: string) => (typeof v === "string" && v.startsWith("enc:") ? v : encrypt(v)),
     },
     imageUrls: { type: [String], default: undefined },
     sources: { type: [MessageSourceSchema], default: undefined },

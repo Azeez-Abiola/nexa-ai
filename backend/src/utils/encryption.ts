@@ -22,9 +22,7 @@ export function encrypt(plaintext: string): string {
   return PREFIX + iv.toString("hex") + ":" + tag.toString("hex") + ":" + encrypted.toString("hex");
 }
 
-export function decrypt(value: string): string {
-  // Graceful fallback: return plaintext values (pre-encryption legacy messages)
-  if (!value.startsWith(PREFIX)) return value;
+function decryptOnce(value: string): string {
   const key = getKey();
   const parts = value.slice(PREFIX.length).split(":");
   if (parts.length !== 3) return value;
@@ -35,6 +33,25 @@ export function decrypt(value: string): string {
   const decipher = createDecipheriv(ALGORITHM, key, iv);
   decipher.setAuthTag(tag);
   return decipher.update(ciphertext).toString("utf8") + decipher.final("utf8");
+}
+
+export function decrypt(value: string): string {
+  if (typeof value !== "string") return value;
+  // Peel every encryption layer. Legacy rows may be wrapped more than once
+  // (a past sharing/sync bug re-encrypted already-encrypted content), so keep
+  // unwrapping until we reach plaintext. Never throws — on any bad/foreign
+  // layer we return the best result so far instead of leaking a 500.
+  let current = value;
+  for (let i = 0; i < 4 && current.startsWith(PREFIX); i++) {
+    try {
+      const next = decryptOnce(current);
+      if (next === current) break; // malformed layer — can't unwrap further
+      current = next;
+    } catch {
+      break;
+    }
+  }
+  return current;
 }
 
 export function decryptMessages(messages: Array<{ content: string; [key: string]: unknown }>): void {

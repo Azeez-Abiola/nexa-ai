@@ -8,6 +8,7 @@ import { RagDocument } from "../models/RagDocument";
 import { KnowledgeGroup } from "../models/KnowledgeGroup";
 import { logEvent } from "./auditService";
 import { sendConversationSharedEmail } from "./emailService";
+import { decrypt } from "../utils/encryption";
 
 /** Placeholder shown to a recipient on assistant messages whose cited sources they aren't authorised to see. */
 const REDACTION_PLACEHOLDER =
@@ -310,6 +311,14 @@ export async function getConversationsSharedWithMe(recipientUserId: string) {
       const visibleMessages = await redactMessagesForRecipient(scopedMessages, recipient);
       const redactedCount = visibleMessages.filter((m) => (m as RedactedMessage).redacted).length;
 
+      // These messages come from a .lean() read, which bypasses the model's
+      // decrypt getter — so decrypt content explicitly before returning to the
+      // frontend. (Redaction placeholders aren't ciphertext, so decrypt no-ops.)
+      const decryptedMessages = visibleMessages.map((m) => ({
+        ...m,
+        content: typeof m.content === "string" ? decrypt(m.content) : m.content,
+      }));
+
       return {
         shareId: share._id,
         sharedAt: share.createdAt,
@@ -321,7 +330,7 @@ export async function getConversationsSharedWithMe(recipientUserId: string) {
         conversation: {
           _id: group._id,
           title: group.title,
-          messages: visibleMessages,
+          messages: decryptedMessages,
           createdAt: group.createdAt,
           updatedAt: group.updatedAt
         },
@@ -495,6 +504,12 @@ export async function getConversationByShareLink(token: string, viewerUserId: st
   const visibleMessages = await redactMessagesForRecipient(scopedMessages, viewer);
   const redactedCount = visibleMessages.filter((m) => (m as RedactedMessage).redacted).length;
 
+  // .lean() read bypasses the model decrypt getter — decrypt before returning.
+  const decryptedMessages = visibleMessages.map((m) => ({
+    ...m,
+    content: typeof m.content === "string" ? decrypt(m.content) : m.content,
+  }));
+
   const sharedByUser = await User.findById(link.sharedByUserId).select("fullName email").lean();
 
   return {
@@ -506,7 +521,7 @@ export async function getConversationByShareLink(token: string, viewerUserId: st
     conversation: {
       _id: group._id,
       title: group.title,
-      messages: visibleMessages,
+      messages: decryptedMessages,
       createdAt: group.createdAt,
       updatedAt: group.updatedAt
     },
