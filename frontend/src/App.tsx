@@ -874,9 +874,16 @@ export const App: React.FC = () => {
       navigate("/user-chat");
     }
 
-    // If the current conversation already exists and is empty, don't create a duplicate —
-    // just make sure we're on the chat page and focus the input.
-    if (currentConversation && (currentConversation.messages?.length ?? 0) === 0) {
+    // Reuse an existing empty conversation instead of creating a duplicate. This covers both
+    // "already on an empty new chat" and "an empty new chat exists but I'm viewing another one"
+    // (e.g. open an existing chat → New Chat → back to existing → New Chat again).
+    const existingEmpty =
+      currentConversation && (currentConversation.messages?.length ?? 0) === 0
+        ? currentConversation
+        : conversations.find((c) => (c.messages?.length ?? 0) === 0);
+    if (existingEmpty) {
+      if (existingEmpty._id !== currentConversation?._id) setCurrentConversation(existingEmpty);
+      setInput("");
       if (location.pathname !== "/user-chat") navigate("/user-chat");
       setTimeout(() => textareaRef.current?.focus(), 50);
       if (typeof window !== "undefined" && window.innerWidth <= 768) setSidebarOpen(false);
