@@ -85,12 +85,32 @@ const AUTH_LIMIT = parseInt(process.env.RATE_LIMIT_AUTH ?? "10", 10);
 const AI_LIMIT_PER_MINUTE = parseInt(process.env.RATE_LIMIT_AI_PER_MINUTE ?? "60", 10);
 const AI_LIMIT_PER_HOUR = parseInt(process.env.RATE_LIMIT_AI_PER_HOUR ?? "100", 10);
 
-// Brute-force protection on auth endpoints — AUTH_LIMIT req per 15 min per IP
+// authLimiter is mounted on the whole /api/v1/auth and /api/v1/admin/auth
+// routers, but it must only guard the unauthenticated, brute-forceable
+// endpoints (login/OTP/password reset). Everything else on those routers
+// (invite-employee, user management, etc.) already requires a valid admin
+// token via adminAuthMiddleware, so it shouldn't share the login IP bucket.
+const AUTH_SENSITIVE_PATHS: RegExp[] = [
+  /\/login\/?$/,
+  /\/verify-email\/?$/,
+  /\/resend-verification\/?$/,
+  /\/forgot-password\/?$/,
+  /\/reset-password\/?$/,
+];
+
+function skipNonAuthSensitive(req: Request): boolean {
+  if (req.method !== "POST") return true;
+  const pathname = req.originalUrl.split("?")[0];
+  return !AUTH_SENSITIVE_PATHS.some((re) => re.test(pathname));
+}
+
+// Brute-force protection on login/OTP/password-reset endpoints — AUTH_LIMIT req per 15 min per IP
 export const authLimiter = rateLimit({
   ...sharedOptions,
   windowMs: 15 * 60 * 1000,
   limit: AUTH_LIMIT,
   keyGenerator: (req) => req.ip ?? "unknown",
+  skip: skipNonAuthSensitive,
   message: { error: "Too many login attempts. Please try again in 15 minutes." },
   store: makeStore("rl:auth:"),
 });
