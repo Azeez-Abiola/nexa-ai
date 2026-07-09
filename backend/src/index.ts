@@ -26,7 +26,7 @@ import { adminKnowledgeGroupsRouter } from "./routes/adminKnowledgeGroups";
 import { adminAuditLogsRouter } from "./routes/adminAuditLogs";
 import { BusinessUnit } from "./models/BusinessUnit";
 import { tenantMiddleware } from "./middleware/tenant";
-import { authLimiter, aiLimiter, aiHourlyLimiter } from "./middleware/rateLimiter";
+import { authLimiter, aiLimiter, aiDailyLimiter } from "./middleware/rateLimiter";
 import logger from "./utils/logger";
 import { sendContactFormInquiry, sendAccessRequestNotification, sendAccessRequestReceived } from "./services/emailService";
 import { TenantRequest } from "./models/TenantRequest";
@@ -107,15 +107,21 @@ app.get("/api/docs.json", (_req, res) => {
 
 app.use("/api/v1/auth", authLimiter, authRouter);
 app.use("/api/v1/admin/auth", authLimiter, adminAuthRouter);
+// Apply the AI rate limiters ONCE per request. They were previously attached to
+// every conversations sub-router, so a single message POST passed through the
+// limiter stack up to 4x and consumed 4 tokens — that's why a "50/user" budget
+// exhausted after ~10 real prompts. The limiters skip non-message requests
+// internally (see skipNonAiMessage), so mounting them at the prefix is safe.
+app.use("/api/v1/conversations", aiLimiter, aiDailyLimiter);
 // Specific-path routers MUST be mounted before conversationRouter because
 // conversationRouter contains GET /:id which catches any unmatched path and
 // returns 404, preventing the sharing/mention routes from ever being reached.
-app.use("/api/v1/conversations", aiLimiter, aiHourlyLimiter, conversationSharingRouter);
-app.use("/api/v1/conversations", aiLimiter, aiHourlyLimiter, conversationAccessRouter);
-app.use("/api/v1/conversations", aiLimiter, aiHourlyLimiter, conversationMentionsRouter);
-app.use("/api/v1/conversations", aiLimiter, aiHourlyLimiter, conversationRouter);
-app.use("/api/v1/conversations", aiLimiter, aiHourlyLimiter, userDocumentsRouter);
-app.use("/api/v1/chat", aiLimiter, aiHourlyLimiter, chatRouter);
+app.use("/api/v1/conversations", conversationSharingRouter);
+app.use("/api/v1/conversations", conversationAccessRouter);
+app.use("/api/v1/conversations", conversationMentionsRouter);
+app.use("/api/v1/conversations", conversationRouter);
+app.use("/api/v1/conversations", userDocumentsRouter);
+app.use("/api/v1/chat", aiLimiter, aiDailyLimiter, chatRouter);
 app.use("/api/v1/admin/policies", adminPoliciesRouter);
 app.use("/api/v1/admin/documents", adminDocumentsRouter);
 app.use("/api/v1/admin/user-groups", adminKnowledgeGroupsRouter);

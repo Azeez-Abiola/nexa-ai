@@ -40,8 +40,19 @@ import {
 } from "../services/documentGeneratorService";
 import { randomUUID } from "crypto";
 import { ConversationFolder } from "../models/ConversationFolder";
-import { syncToCollaborators } from "../utils/syncCollaboration";
+import {
+  syncToCollaborators,
+  getCollaborationRoomId,
+  isCollaborationParticipant,
+} from "../utils/syncCollaboration";
 import { serializeMessages } from "../utils/encryption";
+import { sanitizeAssistantResponse } from "../utils/citationCleanup";
+import { buildRagMessageSources, buildWebMessageSources } from "../utils/buildMessageSources";
+import {
+  setTypingIndicator,
+  clearTypingIndicator,
+  getTypingUsers,
+} from "../services/typingIndicatorService";
 
 const DOC_TTL_MS = 24 * 60 * 60 * 1000;
 
@@ -162,6 +173,7 @@ const ALLOWED_MIME_TYPES = [
   "application/pdf",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-excel", // legacy .xls — SheetJS reads it fine
   "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   "text/plain",
   "text/csv",
@@ -263,26 +275,27 @@ async function handleFileUploads(
 
 const MAX_INLINE_TEXT_CHARS = 15000;
 
-async function extractTextFromFile(file: Express.Multer.File): Promise<string> {
+async function extractTextFromFile(file: Express.Multer.File): Promise<{ text: string; ok: boolean }> {
   try {
     switch (file.mimetype) {
       case "application/pdf":
-        return await extractTextFromPdf(file.buffer);
+        return { text: await extractTextFromPdf(file.buffer), ok: true };
       case "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-        return await extractTextFromDocx(file.buffer);
+        return { text: await extractTextFromDocx(file.buffer), ok: true };
       case "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
-        return extractTextFromXlsx(file.buffer);
+      case "application/vnd.ms-excel":
+        return { text: extractTextFromXlsx(file.buffer), ok: true };
       case "application/vnd.openxmlformats-officedocument.presentationml.presentation":
-        return await extractTextFromPptx(file.buffer);
+        return { text: await extractTextFromPptx(file.buffer), ok: true };
       case "text/plain":
       case "text/csv":
-        return file.buffer.toString("utf-8");
+        return { text: file.buffer.toString("utf-8"), ok: true };
       default:
-        return "";
+        return { text: "", ok: false };
     }
   } catch (err: any) {
     logger.warn("[Conversation] Inline text extraction failed", { fileName: file.originalname, error: err.message });
-    return "";
+    return { text: "", ok: false };
   }
 }
 
@@ -342,7 +355,8 @@ function buildSystemPrompt(
   pendingFileNames: string[],
   hasGlobalContext: boolean,
   contextSource: "rag" | "keyword" | "google_only" | "none" = "none",
-  activeModel: "gpt" | "claude" | "kimi" | "deepseek" = "gpt"
+  activeModel: "gpt" | "claude" | "kimi" | "deepseek" = "gpt",
+  failedFileNames: string[] = []
 ): string {
   const today = new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
   const modelLabel =
@@ -357,6 +371,12 @@ function buildSystemPrompt(
   if (pendingFileNames.length > 0) {
     sections.push(
       `⏳ NOTE: The following document(s) uploaded by the user are still being processed and cannot be queried yet:\n${pendingFileNames.map((f) => `  • ${f}`).join("\n")}\nIf the user asks about these files, let them know processing is in progress and to try again shortly.`
+    );
+  }
+
+  if (failedFileNames.length > 0) {
+    sections.push(
+      `❌ NOTE: The following uploaded document(s) failed to process and cannot be analyzed:\n${failedFileNames.map((f) => `  • ${f}`).join("\n")}\nIf the user asks about these files, explain that processing failed and suggest re-uploading in a supported format (PDF, DOCX, XLSX, PPTX, TXT, CSV) or using a text-based version.`
     );
   }
 
@@ -598,10 +618,67 @@ conversationRouter.get("/:id", authMiddleware, async (req: AuthenticatedRequest,
       updatedAt: group.updatedAt
     };
 
-    res.json({ conversation });
+    const isCollaborative = !!(await getCollaborationRoomId(id));
+
+    res.json({ conversation, isCollaborative });
   } catch (error) {
     console.error("Get conversation error:", error);
     res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/** POST /api/v1/conversations/:id/typing — heartbeat while the user is typing in a group chat. */
+conversationRouter.post("/:id/typing", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const userId = req.userId!;
+
+    const roomId = await getCollaborationRoomId(id);
+    if (!roomId) return res.json({ ok: true });
+
+    const allowed = await isCollaborationParticipant(id, userId);
+    if (!allowed) return res.status(403).json({ error: "Not a participant in this conversation" });
+
+    const name = req.fullName || req.email || "Someone";
+    await setTypingIndicator(roomId, userId, name);
+    return res.json({ ok: true });
+  } catch {
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/** DELETE /api/v1/conversations/:id/typing — clear typing state on blur/send. */
+conversationRouter.delete("/:id/typing", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const userId = req.userId!;
+
+    const roomId = await getCollaborationRoomId(id);
+    if (!roomId) return res.json({ ok: true });
+
+    await clearTypingIndicator(roomId, userId);
+    return res.json({ ok: true });
+  } catch {
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/** GET /api/v1/conversations/:id/typing — who else is currently typing. */
+conversationRouter.get("/:id/typing", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const userId = req.userId!;
+
+    const roomId = await getCollaborationRoomId(id);
+    if (!roomId) return res.json({ typers: [] });
+
+    const allowed = await isCollaborationParticipant(id, userId);
+    if (!allowed) return res.status(403).json({ error: "Not a participant in this conversation" });
+
+    const typers = await getTypingUsers(roomId, userId);
+    return res.json({ typers });
+  } catch {
+    return res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -874,7 +951,8 @@ conversationRouter.post("/:id/message", authMiddleware, async (req: Authenticate
       sessionStatus.pendingOrProcessing,
       hasGlobalContext,
       globalContext.source,
-      model
+      model,
+      sessionStatus.failed
     );
     systemPrompt += await buildKbInventoryNote(businessUnit, content, req.userId);
 
@@ -1022,7 +1100,8 @@ conversationRouter.post("/:id/message/:index/edit", authMiddleware, async (req: 
       sessionStatus.pendingOrProcessing,
       hasGlobalContext,
       globalContext.source,
-      model
+      model,
+      sessionStatus.failed
     );
     systemPrompt += await buildKbInventoryNote(businessUnit, content, req.userId);
 
@@ -1186,15 +1265,25 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
     }
 
     let inlineDocumentText = "";
+    const extractionFailedNames: string[] = [];
     if (documentFiles.length > 0) {
       const extractions = await Promise.all(
         documentFiles.map(async (f) => {
-          const text = await extractTextFromFile(f);
-          return text ? `--- Document: ${f.originalname} ---\n${text.slice(0, MAX_INLINE_TEXT_CHARS)}` : "";
+          const { text, ok } = await extractTextFromFile(f);
+          if (!ok || !text.trim()) {
+            extractionFailedNames.push(f.originalname);
+            return "";
+          }
+          return `--- Document: ${f.originalname} ---\n${text.slice(0, MAX_INLINE_TEXT_CHARS)}`;
         })
       );
       inlineDocumentText = extractions.filter(Boolean).join("\n\n");
     }
+
+    const uploadedDocsWithMeta = uploadedDocs.map((d) => ({
+      ...d,
+      extractionFailed: extractionFailedNames.includes(d.fileName),
+    }));
 
     if (!content && uploadedFiles.length > 0 && !inlineDocumentText && imageAttachments.length === 0) {
       const successUploads = uploadedDocs.filter((d) => d.status === "pending");
@@ -1221,7 +1310,7 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
         `data: ${JSON.stringify({
           done: true,
           fullResponse: ackContent,
-          uploadedDocuments: uploadedDocs,
+          uploadedDocuments: uploadedDocsWithMeta,
           conversation
         })}\n\n`
       );
@@ -1337,6 +1426,7 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
     }
 
     const hasGlobalContext = globalContext.source !== "none" && !globalContext.accessDenied;
+    const failedDocNames = [...new Set([...sessionStatus.failed, ...extractionFailedNames])];
     let systemPrompt = buildSystemPrompt(
       businessUnit,
       sessionContextString,
@@ -1344,7 +1434,8 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
       sessionStatus.pendingOrProcessing,
       hasGlobalContext,
       globalContext.source,
-      model
+      model,
+      failedDocNames
     );
     if (docRequest) {
       systemPrompt += `\n\n📎 DOCUMENT GENERATION: The user has requested a ${docRequest.label}. Confirm you are generating it and briefly describe (1–2 sentences) what the file will contain. Do NOT mention a download link — the system will attach it automatically below your message.`;
@@ -1384,48 +1475,13 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
         res.write(`data: ${JSON.stringify({ chunk, fullResponse })}\n\n`);
       }
 
-      // Resolve cited RAG chunks back to parent documents so the UI can render clickable source
-      // pills. Only attach sources when RAG actually found and used relevant documents —
-      // not for general-knowledge/conversational replies (keyword, google_only, none sources).
-      // De-duplicates by documentId, keeping the highest-scoring chunk per document,
-      // then filters to a minimum relevance score and caps at the top 5.
-      const MIN_SOURCE_SCORE = 0.72;
-      const MAX_SOURCES = 5;
-      let sources: { documentId: string; title: string; documentType: string; version?: number; url?: string }[] = [];
-
-      // Only build source pills when the global context came from RAG (not web search, keyword, or nothing)
-      if (globalContext.source === "rag") {
-        const chunkByDocId = new Map<string, typeof globalContext.ragChunks[number]>();
-        for (const c of globalContext.ragChunks) {
-          if (!c.documentId) continue;
-          // Filter low-relevance chunks before they become source pills
-          if ((c.score ?? 0) < MIN_SOURCE_SCORE) continue;
-          const prev = chunkByDocId.get(c.documentId);
-          if (!prev || (prev.score ?? 0) < (c.score ?? 0)) chunkByDocId.set(c.documentId, c);
-        }
-        if (chunkByDocId.size > 0) {
-          const ids = Array.from(chunkByDocId.keys()).filter((id) => mongoose.Types.ObjectId.isValid(id));
-          if (ids.length > 0) {
-            const docs = await RagDocument.find({ _id: { $in: ids } })
-              .select("_id title documentType version cloudinaryUrl")
-              .lean();
-            const docMap = new Map(docs.map((d: any) => [String(d._id), d]));
-            sources = Array.from(chunkByDocId.entries())
-              // Sort by score descending so the most relevant sources appear first
-              .sort(([, a], [, b]) => (b.score ?? 0) - (a.score ?? 0))
-              .slice(0, MAX_SOURCES)
-              .map(([id, c]) => {
-                const d: any = docMap.get(id);
-                return {
-                  documentId: id,
-                  title: d?.title || c.documentTitle || "Untitled",
-                  documentType: d?.documentType || c.documentType || "other",
-                  version: d?.version ?? c.version,
-                  url: d?.cloudinaryUrl
-                };
-              });
-          }
-        }
+      // Build structured source pills for the UI (KB docs + web results).
+      let sources: Awaited<ReturnType<typeof buildRagMessageSources>> = [];
+      if (globalContext.source === "rag" && globalContext.ragChunks.length > 0) {
+        sources = await buildRagMessageSources(globalContext.ragChunks);
+      }
+      if (globalContext.googleResults.length > 0) {
+        sources = [...sources, ...buildWebMessageSources(globalContext.googleResults)];
       }
 
       let generatedDocument: { url: string; filename: string; documentType: string } | undefined;
@@ -1434,12 +1490,16 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
         if (docResult) generatedDocument = docResult;
       }
 
+      const sanitizedResponse = sanitizeAssistantResponse(fullResponse, {
+        hasStructuredSources: sources.length > 0,
+      });
+
       // A download button next to "I wasn't able to generate a response" would be confusing,
       // so only attach the document if the AI actually produced a response.
-      const attachDocument = generatedDocument && !!fullResponse;
+      const attachDocument = generatedDocument && !!sanitizedResponse;
       const assistantMessage = {
         role: "assistant" as const,
-        content: fullResponse || "I wasn't able to generate a response. Please try again.",
+        content: sanitizedResponse || "I wasn't able to generate a response. Please try again.",
         timestamp: new Date(),
         ...(sources.length > 0 ? { sources } : {}),
         ...(attachDocument ? { generatedDocument } : {})
@@ -1467,8 +1527,8 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
       res.write(
         `data: ${JSON.stringify({
           done: true,
-          fullResponse,
-          uploadedDocuments: uploadedDocs,
+          fullResponse: sanitizedResponse,
+          uploadedDocuments: uploadedDocsWithMeta,
           ...(attachDocument ? { generatedDocument } : {}),
           conversation
         })}\n\n`

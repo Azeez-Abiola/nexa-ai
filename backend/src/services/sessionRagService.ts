@@ -1,6 +1,7 @@
 import { UserDocumentChunk } from "../models/UserDocumentChunk";
 import { UserDocument } from "../models/UserDocument";
 import { generateEmbedding } from "./embeddingService";
+import { getConversationCluster } from "../utils/syncCollaboration";
 import logger from "../utils/logger";
 
 export interface SessionRAGQuery {
@@ -40,7 +41,12 @@ const DEFAULT_TOP_K = parseInt(process.env.RAG_TOP_K || "5");
  */
 export async function hasReadySessionChunks(userId: string, chatSessionId: string): Promise<boolean> {
   try {
-    const count = await UserDocumentChunk.countDocuments({ userId, chatSessionId });
+    // Scope across the whole collaboration cluster so a document any participant attached counts.
+    const { userIds, sessionIds } = await getConversationCluster(chatSessionId, userId);
+    const count = await UserDocumentChunk.countDocuments({
+      userId: { $in: userIds },
+      chatSessionId: { $in: sessionIds },
+    });
     return count > 0;
   } catch {
     return false;
@@ -54,8 +60,10 @@ export async function getSessionDocumentStatus(
   userId: string,
   chatSessionId: string
 ): Promise<SessionDocumentStatus> {
+  // Scope across the whole collaboration cluster so status reflects every participant's docs.
+  const { userIds, sessionIds } = await getConversationCluster(chatSessionId, userId);
   const docs = await UserDocument.find(
-    { userId, chatSessionId },
+    { userId: { $in: userIds }, chatSessionId: { $in: sessionIds } },
     { fileName: 1, status: 1 }
   ).lean();
 
@@ -97,6 +105,11 @@ export async function retrieveSessionChunks(query: SessionRAGQuery): Promise<Ses
 
   const retrievalStart = Date.now();
 
+  // Scope across the whole collaboration cluster so any participant's uploaded document is
+  // searchable by everyone in a group conversation. For a solo conversation this resolves to
+  // the single (userId, chatSessionId) pair, preserving strict session isolation.
+  const { userIds, sessionIds } = await getConversationCluster(query.chatSessionId, query.userId);
+
   const pipeline: any[] = [
     {
       $vectorSearch: {
@@ -106,9 +119,9 @@ export async function retrieveSessionChunks(query: SessionRAGQuery): Promise<Ses
         numCandidates: topK * 10,
         limit: topK * 2,
         filter: {
-          // Strict session isolation — enforced BEFORE LLM receives context
-          userId: { $eq: query.userId },
-          chatSessionId: { $eq: query.chatSessionId }
+          // Session isolation — scoped to this conversation's cluster BEFORE the LLM sees context
+          userId: { $in: userIds },
+          chatSessionId: { $in: sessionIds }
         }
       }
     },

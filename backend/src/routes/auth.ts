@@ -1,4 +1,5 @@
 import express, { Request, Response } from "express";
+import multer from "multer";
 import bcryptjs from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
@@ -7,6 +8,7 @@ import { AdminUser } from "../models/AdminUser";
 import { BusinessUnit as BusinessUnitModel } from "../models/BusinessUnit";
 import { sendVerificationEmail, sendPasswordResetEmail, sendWelcomeEmail } from "../services/emailService";
 import { authMiddleware, AuthenticatedRequest } from "../middleware/auth";
+import { uploadProfilePicture } from "../services/cloudinaryService";
 import { logEvent } from "../services/auditService";
 
 export const authRouter = express.Router();
@@ -301,6 +303,7 @@ authRouter.post("/login", async (req: Request<{}, {}, AuthRequest>, res: Respons
         fullName: user.fullName,
         businessUnit: user.businessUnit,
         department: user.department,
+        profilePicture: user.profilePicture || null,
         ...tenant,
         emailVerified: user.emailVerified,
         isAdmin: payload.isAdmin
@@ -422,6 +425,7 @@ authRouter.get("/me", authMiddleware, async (req: AuthenticatedRequest, res: Res
         fullName: user.fullName,
         businessUnit: user.businessUnit,
         department: user.department,
+        profilePicture: user.profilePicture || null,
         ...tenant,
         emailVerified: user.emailVerified,
         isAdmin: false
@@ -461,6 +465,7 @@ authRouter.patch("/me", authMiddleware, async (req: AuthenticatedRequest, res: R
         fullName: user.fullName,
         businessUnit: user.businessUnit,
         department: user.department,
+        profilePicture: user.profilePicture || null,
         ...tenant,
         emailVerified: user.emailVerified,
         isAdmin: false
@@ -496,5 +501,71 @@ authRouter.put("/me/password", authMiddleware, async (req: AuthenticatedRequest,
   } catch (error) {
     console.error("PUT /auth/me/password error:", error);
     res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Profile picture upload. Works for both employees (User) and BU admins (AdminUser)
+// since both use the chat UI where mentions/avatars appear.
+const avatarUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
+  fileFilter: (_req, file, cb) => {
+    if (/^image\/(png|jpe?g|webp|gif)$/.test(file.mimetype)) cb(null, true);
+    else cb(new Error("Only PNG, JPG, WEBP or GIF images are allowed"));
+  },
+});
+
+/** Resolve the caller's account across both collections. Admin JWTs map adminId → userId. */
+async function findAccountById(id: string, isAdmin?: boolean) {
+  if (isAdmin) {
+    return (await AdminUser.findById(id)) || (await User.findById(id));
+  }
+  return (await User.findById(id)) || (await AdminUser.findById(id));
+}
+
+/** POST /api/v1/auth/me/avatar — upload/replace the caller's profile picture. */
+authRouter.post(
+  "/me/avatar",
+  authMiddleware,
+  (req: AuthenticatedRequest, res: Response) => {
+    avatarUpload.single("avatar")(req, res, async (err: unknown) => {
+      if (err) {
+        return res.status(400).json({ error: (err as Error).message || "Upload failed" });
+      }
+      try {
+        if (!req.file?.buffer) {
+          return res.status(400).json({ error: "No image file provided" });
+        }
+        const account = await findAccountById(req.userId!, req.isAdmin);
+        if (!account) return res.status(404).json({ error: "User not found" });
+
+        const { secureUrl } = await uploadProfilePicture(
+          req.file.buffer,
+          req.file.originalname || "avatar",
+          req.userId!,
+          req.file.mimetype
+        );
+        account.profilePicture = secureUrl;
+        await account.save();
+        return res.json({ profilePicture: secureUrl });
+      } catch (error) {
+        console.error("POST /auth/me/avatar error:", error);
+        return res.status(500).json({ error: "Could not upload profile picture" });
+      }
+    });
+  }
+);
+
+/** DELETE /api/v1/auth/me/avatar — remove the caller's profile picture. */
+authRouter.delete("/me/avatar", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const account = await findAccountById(req.userId!, req.isAdmin);
+    if (!account) return res.status(404).json({ error: "User not found" });
+    account.profilePicture = undefined;
+    await account.save();
+    return res.json({ profilePicture: null });
+  } catch (error) {
+    console.error("DELETE /auth/me/avatar error:", error);
+    return res.status(500).json({ error: "Could not remove profile picture" });
   }
 });

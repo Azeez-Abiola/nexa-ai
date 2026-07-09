@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import axios from "axios";
-import { BiArrowBack, BiInfoCircle, BiLock, BiUser } from "react-icons/bi";
+import { BiArrowBack, BiInfoCircle, BiLock, BiUser, BiCamera, BiTrash } from "react-icons/bi";
 
 const AVATARS = ["/avatar-1.png", "/avatar-2.png"] as const;
 
@@ -18,6 +18,7 @@ export interface ChatUserShape {
   tenantColor?: string;
   emailVerified?: boolean;
   isAdmin?: boolean;
+  profilePicture?: string | null;
 }
 
 type Props = {
@@ -46,6 +47,54 @@ export const UserChatProfile: React.FC<Props> = ({
   const [confirmPassword, setConfirmPassword] = useState("");
   const [savingPw, setSavingPw] = useState(false);
   const [pwMsg, setPwMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
+
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [avatarMsg, setAvatarMsg] = useState<string | null>(null);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+
+  const initials = (user.fullName || user.email || "U")
+    .split(" ")
+    .map((n) => n[0])
+    .join("")
+    .toUpperCase()
+    .slice(0, 2);
+
+  const handleAvatarFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setAvatarMsg(null);
+    setUploadingAvatar(true);
+    try {
+      const fd = new FormData();
+      fd.append("avatar", file);
+      const { data } = await axios.post<{ profilePicture: string }>("/api/v1/auth/me/avatar", fd, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      onUserUpdated({ ...user, profilePicture: data.profilePicture });
+      setAvatarMsg("Saved.");
+    } catch (err: unknown) {
+      const msg = axios.isAxiosError(err) ? err.response?.data?.error : null;
+      setAvatarMsg(typeof msg === "string" ? msg : "Could not upload picture.");
+    } finally {
+      setUploadingAvatar(false);
+      if (avatarInputRef.current) avatarInputRef.current.value = "";
+    }
+  };
+
+  const handleRemoveAvatar = async () => {
+    setAvatarMsg(null);
+    setUploadingAvatar(true);
+    try {
+      await axios.delete("/api/v1/auth/me/avatar");
+      onUserUpdated({ ...user, profilePicture: null });
+      setAvatarMsg("Removed.");
+    } catch (err: unknown) {
+      const msg = axios.isAxiosError(err) ? err.response?.data?.error : null;
+      setAvatarMsg(typeof msg === "string" ? msg : "Could not remove picture.");
+    } finally {
+      setUploadingAvatar(false);
+    }
+  };
 
   const isDark = theme === "dark";
   /** Match `App.tsx` `.dark-theme` chat shell (sidebar / layout / cards). */
@@ -191,6 +240,79 @@ export const UserChatProfile: React.FC<Props> = ({
           <p className={`mt-4 text-xs ${isDark ? d.label : "text-slate-400"}`}>
             Email: <span className="font-semibold text-[var(--brand-color,#ed0000)]">{user.email}</span> (managed by your administrator)
           </p>
+        </section>
+
+        <section
+          className={`rounded-2xl p-5 sm:p-6 ${
+            isDark ? `${d.card} ${d.cardInnerHover}` : "border border-slate-200 bg-white shadow-sm"
+          }`}
+        >
+          <div className="mb-4 flex items-center gap-2">
+            <BiCamera className={isDark ? d.body : "text-slate-500"} size={20} />
+            <h2 className={`text-lg font-bold ${isDark ? d.heading : "text-slate-900"}`}>Profile picture</h2>
+          </div>
+          <p className={`mb-4 text-sm ${isDark ? d.body : "text-slate-500"}`}>
+            This appears when you’re tagged or collaborate in group conversations.
+          </p>
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-full">
+              {user.profilePicture ? (
+                <img src={user.profilePicture} alt="" className="h-full w-full object-cover" />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center bg-[var(--brand-color,#ed0000)] text-2xl font-bold text-white">
+                  {initials}
+                </div>
+              )}
+            </div>
+            <div className="flex flex-col gap-2">
+              <input
+                ref={avatarInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                className="hidden"
+                onChange={handleAvatarFile}
+              />
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  disabled={uploadingAvatar}
+                  onClick={() => avatarInputRef.current?.click()}
+                  className="h-11 rounded-xl bg-[var(--brand-color,#ed0000)] px-5 text-sm font-bold text-white shadow-md transition-opacity disabled:opacity-50"
+                >
+                  {uploadingAvatar ? "Uploading…" : user.profilePicture ? "Change photo" : "Upload photo"}
+                </button>
+                {user.profilePicture && (
+                  <button
+                    type="button"
+                    disabled={uploadingAvatar}
+                    onClick={handleRemoveAvatar}
+                    className={`inline-flex h-11 items-center gap-1.5 rounded-xl px-4 text-sm font-semibold transition-colors disabled:opacity-50 ${
+                      isDark ? d.btnSecondary : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                    }`}
+                  >
+                    <BiTrash size={16} /> Remove
+                  </button>
+                )}
+              </div>
+              {avatarMsg ? (
+                <span
+                  className={`text-sm ${
+                    avatarMsg === "Saved." || avatarMsg === "Removed."
+                      ? isDark
+                        ? d.success
+                        : "text-emerald-600"
+                      : isDark
+                        ? d.error
+                        : "text-red-600"
+                  }`}
+                >
+                  {avatarMsg}
+                </span>
+              ) : (
+                <span className={`text-xs ${isDark ? d.label : "text-slate-400"}`}>PNG, JPG, WEBP or GIF up to 5MB.</span>
+              )}
+            </div>
+          </div>
         </section>
 
         <section

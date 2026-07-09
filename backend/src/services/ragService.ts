@@ -298,7 +298,7 @@ export function buildRAGContext(chunks: RetrievedChunk[]): string {
     // last updated?" without guessing.
     const uploaded = chunk.uploadedAt ? ` — uploaded ${chunk.uploadedAt.slice(0, 10)}` : "";
     return [
-      `[Chunk ${i + 1}] Source: ${chunk.documentTitle} (${chunk.documentType})${v}${superseded}${uploaded} — relevance: ${score}%`,
+      `[Chunk ${i + 1}] Document: ${chunk.documentTitle} (${chunk.documentType})${v}${superseded}${uploaded} — relevance: ${score}%`,
       chunk.content,
       "---"
     ].join("\n");

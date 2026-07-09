@@ -6,6 +6,8 @@ export interface AdminUserDocument extends Document {
   email: string;
   fullName: string;
   businessUnit: BusinessUnit;
+  /** Cloudinary URL of the admin's profile picture (avatar). Optional. */
+  profilePicture?: string;
   password: string;
   emailVerified: boolean;
   emailVerificationOTP?: string;
@@ -29,6 +31,7 @@ const AdminUserSchema = new Schema<AdminUserDocument>(
       index: true,
       trim: true
     },
+    profilePicture: { type: String, default: null },
     password: { type: String, required: true },
     emailVerified: { type: Boolean, default: false },
     isActive: { type: Boolean, default: true },

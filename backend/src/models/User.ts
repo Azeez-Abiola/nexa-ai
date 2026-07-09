@@ -7,6 +7,8 @@ export interface UserDocument extends Document {
   fullName: string;
   businessUnit: BusinessUnit;
   department?: string;
+  /** Cloudinary URL of the user's profile picture (avatar). Optional. */
+  profilePicture?: string;
   password: string;
   emailVerified: boolean;
   isActive: boolean;
@@ -24,6 +26,7 @@ const UserSchema = new Schema<UserDocument>(
     fullName: { type: String, required: true },
     businessUnit: { type: String, required: true, index: true, trim: true },
     department: { type: String, trim: true },
+    profilePicture: { type: String, default: null },
     password: { type: String, required: true },
     emailVerified: { type: Boolean, default: false },
     isActive: { type: Boolean, default: true, index: true },

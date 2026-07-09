@@ -82,8 +82,12 @@ function skipNonAiMessage(req: Request): boolean {
 }
 
 const AUTH_LIMIT = parseInt(process.env.RATE_LIMIT_AUTH ?? "10", 10);
-const AI_LIMIT_PER_MINUTE = parseInt(process.env.RATE_LIMIT_AI_PER_MINUTE ?? "60", 10);
-const AI_LIMIT_PER_HOUR = parseInt(process.env.RATE_LIMIT_AI_PER_HOUR ?? "100", 10);
+// Short-window burst guard (per user). Kept generous so it only trips on abuse,
+// never during normal back-and-forth chatting.
+const AI_LIMIT_PER_MINUTE = parseInt(process.env.RATE_LIMIT_AI_PER_MINUTE ?? "30", 10);
+// The user-facing prompt budget: 50 prompts per user per day. This is the number
+// surfaced by the RateLimitBanner. Keyed per user (see aiKeyGenerator), not per model.
+const AI_LIMIT_PER_DAY = parseInt(process.env.RATE_LIMIT_AI_PER_DAY ?? "50", 10);
 
 // authLimiter is mounted on the whole /api/v1/auth and /api/v1/admin/auth
 // routers, but it must only guard the unauthenticated, brute-forceable
@@ -126,17 +130,17 @@ export const aiLimiter = rateLimit({
   store: makeStore("rl:ai:"),
 });
 
-// AI hourly cap — AI_LIMIT_PER_HOUR messages per hour per user
-export const aiHourlyLimiter = rateLimit({
+// AI daily cap — AI_LIMIT_PER_DAY messages per day per user
+export const aiDailyLimiter = rateLimit({
   ...sharedOptions,
-  windowMs: 60 * 60 * 1000,
-  limit: AI_LIMIT_PER_HOUR,
+  windowMs: 24 * 60 * 60 * 1000,
+  limit: AI_LIMIT_PER_DAY,
   keyGenerator: aiKeyGenerator,
   skip: skipNonAiMessage,
-  store: makeStore("rl:ai-hourly:"),
+  store: makeStore("rl:ai-daily:"),
   handler: (_req, res) => {
     res.status(429).json({
-      error: "You've reached your hourly message limit. Please try again in an hour.",
+      error: "You've reached your daily message limit. Please try again tomorrow.",
     });
   },
 });

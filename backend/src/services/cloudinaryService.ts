@@ -61,6 +61,44 @@ export async function uploadDocument(
   });
 }
 
+/**
+ * Upload a user's profile picture to Cloudinary under a per-user avatar folder.
+ * Stored as an image so Cloudinary serves an optimized, square-croppable URL.
+ */
+export async function uploadProfilePicture(
+  buffer: Buffer,
+  filename: string,
+  userId: string,
+  _mimeType: string
+): Promise<{ publicId: string; secureUrl: string }> {
+  const publicId = `${BASE_FOLDER}/avatars/${userId}/${randomUUID()}`;
+
+  return new Promise((resolve, reject) => {
+    const uploadStream = cloudinary.uploader.upload_stream(
+      {
+        public_id: publicId,
+        resource_type: "image",
+        overwrite: false,
+        // Normalize avatars to a reasonable square thumbnail to keep payloads small.
+        transformation: [{ width: 256, height: 256, crop: "fill", gravity: "face" }],
+      },
+      (error, result) => {
+        if (error || !result) {
+          logger.error("[Cloudinary] Profile picture upload failed", { error, filename, userId });
+          return reject(error || new Error("Upload returned no result"));
+        }
+        logger.info("[Cloudinary] Profile picture uploaded", { publicId: result.public_id });
+        resolve({ publicId: result.public_id, secureUrl: result.secure_url });
+      }
+    );
+
+    const readable = new Readable();
+    readable.push(buffer);
+    readable.push(null);
+    readable.pipe(uploadStream);
+  });
+}
+
 export async function getDocumentBuffer(cloudinaryUrl: string): Promise<Buffer> {
   const response = await fetch(cloudinaryUrl);
   if (!response.ok) {

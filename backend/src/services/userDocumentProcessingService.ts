@@ -32,7 +32,10 @@ async function extractText(buffer: Buffer, mimeType: string): Promise<string> {
   if (mimeType === "text/plain") {
     return buffer.toString("utf-8");
   }
-  if (mimeType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") {
+  if (
+    mimeType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+    mimeType === "application/vnd.ms-excel"
+  ) {
     return extractTextFromXlsx(buffer);
   }
   if (mimeType === "application/vnd.openxmlformats-officedocument.presentationml.presentation") {

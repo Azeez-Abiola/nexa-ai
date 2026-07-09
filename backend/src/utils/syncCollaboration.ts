@@ -9,6 +9,66 @@ import { ConversationCollaboration } from "../models/ConversationCollaboration";
  *
  * Fire-and-forget — never throws; errors are logged and swallowed.
  */
+/**
+ * Resolve the full collaboration cluster for a conversation group so callers can scope
+ * queries (e.g. session-document retrieval) across every participant, not just the requester.
+ *
+ * Collaborators each hold their own forked group under their own userId, so a document one
+ * person attaches is stored under (theirUserId, theirGroupId). To let the whole group's AI
+ * see it, we gather every (userId, groupId) pair in the cluster.
+ *
+ * For a non-collaborative conversation this returns just the single pair, so behaviour is
+ * unchanged. Never throws — on error it falls back to the single pair.
+ */
+export async function getConversationCluster(
+  groupId: string,
+  currentUserId: string
+): Promise<{ userIds: string[]; sessionIds: string[] }> {
+  const userIds = new Set<string>([currentUserId]);
+  const sessionIds = new Set<string>([groupId]);
+  try {
+    const direct = await ConversationCollaboration.find({
+      $or: [{ ownerGroupId: groupId }, { collaboratorGroupId: groupId }],
+    }).lean();
+
+    if (direct.length > 0) {
+      const ownerGroupIds = [...new Set(direct.map((c) => c.ownerGroupId))];
+      const cluster = await ConversationCollaboration.find({
+        ownerGroupId: { $in: ownerGroupIds },
+      }).lean();
+      for (const c of cluster) {
+        sessionIds.add(c.ownerGroupId);
+        sessionIds.add(c.collaboratorGroupId);
+        userIds.add(c.ownerId.toString());
+        userIds.add(c.collaboratorId.toString());
+      }
+    }
+  } catch (err) {
+    console.error("[syncCollaboration] getConversationCluster error:", (err as Error).message);
+  }
+  return { userIds: [...userIds], sessionIds: [...sessionIds] };
+}
+
+/** Canonical room id for ephemeral signals (typing) across a collaboration cluster. */
+export async function getCollaborationRoomId(groupId: string): Promise<string | null> {
+  try {
+    const direct = await ConversationCollaboration.findOne({
+      $or: [{ ownerGroupId: groupId }, { collaboratorGroupId: groupId }],
+    })
+      .select("ownerGroupId")
+      .lean();
+    return direct?.ownerGroupId ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** True when the user belongs to a multi-participant collaboration cluster. */
+export async function isCollaborationParticipant(groupId: string, userId: string): Promise<boolean> {
+  const cluster = await getConversationCluster(groupId, userId);
+  return cluster.userIds.length > 1 || cluster.sessionIds.length > 1;
+}
+
 export async function syncToCollaborators(
   sourceGroupId: string,
   newMessages: Partial<ChatMessage>[]

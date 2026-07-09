@@ -54,7 +54,7 @@ async function keywordSearch(query: string, businessUnit: string): Promise<any[]
 // Only fetch from Google when the query signals a need for current/recent information.
 // Everything else (math, general knowledge, greetings, company questions) is answered
 // by the model's training data or the internal KB — Google just adds 5-8s of latency.
-const NEEDS_WEB_RE = /\b(news|latest|current|today|yesterday|this week|this month|recent|now|live|update|price|stock|weather|score|result|winner|election|announce|release|launch|2024|2025|2026)\b|\b(who is|who are|who was|what happened|where is|when did|tell me about)\b/i;
+const NEEDS_WEB_RE = /\b(news|latest|current|today|yesterday|this week|this month|recent|now|live|update|price|stock|weather|score|result|winner|election|announce|release|launch|research|compare|versus|\bvs\b|2024|2025|2026)\b|\b(who is|who are|who was|what happened|where is|when did|tell me about|look up|find out)\b/i;
 
 function needsWebSearch(query: string): boolean {
   return NEEDS_WEB_RE.test(query);
@@ -109,20 +109,28 @@ export async function buildContextForQuery(
     }
   }
 
-  // Google only runs when the KB (RAG + strong keyword) produced nothing. Skipped for access-denied
-  // too, since the user's answer should come from the company source and not a public fallback.
-  // Hard 3s ceiling: SerpAPI has no built-in timeout and enrichment fetches real pages — together
-  // they can take 6–8s. If they don't finish in 3s, skip Google and let the model answer from
-  // training data (acceptable for general-knowledge queries; RAG answers are already fast).
-  const GOOGLE_TOTAL_TIMEOUT_MS = 3_000;
+  // Web search runs for time-sensitive queries (useGoogle) when the internal KB is NOT a strong
+  // match. Previously ANY RAG hit ≥0.65 blocked Google, so a tangential internal chunk would kill
+  // web research for genuinely current-events questions ("latest ... 2026"). Now we only treat the
+  // KB as authoritative-enough-to-skip-web when the top RAG chunk clears a higher bar; otherwise we
+  // still fetch the web and hand the model both, letting it prefer the fresh results for recency.
+  // Hard 6s ceiling: SerpAPI has no built-in timeout and enrichment fetches real pages. If it
+  // doesn't finish in time we fall back to whatever KB context we have (or training data).
+  const GOOGLE_TOTAL_TIMEOUT_MS = 8_000;
+  const STRONG_KB_SCORE = 0.8;
+  const topRagScore = ragChunks[0]?.score ?? 0;
   const kbEmpty = ragChunks.length === 0 && policies.length === 0;
-  if (useGoogle && kbEmpty && !accessDenied) {
+  const kbStrong = topRagScore >= STRONG_KB_SCORE || policies.length > 0;
+  if (useGoogle && !kbStrong && !accessDenied) {
     try {
       const googlePromise = (async () => {
         const googleOutcome = await searchGoogle(query, 3);
         if (googleOutcome?.success && googleOutcome.results?.length) {
           googleResults = await enrichResultsWithPageContent(googleOutcome.results);
-          source = "google_only";
+          // Only label the whole answer as web-sourced when the KB contributed nothing;
+          // if we're augmenting weak RAG chunks, keep source="rag" so the prompt still
+          // frames the internal docs correctly while the web block rides along.
+          if (kbEmpty) source = "google_only";
         }
       })();
       const timeoutPromise = new Promise<never>((_, reject) =>

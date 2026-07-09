@@ -6,7 +6,7 @@ import {
   BiUserCircle, BiCog, BiMessageSquareAdd, BiSearch, BiImage, BiCodeBlock,
   BiBoltCircle, BiShareAlt, BiHelpCircle, BiChevronDown,
   BiUpArrowAlt, BiMessageRounded, BiPlus, BiDotsHorizontalRounded,
-  BiPaperclip, BiMicrophone, BiMoon, BiSun, BiCamera, BiCopy, BiCheck
+  BiPaperclip, BiMicrophone, BiMoon, BiSun, BiCamera, BiCopy, BiCheck, BiLink
 } from "react-icons/bi";
 import { MdPushPin, MdAutoAwesome, MdCreateNewFolder, MdFolder, MdFolderOpen } from "react-icons/md";
 import { FiLogOut, FiDownload, FiTrash2, FiExternalLink, FiFileText } from "react-icons/fi";
@@ -72,6 +72,8 @@ interface Conversation {
   messages: Message[];
   createdAt: string;
   updatedAt: string;
+  /** True when this conversation has multiple participants (group chat). */
+  isCollaborative?: boolean;
   /** True when viewing a conversation shared with this user — input is hidden and edits are disabled. */
   isShared?: boolean;
   /** When isShared, who shared it. */
@@ -108,6 +110,7 @@ interface User {
   fullName: string;
   businessUnit: string;
   grade?: string;
+  profilePicture?: string | null;
   tenantLabel?: string;
   tenantContactEmail?: string;
   tenantId?: string;
@@ -120,9 +123,30 @@ interface User {
 
 type View = "chat" | "admin";
 
-/** Document types for the chat “Files” picker (images use Camera / Photos). */
+/**
+ * Document types for the chat “Files” picker (images use Camera / Photos).
+ * Kept in sync with the backend's ALLOWED_MIME_TYPES so users don't hit an opaque
+ * 400. Legacy binary .doc/.ppt are intentionally excluded (the backend parsers
+ * only read the modern OOXML formats); legacy .xls IS supported via SheetJS.
+ */
 const CHAT_DOCUMENT_ACCEPT =
-  ".pdf,.doc,.docx,.txt,.csv,.xlsx,.xls,.ppt,.pptx,.ppt,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  ".pdf,.docx,.txt,.csv,.xlsx,.xls,.pptx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/plain,text/csv";
+
+/** Extensions the backend can actually parse (documents + images). */
+const SUPPORTED_UPLOAD_EXTENSIONS = [
+  "pdf", "docx", "txt", "csv", "xlsx", "xls", "pptx",
+  "jpg", "jpeg", "png", "gif", "webp",
+];
+/** Must match backend defaults in rateLimiter/multer config. */
+const MAX_UPLOAD_FILE_SIZE_MB = 10;
+const MAX_UPLOAD_FILES_PER_MESSAGE = 5;
+
+function formatCollabTypingLabel(typers: { name: string }[]): string {
+  const names = typers.map((t) => t.name.split(/\s+/)[0] || t.name);
+  if (names.length === 1) return `${names[0]} is typing…`;
+  if (names.length === 2) return `${names[0]} and ${names[1]} are typing…`;
+  return `${names[0]} and ${names.length - 1} others are typing…`;
+}
 
 function applyTenantBrandFromSession(tenantColor: string | undefined) {
   const brandHex = normalizeHexToRrggbb(tenantColor);
@@ -248,12 +272,16 @@ export const App: React.FC = () => {
   const [accessRequestStatus, setAccessRequestStatus] = useState<Record<string, 'idle'|'pending'|'accepted'|'rejected'>>({});
 
   // @mention state
-  const [buUsers, setBuUsers] = useState<{_id: string; fullName: string; email: string}[]>([]);
+  const [buUsers, setBuUsers] = useState<{_id: string; fullName: string; email: string; profilePicture?: string | null; isAdmin?: boolean}[]>([]);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  // Index of the highlighted option in the @mention autocomplete dropdown (keyboard nav).
+  const [mentionActiveIndex, setMentionActiveIndex] = useState(0);
   const [pendingMentions, setPendingMentions] = useState<{userId: string; name: string}[]>([]);
-  const [mentionedConversations, setMentionedConversations] = useState<{mentionId: string; mentionerName: string; conversation: Conversation}[]>([]);
+  const [mentionedConversations, setMentionedConversations] = useState<{mentionId: string; mentionerName: string; conversation: Conversation; participants?: {id: string; name: string; profilePicture?: string | null}[]}[]>([]);
   const [isSharedConvCollapsed, setIsSharedConvCollapsed] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const lastTypingPingRef = useRef(0);
+  const [collaborativeTypers, setCollaborativeTypers] = useState<{ userId: string; name: string }[]>([]);
 
   const [folders, setFolders] = useState<ConversationFolder[]>([]);
   const [expandedFolderIds, setExpandedFolderIds] = useState<Set<string>>(new Set());
@@ -275,6 +303,10 @@ export const App: React.FC = () => {
   // Admin is a separate page at /admin
   const [view, setView] = useState<View>("chat");
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
+  // Screen-fixed anchor for the currently open conversation/folder kebab dropdown.
+  // Using fixed positioning lets the dropdown escape the sidebar's scroll container
+  // (overflow:auto) and the footer, which were clipping/covering it.
+  const [menuAnchor, setMenuAnchor] = useState<{ left: number; top?: number; bottom?: number } | null>(null);
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     return (localStorage.getItem('nexa-theme') as 'light' | 'dark') || 'light';
   });
@@ -287,6 +319,7 @@ export const App: React.FC = () => {
   const [isHistoryCollapsed, setIsHistoryCollapsed] = useState(false);
   const [isHomeRecentCollapsed, setIsHomeRecentCollapsed] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
+  const [attachError, setAttachError] = useState<string | null>(null);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
   const [selectedModel, setSelectedModel] = useState<"gpt" | "claude" | "kimi" | "deepseek">("gpt");
   const [webcamOpen, setWebcamOpen] = useState(false);
@@ -302,6 +335,8 @@ export const App: React.FC = () => {
   const copyFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+  // Aborts the in-flight streaming generation when the user hits "stop".
+  const abortControllerRef = useRef<AbortController | null>(null);
   const isAdminPage = location.pathname.startsWith('/admin');
   const isSuperAdminPage = location.pathname.startsWith('/super-admin');
   const isUserChatProfile = location.pathname === "/user-chat/profile";
@@ -309,6 +344,175 @@ export const App: React.FC = () => {
   const userInitials = user
     ? `${user.fullName?.split(' ').map(n => n[0]).join('').toUpperCase() || ""}`
     : "";
+
+  // Initials fallback for any display name (used when no profile picture is set).
+  const initialsOf = (name?: string | null) =>
+    (name || '?').split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+
+  // Small circular avatar (picture or initials) for sidebar shared/group entries.
+  const renderMiniAvatar = (
+    person: { name?: string | null; profilePicture?: string | null },
+    key?: React.Key
+  ) =>
+    person.profilePicture ? (
+      <img
+        key={key}
+        className="mini-avatar"
+        src={person.profilePicture}
+        alt={person.name || ''}
+        title={person.name || ''}
+      />
+    ) : (
+      <span key={key} className="mini-avatar mini-avatar--initials" title={person.name || ''}>
+        {initialsOf(person.name)}
+      </span>
+    );
+
+  // Map of userId → profile picture for quickly resolving avatars of message senders
+  // and mentions. Includes the current user so their own avatar renders too.
+  const avatarById = React.useMemo(() => {
+    const map = new Map<string, string>();
+    for (const u of buUsers) {
+      if (u.profilePicture) map.set(String(u._id), u.profilePicture);
+    }
+    if (user?.id && user.profilePicture) map.set(String(user.id), user.profilePicture);
+    return map;
+  }, [buUsers, user?.id, user?.profilePicture]);
+
+  const isActiveGroupChat = React.useMemo(() => {
+    if (!currentConversation || currentConversation.isShared) return false;
+    if (currentConversation.isCollaborative) return true;
+    if (mentionedConversations.some((m) => String(m.conversation._id) === currentConversation._id)) return true;
+    if (pendingMentions.length > 0) return true;
+    return (currentConversation.messages ?? []).some(
+      (m) => m.senderId && String(m.senderId) !== String(user?.id)
+    );
+  }, [currentConversation, mentionedConversations, pendingMentions.length, user?.id]);
+
+  const notifyCollaborativeTyping = useCallback(() => {
+    if (!isActiveGroupChat || !token || !currentConversation?._id) return;
+    const now = Date.now();
+    if (now - lastTypingPingRef.current < 2500) return;
+    lastTypingPingRef.current = now;
+    axios
+      .post(`/api/v1/conversations/${currentConversation._id}/typing`, {}, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      .catch(() => {});
+  }, [isActiveGroupChat, token, currentConversation?._id]);
+
+  const stopCollaborativeTyping = useCallback(() => {
+    if (!token || !currentConversation?._id) return;
+    lastTypingPingRef.current = 0;
+    axios
+      .delete(`/api/v1/conversations/${currentConversation._id}/typing`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      .catch(() => {});
+  }, [token, currentConversation?._id]);
+
+  const handleComposerInput = (val: string, el: HTMLTextAreaElement, maxHeight: number) => {
+    setInput(val);
+    autoGrowTextarea(el, maxHeight);
+    if (val.trim()) notifyCollaborativeTyping();
+    else stopCollaborativeTyping();
+    const cursor = el.selectionStart ?? val.length;
+    const textBefore = val.slice(0, cursor);
+    const match = textBefore.match(/@([^@\s]*)$/);
+    if (match) {
+      setMentionQuery(match[1]);
+      setMentionActiveIndex(0);
+    } else {
+      setMentionQuery(null);
+    }
+  };
+
+  // @mention autocomplete: users whose name/email match the current query.
+  // Names that START WITH the query are ranked first so the top match lines up
+  // with the inline ghost-text completion.
+  const getMentionMatches = (query: string) => {
+    const q = query.toLowerCase();
+    return buUsers
+      .filter(
+        u =>
+          u.fullName.toLowerCase().includes(q) ||
+          u.email.toLowerCase().includes(q)
+      )
+      .sort((a, b) => {
+        const ap = a.fullName.toLowerCase().startsWith(q) ? 0 : 1;
+        const bp = b.fullName.toLowerCase().startsWith(q) ? 0 : 1;
+        if (ap !== bp) return ap - bp;
+        return a.fullName.localeCompare(b.fullName);
+      })
+      .slice(0, 6);
+  };
+
+  // Inline ghost-text completion for the current @query. Shows the remainder of
+  // the best prefix match in grey so the user can accept it with Enter/Tab.
+  const mentionMatches = mentionQuery !== null ? getMentionMatches(mentionQuery) : [];
+  const mentionGhostSuffix = (() => {
+    if (!mentionQuery) return "";
+    const top = mentionMatches[0];
+    if (!top || !top.fullName.toLowerCase().startsWith(mentionQuery.toLowerCase())) return "";
+    // Only show the ghost while the @query sits at the very end of the input.
+    if (!/@[^@\s]*$/.test(input)) return "";
+    return top.fullName.slice(mentionQuery.length);
+  })();
+
+  // Insert the selected mention into the input, replacing the partial "@query".
+  const selectMention = (u: { _id: string; fullName: string }) => {
+    const atIdx = input.lastIndexOf('@');
+    const newInput = (atIdx >= 0 ? input.slice(0, atIdx) : input) + `@${u.fullName} `;
+    setInput(newInput);
+    setPendingMentions(prev =>
+      prev.some(m => m.userId === u._id) ? prev : [...prev, { userId: u._id, name: u.fullName }]
+    );
+    setMentionQuery(null);
+    setMentionActiveIndex(0);
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  };
+
+  // Compute a screen-fixed anchor for a kebab dropdown from the clicked button.
+  // Opens downward normally, but flips upward when there isn't enough room below
+  // (e.g. sessions near the bottom, above the dark-mode/settings/logout footer).
+  const computeMenuAnchor = (e: React.MouseEvent): { left: number; top?: number; bottom?: number } => {
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const DROPDOWN_W = 180;
+    const DROPDOWN_H = 260;
+    const left = Math.max(8, Math.min(rect.right - DROPDOWN_W, window.innerWidth - DROPDOWN_W - 8));
+    const openUp = rect.bottom + DROPDOWN_H > window.innerHeight;
+    return openUp
+      ? { left, bottom: Math.max(8, window.innerHeight - rect.top + 4) }
+      : { left, top: rect.bottom + 4 };
+  };
+
+  // Toggle a kebab menu open/closed, capturing its anchor position when opening.
+  const toggleConvMenu = (
+    e: React.MouseEvent,
+    id: string,
+    isOpen: boolean,
+    setId: (v: string | null) => void
+  ) => {
+    e.stopPropagation();
+    if (isOpen) {
+      setId(null);
+      setMenuAnchor(null);
+    } else {
+      setId(id);
+      setMenuAnchor(computeMenuAnchor(e));
+    }
+  };
+
+  const convMenuStyle: React.CSSProperties | undefined = menuAnchor
+    ? {
+        position: "fixed",
+        left: menuAnchor.left,
+        top: menuAnchor.top ?? "auto",
+        bottom: menuAnchor.bottom ?? "auto",
+        right: "auto",
+        zIndex: 200,
+      }
+    : undefined;
 
   // Helper function to scroll to bottom with multiple RAF attempts
   const scrollToBottom = (force: boolean = false) => {
@@ -375,9 +579,7 @@ export const App: React.FC = () => {
   // Poll current conversation for new messages from collaborators
   useEffect(() => {
     if (!currentConversation?._id || currentConversation.isShared || loading || !token) return;
-    // Only poll if conversation has any message with a senderId (collaborative)
-    const isCollab = currentConversation.messages?.some(m => m.senderId);
-    if (!isCollab) return;
+    if (!isActiveGroupChat) return;
     const interval = setInterval(async () => {
       try {
         const { data } = await axios.get(
@@ -387,14 +589,37 @@ export const App: React.FC = () => {
         const fresh = data.conversation;
         if (fresh && fresh.messages?.length > (currentConversation.messages?.length ?? 0)) {
           setCurrentConversation(prev => prev && prev._id === fresh._id
-            ? { ...prev, messages: fresh.messages }
+            ? { ...prev, messages: fresh.messages, isCollaborative: data.isCollaborative ?? prev.isCollaborative }
             : prev
           );
         }
       } catch { /* silent */ }
     }, 8000);
     return () => clearInterval(interval);
-  }, [currentConversation?._id, currentConversation?.messages?.length, loading, token]);
+  }, [currentConversation?._id, currentConversation?.messages?.length, loading, token, isActiveGroupChat]);
+
+  // Poll for "X is typing…" in group conversations
+  useEffect(() => {
+    if (!isActiveGroupChat || !currentConversation?._id || !token || currentConversation.isShared) {
+      setCollaborativeTypers([]);
+      return;
+    }
+    let cancelled = false;
+    const fetchTypers = async () => {
+      try {
+        const { data } = await axios.get(
+          `/api/v1/conversations/${currentConversation._id}/typing`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        if (!cancelled) setCollaborativeTypers(data.typers || []);
+      } catch {
+        if (!cancelled) setCollaborativeTypers([]);
+      }
+    };
+    fetchTypers();
+    const interval = setInterval(fetchTypers, 2500);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [isActiveGroupChat, currentConversation?._id, token, currentConversation?.isShared]);
 
   // Poll for accepted/rejected access requests
   useEffect(() => {
@@ -638,6 +863,9 @@ export const App: React.FC = () => {
         fetchMentionedConversations();
       } catch { /* silent — duplicate mention etc */ }
     }
+    setCurrentConversation((prev) =>
+      prev && prev._id === convId ? { ...prev, isCollaborative: true } : prev
+    );
   }
 
   async function handleAccessRequest(convId: string, sharerId: string) {
@@ -1204,7 +1432,10 @@ export const App: React.FC = () => {
       );
     } catch (error) {
       console.error("Edit message error:", error);
-      alert("Failed to edit message");
+      // Rate-limit hits are surfaced by the RateLimitBanner, not an alert.
+      if (!(axios.isAxiosError(error) && error.response?.status === 429)) {
+        alert("Failed to edit message");
+      }
     } finally {
       setEditModalOpen(false);
       setEditingMessageIndex(null);
@@ -1256,9 +1487,13 @@ export const App: React.FC = () => {
       body = JSON.stringify({ content: userContent, model });
     }
 
+    // Fresh AbortController for this generation so the user can stop it.
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     const response = await fetch(
       `${apiBase}/api/v1/conversations/${conversationId}/message-stream`,
-      { method: "POST", headers, body }
+      { method: "POST", headers, body, signal: controller.signal }
     );
 
     // Always record the latest quota so the banner can warn as it runs low.
@@ -1271,7 +1506,15 @@ export const App: React.FC = () => {
     }
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      // Prefer the backend's JSON error (e.g. multer "Only PDF, DOCX… files are allowed",
+      // file-too-large, session cap) so the user sees an actionable message.
+      let backendMsg = "";
+      try {
+        const data = await response.clone().json();
+        backendMsg = data?.error || "";
+      } catch { /* not JSON */ }
+      if (backendMsg && hasFiles) setAttachError(backendMsg);
+      throw new Error(backendMsg || `HTTP ${response.status}: ${response.statusText}`);
     }
 
     if (!response.body) {
@@ -1303,6 +1546,26 @@ export const App: React.FC = () => {
                 // Capture final conversation data from server
                 if (data.conversation) {
                   finalConversation = data.conversation;
+                }
+                // Surface any per-file upload failures the backend reported so the
+                // user isn't left thinking a document was analyzed when it wasn't.
+                if (Array.isArray(data.uploadedDocuments)) {
+                  const failed = data.uploadedDocuments
+                    .filter((d: { status?: string }) => d?.status === "failed")
+                    .map((d: { fileName?: string }) => d.fileName)
+                    .filter(Boolean);
+                  const extractionFailed = data.uploadedDocuments
+                    .filter((d: { extractionFailed?: boolean }) => d?.extractionFailed)
+                    .map((d: { fileName?: string }) => d.fileName)
+                    .filter(Boolean);
+                  const notices: string[] = [];
+                  if (failed.length > 0) {
+                    notices.push(`These files couldn't be uploaded: ${failed.join(", ")}.`);
+                  }
+                  if (extractionFailed.length > 0) {
+                    notices.push(`Couldn't read text from: ${extractionFailed.join(", ")}. Try a text-based PDF/DOCX or re-upload.`);
+                  }
+                  if (notices.length > 0) setAttachError(notices.join(" "));
                 }
                 return finalConversation;
               }
@@ -1368,7 +1631,14 @@ export const App: React.FC = () => {
               // Scroll to show the streaming response
               scrollToBottom(false);
             } catch (error) {
-              console.error("Error parsing stream data:", error);
+              // Only swallow malformed-JSON fragments (SSE chunks can split mid-line).
+              // Real errors — a thrown `data.error` or an abort — must propagate so the
+              // user actually sees that generation failed instead of a stuck placeholder.
+              if (error instanceof SyntaxError) {
+                console.error("Error parsing stream data:", error);
+              } else {
+                throw error;
+              }
             }
           }
         }
@@ -1376,8 +1646,33 @@ export const App: React.FC = () => {
         // Keep incomplete line in buffer
         buffer = lines[lines.length - 1];
       }
+    } catch (err) {
+      // User pressed "stop" — keep whatever streamed so far, don't surface an error,
+      // and replace the "Generating response…" placeholder with a clear stopped notice.
+      if ((err as Error)?.name === "AbortError") {
+        setCurrentConversation((prev) => {
+          if (!prev) return prev;
+          const msgs = [...prev.messages];
+          const last = msgs[msgs.length - 1];
+          const hasPartial = !!fullResponse && !!fullResponse.trim();
+          if (last && last.role === "assistant") {
+            msgs[msgs.length - 1] = {
+              ...last,
+              content: hasPartial
+                ? `${fullResponse}\n\n*Response generation stopped*`
+                : "*Response generation stopped*",
+            };
+          } else {
+            msgs.push({ role: "assistant" as const, content: "*Response generation stopped*", timestamp: new Date() });
+          }
+          return { ...prev, messages: msgs };
+        });
+        return finalConversation;
+      }
+      throw err;
     } finally {
       reader.releaseLock();
+      abortControllerRef.current = null;
     }
 
     return finalConversation;
@@ -1422,13 +1717,57 @@ export const App: React.FC = () => {
 
   const handleFileAttach = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
-    if (files.length > 0) {
-      setAttachedFiles((prev) => [...prev, ...files]);
+    const resetInputs = () => {
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      if (cameraInputRef.current) cameraInputRef.current.value = "";
+      if (photosInputRef.current) photosInputRef.current.value = "";
+    };
+
+    if (files.length === 0) {
+      resetInputs();
+      return;
+    }
+
+    // Validate up front so users get a clear message instead of an opaque HTTP 400
+    // once the upload reaches the backend's multer limits.
+    const maxBytes = MAX_UPLOAD_FILE_SIZE_MB * 1024 * 1024;
+    const accepted: File[] = [];
+    const rejected: string[] = [];
+
+    for (const file of files) {
+      const ext = file.name.split(".").pop()?.toLowerCase() || "";
+      const isImage = file.type.startsWith("image/");
+      const typeOk = isImage || SUPPORTED_UPLOAD_EXTENSIONS.includes(ext);
+      if (!typeOk) {
+        rejected.push(`${file.name} (unsupported type)`);
+        continue;
+      }
+      if (file.size > maxBytes) {
+        rejected.push(`${file.name} (over ${MAX_UPLOAD_FILE_SIZE_MB}MB)`);
+        continue;
+      }
+      accepted.push(file);
+    }
+
+    let capNotice = "";
+    let toAdd = accepted;
+    const room = MAX_UPLOAD_FILES_PER_MESSAGE - attachedFiles.length;
+    if (accepted.length > room) {
+      toAdd = accepted.slice(0, Math.max(0, room));
+      capNotice = `You can attach up to ${MAX_UPLOAD_FILES_PER_MESSAGE} files per message.`;
+    }
+
+    if (toAdd.length > 0) {
+      setAttachedFiles((prev) => [...prev, ...toAdd]);
       setAttachMenuOpen(false);
     }
-    if (fileInputRef.current) fileInputRef.current.value = "";
-    if (cameraInputRef.current) cameraInputRef.current.value = "";
-    if (photosInputRef.current) photosInputRef.current.value = "";
+
+    const messages: string[] = [];
+    if (rejected.length > 0) messages.push(`Couldn't attach: ${rejected.join(", ")}.`);
+    if (capNotice) messages.push(capNotice);
+    setAttachError(messages.length > 0 ? messages.join(" ") : null);
+
+    resetInputs();
   };
 
   useEffect(() => {
@@ -1456,6 +1795,7 @@ export const App: React.FC = () => {
 
   const removeAttachedFile = (index: number) => {
     setAttachedFiles(prev => prev.filter((_, i) => i !== index));
+    setAttachError(null);
   };
 
   const copyMessageText = async (text: string, messageIndex: number) => {
@@ -1477,6 +1817,13 @@ export const App: React.FC = () => {
   // Hard block: hourly/minute quota exhausted and not yet refreshed.
   const isRateLimited = !!rateLimit && rateLimit.remaining <= 0 && rateLimit.resetAt > Date.now();
 
+  // Stop an in-progress AI generation. The stream reader's abort is handled
+  // gracefully in streamResponse (partial text is kept).
+  const handleStop = () => {
+    abortControllerRef.current?.abort();
+    setLoading(false);
+  };
+
   const handleSend = async () => {
     const trimmed = input.trim();
     if (!trimmed && attachedFiles.length === 0) return;
@@ -1490,7 +1837,9 @@ export const App: React.FC = () => {
     const filesToSend = [...attachedFiles];
     setInput("");
     setAttachedFiles([]);
+    setAttachError(null);
     setMentionQuery(null);
+    stopCollaborativeTyping();
 
     if (isMentionOnly && trimmed) {
       const userMsg: Message = { role: "user", content: trimmed, timestamp: new Date() };
@@ -1562,8 +1911,8 @@ export const App: React.FC = () => {
         }
       } catch (error) {
         console.error("Send message error:", error);
-        // Rate-limit hits are surfaced by the RateLimitBanner, not an alert.
-        if (!(error as { rateLimited?: boolean })?.rateLimited) {
+        // Rate-limit hits (banner) and user-initiated stops (AbortError) are not errors.
+        if (!(error as { rateLimited?: boolean })?.rateLimited && (error as Error)?.name !== "AbortError") {
           alert("Error sending message. Please try again.");
         }
       } finally {
@@ -1592,7 +1941,10 @@ export const App: React.FC = () => {
       }
     } catch (error) {
       console.error("Send message error:", error);
-      alert("Error sending message. Please try again.");
+      // Rate-limit hits (banner) and user-initiated stops (AbortError) are not errors.
+      if (!(error as { rateLimited?: boolean })?.rateLimited && (error as Error)?.name !== "AbortError") {
+        alert("Error sending message. Please try again.");
+      }
     } finally {
       setLoading(false);
     }
@@ -1856,16 +2208,15 @@ export const App: React.FC = () => {
           {(folderMenuId || activeMenuId) && (
             <div
               style={{ position: 'fixed', inset: 0, zIndex: 90 }}
-              onClick={() => { setFolderMenuId(null); setActiveMenuId(null); setFolderSubMenuConvId(null); }}
+              onClick={() => { setFolderMenuId(null); setActiveMenuId(null); setFolderSubMenuConvId(null); setMenuAnchor(null); }}
             />
           )}
           <div className="sidebar-conversations-v2">
             {/* ── Folders ── */}
             {(() => {
-              const allFolderedIds = new Set([
-                ...folders.flatMap(f => f.conversationIds),
-                ...mentionedConversations.map(m => String(m.conversation._id)),
-              ]);
+              // Group/mentioned conversations live in their own section, so they're the
+              // only things excluded from Recent. Foldered chats still appear in Recent.
+              const mentionedConvIds = new Set(mentionedConversations.map(m => String(m.conversation._id)));
               return (
                 <>
                   <div className="sidebar-section-label retractable" style={{ justifyContent: 'space-between' }}>
@@ -1935,13 +2286,13 @@ export const App: React.FC = () => {
                           <span className="folder-count">{folder.conversationIds.length}</span>
                           <button
                             className="conv-menu-btn"
-                            onClick={e => { e.stopPropagation(); setFolderMenuId(folderMenuId === folder._id ? null : folder._id); }}
+                            onClick={e => toggleConvMenu(e, folder._id, folderMenuId === folder._id, setFolderMenuId)}
                           >
                             <BiDotsHorizontalRounded size={15} />
                           </button>
                           {folderMenuId === folder._id && (
-                            <div className="conv-dropdown" onClick={e => e.stopPropagation()}>
-                              <button onClick={() => { setRenamingFolderId(folder._id); setRenameFolderName(folder.name); setFolderMenuId(null); }}>Rename</button>
+                            <div className="conv-dropdown" style={convMenuStyle} onClick={e => e.stopPropagation()}>
+                              <button onClick={() => { setRenamingFolderId(folder._id); setRenameFolderName(folder.name); setFolderMenuId(null); setMenuAnchor(null); }}>Rename</button>
                               <button style={{ color: '#ef4444' }} onClick={() => handleDeleteFolder(folder._id)}>Delete folder</button>
                             </div>
                           )}
@@ -1957,11 +2308,11 @@ export const App: React.FC = () => {
                             }}
                           >
                             <div className="conv-title-v2">{conv.title}</div>
-                            <button className="conv-menu-btn visible" onClick={e => { e.stopPropagation(); setActiveMenuId(activeMenuId === conv._id ? null : conv._id); }}>
+                            <button className="conv-menu-btn visible" onClick={e => toggleConvMenu(e, conv._id, activeMenuId === conv._id, setActiveMenuId)}>
                               <BiDotsHorizontalRounded size={18} />
                             </button>
                             {activeMenuId === conv._id && (
-                              <div className="conv-dropdown">
+                              <div className="conv-dropdown" style={convMenuStyle} onClick={e => e.stopPropagation()}>
                                 <button onClick={e => { handleOpenShareModal(conv._id, e as any); }}>Share</button>
                                 <button onClick={() => handleRemoveFromFolder(folder._id, conv._id)}>Remove from folder</button>
                                 <button onClick={e => { handleContextMenuDelete(conv._id, e as any); setActiveMenuId(null); }}>Delete</button>
@@ -1992,14 +2343,21 @@ export const App: React.FC = () => {
                             key={String(m.mentionId)}
                             className={`sidebar-conversation-v2 folder-conv ${currentConversation?._id === String(m.conversation._id) ? 'active' : ''}`}
                             onClick={() => {
-                              setCurrentConversation({ ...m.conversation, _id: String(m.conversation._id) });
+                              setCurrentConversation({ ...m.conversation, _id: String(m.conversation._id), isCollaborative: true });
                               if (location.pathname !== '/user-chat') navigate('/user-chat');
                               if (window.innerWidth <= 768) setSidebarOpen(false);
                             }}
-                            style={{ cursor: 'pointer' }}
+                            style={{ cursor: 'pointer', flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}
                           >
                             <div className="conv-title-v2">{m.conversation.title}</div>
-                            <div style={{ fontSize: 10, opacity: 0.6, paddingLeft: 2 }}>From {m.mentionerName}</div>
+                            {m.participants && m.participants.length > 0 && (
+                              <div className="mini-avatar-row" title={m.participants.map(p => p.name).join(', ')}>
+                                {m.participants.slice(0, 5).map((p) => renderMiniAvatar(p, p.id))}
+                                {m.participants.length > 5 && (
+                                  <span className="mini-avatar mini-avatar--more">+{m.participants.length - 5}</span>
+                                )}
+                              </div>
+                            )}
                           </div>
                         ))
                     )}
@@ -2024,8 +2382,11 @@ export const App: React.FC = () => {
                             style={{ cursor: 'pointer' }}
                           >
                             <div className="conv-title-v2">{s.singleMessage ? "💬 " : ""}{s.conversation.title}</div>
-                            <div style={{ fontSize: 10, opacity: 0.6, paddingLeft: 2 }}>
-                              {s.sharedBy?.fullName || s.sharedBy?.email || "Someone"}
+                            <div className="mini-avatar-row" style={{ marginLeft: 'auto' }}>
+                              {renderMiniAvatar({
+                                name: s.sharedBy?.fullName || s.sharedBy?.email || "Someone",
+                                profilePicture: s.sharedBy?.userId ? avatarById.get(String(s.sharedBy.userId)) : undefined,
+                              })}
                             </div>
                           </div>
                         ))
@@ -2041,8 +2402,10 @@ export const App: React.FC = () => {
                     <BiChevronDown style={{ transform: isHistoryCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }} />
                   </div>
                   {!isHistoryCollapsed && (() => {
-                    const unfiled = conversations.filter(c => !allFolderedIds.has(c._id));
-                    const sorted = [...unfiled].sort((a, b) => {
+                    // Recent shows every conversation (including ones filed into folders);
+                    // only the separate group-conversation entries are excluded.
+                    const recent = conversations.filter(c => !mentionedConvIds.has(c._id));
+                    const sorted = [...recent].sort((a, b) => {
                       const aPinned = pinnedConversations.has(a._id);
                       const bPinned = pinnedConversations.has(b._id);
                       if (aPinned !== bPinned) return aPinned ? -1 : 1;
@@ -2052,7 +2415,7 @@ export const App: React.FC = () => {
                       <div className="sidebar-empty">No conversations yet</div>
                     ) : (
                       <AnimatePresence initial={false}>
-                        {sorted.slice(0, 10).map((conv) => (
+                        {sorted.map((conv) => (
                           <motion.div
                             layout
                             key={conv._id}
@@ -2069,11 +2432,11 @@ export const App: React.FC = () => {
                           >
                             {pinnedConversations.has(conv._id) && <MdPushPin size={16} className="pin-active-icon mr-2 flex-shrink-0" />}
                             <div className="conv-title-v2">{conv.title}</div>
-                            <button className="conv-menu-btn visible" onClick={e => { e.stopPropagation(); setActiveMenuId(activeMenuId === conv._id ? null : conv._id); setFolderSubMenuConvId(null); }}>
+                            <button className="conv-menu-btn visible" onClick={e => { setFolderSubMenuConvId(null); toggleConvMenu(e, conv._id, activeMenuId === conv._id, setActiveMenuId); }}>
                               <BiDotsHorizontalRounded size={18} />
                             </button>
                             {activeMenuId === conv._id && (
-                              <div className="conv-dropdown">
+                              <div className="conv-dropdown" style={convMenuStyle} onClick={e => e.stopPropagation()}>
                                 <button onClick={e => { handlePinConversation(conv._id, e as any); setActiveMenuId(null); }}>
                                   {pinnedConversations.has(conv._id) ? 'Unpin' : 'Pin'}
                                 </button>
@@ -2166,7 +2529,11 @@ export const App: React.FC = () => {
             aria-label="Open profile settings"
           >
             <div className="user-avatar-v2">
-              {userInitials || "U"}
+              {user?.profilePicture ? (
+                <img className="user-avatar-v2-img" src={user.profilePicture} alt="" />
+              ) : (
+                userInitials || "U"
+              )}
             </div>
             <div className="user-info-v2">
               <div className="user-name-v2">{user?.fullName || "Account"}</div>
@@ -2418,6 +2785,9 @@ export const App: React.FC = () => {
                 <RateLimitBanner info={rateLimit} onExpire={() => setRateLimit(null)} />
 
                 <div className="main-input-container-v2">
+                  {attachError && (
+                    <div className="attach-error" role="alert">{attachError}</div>
+                  )}
                   {/* Attached Files Preview */}
                   {attachedFiles.length > 0 && (
                     <div className="attached-files-preview">
@@ -2478,11 +2848,13 @@ export const App: React.FC = () => {
                       </div>
                     </div>
                     <button
-                      className="send-btn-v2"
-                      onClick={handleSend}
-                      disabled={(!input.trim() && attachedFiles.length === 0) || loading || isRateLimited}
+                      className={`send-btn-v2${loading ? ' is-stop' : ''}`}
+                      onClick={loading ? handleStop : handleSend}
+                      disabled={loading ? false : ((!input.trim() && attachedFiles.length === 0) || isRateLimited)}
+                      title={loading ? 'Stop generating' : 'Send'}
+                      aria-label={loading ? 'Stop generating' : 'Send'}
                     >
-                      <BiUpArrowAlt size={24} />
+                      {loading ? <span className="stop-square" /> : <BiUpArrowAlt size={24} />}
                     </button>
                   </div>
                 </div>
@@ -2555,11 +2927,15 @@ export const App: React.FC = () => {
                     </div>
                   ) : null}
                   {(currentConversation?.messages ?? []).map((m, idx) => {
-                    // In a collaborative conversation, user messages are tagged with a senderId.
-                    const showSender = m.role === 'user' && !!m.senderId;
-                    const isOwn = m.senderId === user?.id;
-                    const senderInitials = (m.senderName || '?')
-                      .split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2);
+                    // Treat plain (non-collaborative) user messages as "own" so the current
+                    // user's avatar still shows next to them.
+                    const isOwn = m.role === 'user' && (!m.senderId || m.senderId === user?.id);
+                    const senderInitials = isOwn
+                      ? (userInitials || 'U')
+                      : (m.senderName || '?').split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2);
+                    const senderAvatar = m.role === 'user'
+                      ? (isOwn ? (user?.profilePicture || undefined) : avatarById.get(String(m.senderId)))
+                      : undefined;
                     return (
                     <div key={idx} className={`message-row-v2 ${m.role}${m.redacted ? ' redacted' : ''}`}>
                       {m.role === 'assistant' && (
@@ -2568,9 +2944,13 @@ export const App: React.FC = () => {
                         </div>
                       )}
                       <div className="message-bubble-wrap-v2">
-                        {showSender && (
-                          <div className={`collab-sender-badge${isOwn ? ' own' : ''}`} title={isOwn ? 'You' : (m.senderName || 'Collaborator')}>
-                            {isOwn ? 'You' : senderInitials}
+                        {m.role === 'user' && (
+                          <div className={`msg-user-avatar${isOwn ? ' own' : ''}`} title={isOwn ? 'You' : (m.senderName || 'Collaborator')}>
+                            {senderAvatar ? (
+                              <img src={senderAvatar} alt="" />
+                            ) : (
+                              senderInitials
+                            )}
                           </div>
                         )}
                         {(() => {
@@ -2667,18 +3047,30 @@ export const App: React.FC = () => {
                             <div className="message-sources-v2">
                               <span className="message-sources-label-v2">Sources</span>
                               {m.sources.map((s) => {
+                                const isWeb = s.documentType === "web";
                                 const content = (
                                   <>
                                     <span className="message-source-pill-icon-v2">
-                                      <BiLibrary size={12} />
+                                      {isWeb ? <BiLink size={12} /> : <BiLibrary size={12} />}
                                     </span>
                                     <span className="message-source-pill-title-v2">{s.title}</span>
-                                    {typeof s.version === "number" && s.version > 0 ? (
+                                    {!isWeb && typeof s.version === "number" && s.version > 0 ? (
                                       <span className="message-source-pill-version-v2">v{s.version}</span>
                                     ) : null}
                                   </>
                                 );
-                                return (
+                                return s.url ? (
+                                  <a
+                                    key={s.documentId}
+                                    href={s.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="message-source-pill-v2"
+                                    title={s.title}
+                                  >
+                                    {content}
+                                  </a>
+                                ) : (
                                   <span
                                     key={s.documentId}
                                     className="message-source-pill-v2 message-source-pill-v2--static"
@@ -2751,6 +3143,16 @@ export const App: React.FC = () => {
                       </div>
                     </div>
                   )}
+                  {isActiveGroupChat && collaborativeTypers.length > 0 && (
+                    <div className="collab-typing-bar" aria-live="polite">
+                      <span className="collab-typing-label">{formatCollabTypingLabel(collaborativeTypers)}</span>
+                      <span className="collab-typing-dots typing-v2">
+                        <span className="dot-v2"></span>
+                        <span className="dot-v2"></span>
+                        <span className="dot-v2"></span>
+                      </span>
+                    </div>
+                  )}
                   <div ref={messagesEndRef} />
                 </div>
               </div>
@@ -2760,6 +3162,9 @@ export const App: React.FC = () => {
           {((currentConversation?.messages?.length ?? 0) > 0 || loading) && !currentConversation?.isShared && (
             <footer className="footer-input-v2" onClick={(e) => e.stopPropagation()}>
               <RateLimitBanner info={rateLimit} onExpire={() => setRateLimit(null)} />
+              {attachError && (
+                <div className="attach-error" role="alert">{attachError}</div>
+              )}
               {attachedFiles.length > 0 && (
                 <div className="footer-attached-preview">
                   {attachedFiles.map((file, i) => (
@@ -2785,69 +3190,83 @@ export const App: React.FC = () => {
                     <BiMicrophone style={{ color: isRecording ? 'var(--brand-color, #ed0000)' : 'inherit' }} />
                   </button>
                 </div>
-                {mentionQuery !== null && (
-                  <div className="mention-dropdown">
-                    {buUsers
-                      .filter(u => u.fullName.toLowerCase().includes(mentionQuery.toLowerCase()) || u.email.toLowerCase().includes(mentionQuery.toLowerCase()))
-                      .slice(0, 6)
-                      .map(u => (
+                {mentionQuery !== null && (() => {
+                  const matches = getMentionMatches(mentionQuery);
+                  return (
+                    <div className="mention-dropdown">
+                      {matches.map((u, idx) => (
                         <button
                           key={u._id}
-                          className="mention-option"
+                          className={`mention-option${idx === mentionActiveIndex ? ' mention-option--active' : ''}`}
+                          onMouseEnter={() => setMentionActiveIndex(idx)}
                           onMouseDown={(e) => {
                             e.preventDefault();
-                            // Replace @partial with @FullName in input
-                            const atIdx = input.lastIndexOf('@');
-                            const newInput = input.slice(0, atIdx) + `@${u.fullName} `;
-                            setInput(newInput);
-                            setPendingMentions(prev => prev.some(m => m.userId === u._id) ? prev : [...prev, { userId: u._id, name: u.fullName }]);
-                            setMentionQuery(null);
+                            selectMention(u);
                           }}
                         >
-                          <span className="mention-avatar">{u.fullName.charAt(0).toUpperCase()}</span>
+                          {u.profilePicture ? (
+                            <img className="mention-avatar mention-avatar--img" src={u.profilePicture} alt="" />
+                          ) : (
+                            <span className="mention-avatar">{u.fullName.charAt(0).toUpperCase()}</span>
+                          )}
                           <span className="mention-name">{u.fullName}</span>
+                          {u.isAdmin && <span className="mention-role-badge">Admin</span>}
                           <span className="mention-email">{u.email}</span>
                         </button>
                       ))}
-                    {buUsers.filter(u => u.fullName.toLowerCase().includes(mentionQuery.toLowerCase())).length === 0 && (
-                      <div className="mention-empty">No users found</div>
-                    )}
-                  </div>
-                )}
-                <textarea
-                  className="footer-textarea-v2"
-                  placeholder="Send a message... (type @ to mention someone)"
-                  value={input}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setInput(val);
-                    autoGrowTextarea(e.target, 200);
-                    // Detect @mention
-                    const cursor = e.target.selectionStart ?? val.length;
-                    const textBefore = val.slice(0, cursor);
-                    const match = textBefore.match(/@([^@\s]*)$/);
-                    if (match) {
-                      setMentionQuery(match[1]);
-                    } else {
-                      setMentionQuery(null);
-                    }
-                  }}
-                  ref={(el) => {
-                    (textareaRef as any).current = el;
-                    if (el && !input) el.style.height = "";
-                  }}
-                  onKeyDown={(e) => {
-                    if (mentionQuery !== null && e.key === 'Escape') { setMentionQuery(null); return; }
-                    handleKeyDown(e);
-                  }}
-                  rows={1}
-                />
+                      {matches.length === 0 && (
+                        <div className="mention-empty">No users found</div>
+                      )}
+                    </div>
+                  );
+                })()}
+                <div className="footer-textarea-shell">
+                  {mentionGhostSuffix && (
+                    <div className="footer-ghost" aria-hidden="true">
+                      <span className="footer-ghost-typed">{input}</span>
+                      <span className="footer-ghost-suffix">{mentionGhostSuffix}</span>
+                    </div>
+                  )}
+                  <textarea
+                    className="footer-textarea-v2"
+                    placeholder="Send a message... (type @ to mention someone)"
+                    value={input}
+                    onChange={(e) => handleComposerInput(e.target.value, e.target, 200)}
+                    onBlur={stopCollaborativeTyping}
+                    ref={(el) => {
+                      (textareaRef as any).current = el;
+                      if (el && !input) el.style.height = "";
+                    }}
+                    onKeyDown={(e) => {
+                      // When the @mention autocomplete is open, arrow keys navigate it and
+                      // Enter/Tab (or → at the end) accepts the highlighted user instead of
+                      // sending the message.
+                      if (mentionQuery !== null) {
+                        const matches = getMentionMatches(mentionQuery);
+                        if (matches.length > 0) {
+                          if (e.key === 'ArrowDown') { e.preventDefault(); setMentionActiveIndex(i => (i + 1) % matches.length); return; }
+                          if (e.key === 'ArrowUp') { e.preventDefault(); setMentionActiveIndex(i => (i - 1 + matches.length) % matches.length); return; }
+                          if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); selectMention(matches[Math.min(mentionActiveIndex, matches.length - 1)]); return; }
+                          if (e.key === 'ArrowRight' && mentionGhostSuffix) {
+                            const el = e.currentTarget;
+                            if (el.selectionStart === el.value.length) { e.preventDefault(); selectMention(matches[0]); return; }
+                          }
+                        }
+                        if (e.key === 'Escape') { setMentionQuery(null); return; }
+                      }
+                      handleKeyDown(e);
+                    }}
+                    rows={1}
+                  />
+                </div>
                 <button
-                  className="footer-send-btn-v2"
-                  onClick={handleSend}
-                  disabled={(!input.trim() && attachedFiles.length === 0) || loading || isRateLimited}
+                  className={`footer-send-btn-v2${loading ? ' is-stop' : ''}`}
+                  onClick={loading ? handleStop : handleSend}
+                  disabled={loading ? false : ((!input.trim() && attachedFiles.length === 0) || isRateLimited)}
+                  title={loading ? 'Stop generating' : 'Send'}
+                  aria-label={loading ? 'Stop generating' : 'Send'}
                 >
-                  <BiUpArrowAlt size={20} />
+                  {loading ? <span className="stop-square" /> : <BiUpArrowAlt size={20} />}
                 </button>
               </div>
               <p className="footer-disclaimer-v2">
@@ -3342,18 +3761,41 @@ export const App: React.FC = () => {
           width: 100%; padding: 9px 14px;
           border: none; background: transparent; cursor: pointer; text-align: left;
         }
-        .mention-option:hover { background: #f3f4f6; }
-        .dark-theme .mention-option:hover { background: rgba(255,255,255,0.07); }
+        .mention-option:hover,
+        .mention-option--active { background: #f3f4f6; }
+        .dark-theme .mention-option:hover,
+        .dark-theme .mention-option--active { background: rgba(255,255,255,0.07); }
         .mention-avatar {
           width: 28px; height: 28px; border-radius: 8px; flex-shrink: 0;
           background: var(--brand-color, #ed0000); color: #fff;
           display: flex; align-items: center; justify-content: center;
           font-size: 12px; font-weight: 700;
         }
-        .mention-name { font-size: 13px; font-weight: 700; color: #111; flex: 1; }
+        .mention-avatar--img { object-fit: cover; padding: 0; }
+        .mention-name { font-size: 13px; font-weight: 700; color: #111; flex: 0 0 auto; }
         .dark-theme .mention-name { color: #f3f4f6; }
-        .mention-email { font-size: 11px; color: #9ca3af; }
+        .mention-role-badge {
+          font-size: 9px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase;
+          color: var(--brand-color, #ed0000); background: rgba(237,0,0,0.1);
+          padding: 1px 6px; border-radius: 999px; flex-shrink: 0;
+        }
+        .mention-email { font-size: 11px; color: #9ca3af; flex: 1; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .mention-empty { padding: 10px 14px; font-size: 12px; color: #9ca3af; text-align: center; }
+
+        /* Sidebar mini avatars (shared-by / group participants) */
+        .mini-avatar-row { display: flex; align-items: center; padding-left: 2px; }
+        .mini-avatar-row .mini-avatar { margin-left: -6px; }
+        .mini-avatar-row .mini-avatar:first-child { margin-left: 0; }
+        .mini-avatar {
+          width: 22px; height: 22px; border-radius: 50%;
+          object-fit: cover; flex-shrink: 0;
+          display: inline-flex; align-items: center; justify-content: center;
+          background: var(--brand-color, #ed0000); color: #fff;
+          font-size: 9px; font-weight: 800; letter-spacing: 0.2px;
+          border: 1.5px solid #f3f4f6;
+        }
+        .mini-avatar--more { background: #6b7280; font-size: 8px; }
+        .dark-theme .mini-avatar { border-color: #1e1e1e; }
 
         /* Dark theme overrides for folders */
         .dark-theme .folder-header { color: rgba(255,255,255,0.75); }
@@ -3460,6 +3902,15 @@ export const App: React.FC = () => {
           font-weight: 700;
         }
         .dark-theme .collab-sender-badge.own { color: #f3f4f6; border-color: #4b5563; }
+        /* When a sender has a profile picture, the badge becomes a round avatar. */
+        .collab-sender-badge:has(.collab-sender-avatar-img) {
+          padding: 0; background: transparent; border: none; width: 24px; height: 24px; min-width: 24px;
+        }
+        .collab-sender-avatar-img {
+          width: 24px; height: 24px; border-radius: 50%; object-fit: cover;
+          border: 1px solid rgba(0,0,0,0.08);
+        }
+        .dark-theme .collab-sender-avatar-img { border-color: rgba(255,255,255,0.15); }
 
         .shared-banner-request-btn {
           margin-top: 10px;
@@ -3736,6 +4187,15 @@ export const App: React.FC = () => {
           justify-content: center;
           font-size: 12px;
           font-weight: 600;
+          overflow: hidden;
+          flex-shrink: 0;
+        }
+
+        .user-avatar-v2-img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          border-radius: 50%;
         }
 
         .user-info-v2 {
@@ -4336,6 +4796,22 @@ export const App: React.FC = () => {
           border-bottom: 1px solid #f3f4f6;
         }
 
+        .attach-error {
+          margin: 0 8px 8px;
+          padding: 8px 12px;
+          border-radius: 10px;
+          background: #fef2f2;
+          border: 1px solid #fecaca;
+          color: #991b1b;
+          font-size: 12.5px;
+          line-height: 1.4;
+        }
+        .dark-theme .attach-error {
+          background: rgba(237, 0, 0, 0.12);
+          border-color: rgba(237, 0, 0, 0.4);
+          color: #fca5a5;
+        }
+
         .attached-file-chip {
           background: #f3f4f6;
           padding: 4px 10px;
@@ -4933,6 +5409,38 @@ export const App: React.FC = () => {
           display: block;
         }
 
+        /* User avatar shown at the top-right, above their message bubble. */
+        .msg-user-avatar {
+          align-self: flex-end;
+          width: 44px;
+          height: 44px;
+          border-radius: 50%;
+          overflow: hidden;
+          flex-shrink: 0;
+          background: var(--brand-color, #ed0000);
+          color: #fff;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 15px;
+          font-weight: 800;
+          letter-spacing: 0.3px;
+        }
+        @media (min-width: 640px) {
+          .msg-user-avatar {
+            width: 48px;
+            height: 48px;
+            font-size: 16px;
+          }
+        }
+        .msg-user-avatar.own { background: #111827; }
+        .msg-user-avatar img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          display: block;
+        }
+
         .message-row-v2.user .message-avatar-v2 {
           background: #111827;
           color: white;
@@ -5051,6 +5559,8 @@ export const App: React.FC = () => {
           font-size: 12px;
           font-weight: 600;
           line-height: 1.2;
+          text-decoration: none;
+          color: inherit;
           background: color-mix(in srgb, var(--brand-color, #ed0000) 10%, #fff);
           color: var(--brand-color, #ed0000);
           border: 1px solid color-mix(in srgb, var(--brand-color, #ed0000) 22%, transparent);
@@ -5168,6 +5678,41 @@ export const App: React.FC = () => {
           padding: 8px 0;
         }
 
+        .collab-typing-bar {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 4px 4px 10px;
+          margin-left: 52px;
+          opacity: 0.55;
+          animation: collab-typing-in 0.2s ease;
+        }
+
+        @keyframes collab-typing-in {
+          from { opacity: 0; transform: translateY(4px); }
+          to { opacity: 0.55; transform: translateY(0); }
+        }
+
+        .collab-typing-label {
+          font-size: 13px;
+          font-style: italic;
+          color: #6b7280;
+          letter-spacing: 0.01em;
+        }
+
+        .collab-typing-dots {
+          padding: 0;
+        }
+
+        .collab-typing-dots .dot-v2 {
+          width: 5px;
+          height: 5px;
+        }
+
+        .dark-theme .collab-typing-label {
+          color: #9ca3af;
+        }
+
         .dot-v2 {
           width: 6px;
           height: 6px;
@@ -5249,6 +5794,44 @@ export const App: React.FC = () => {
           }
         }
 
+        /* Wrapper that lets the grey ghost-text completion sit exactly behind the
+           @mention input. The textarea is transparent so the ghost shows through. */
+        .footer-textarea-shell {
+          position: relative;
+          flex: 1;
+          min-width: 0;
+          display: flex;
+        }
+        .footer-textarea-shell .footer-textarea-v2 {
+          position: relative;
+          z-index: 1;
+          background: transparent;
+        }
+        .footer-ghost {
+          position: absolute;
+          inset: 0;
+          z-index: 2;
+          pointer-events: none;
+          padding: 8px 4px;
+          font-size: 16px;
+          line-height: 1.45;
+          font-family: inherit;
+          white-space: pre-wrap;
+          overflow-wrap: anywhere;
+          overflow: hidden;
+          max-height: 160px;
+        }
+        @media (min-width: 640px) {
+          .footer-ghost {
+            font-size: 15px;
+            padding: 8px 0;
+            max-height: 200px;
+          }
+        }
+        .footer-ghost-typed { color: transparent; }
+        .footer-ghost-suffix { color: #9ca3af; }
+        .dark-theme .footer-ghost-suffix { color: #6b7280; }
+
         .footer-send-btn-v2 {
           background: var(--brand-color, #ed0000);
           color: white;
@@ -5268,6 +5851,24 @@ export const App: React.FC = () => {
             width: 36px;
             height: 36px;
           }
+        }
+
+        /* Stop-generating state: send button stays red with a white square. */
+        .footer-send-btn-v2.is-stop,
+        .send-btn-v2.is-stop {
+          background: var(--brand-color, #ed0000);
+          opacity: 1;
+        }
+        .footer-send-btn-v2.is-stop:disabled,
+        .send-btn-v2.is-stop:disabled {
+          opacity: 1;
+        }
+        .stop-square {
+          width: 14px;
+          height: 14px;
+          background: #fff;
+          border-radius: 3px;
+          display: block;
         }
 
         .footer-disclaimer-v2 {

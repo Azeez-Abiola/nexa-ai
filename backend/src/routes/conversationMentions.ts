@@ -5,6 +5,7 @@ import { ConversationMention } from "../models/ConversationMention";
 import { ConversationCollaboration } from "../models/ConversationCollaboration";
 import { Conversation } from "../models/Conversation";
 import { User } from "../models/User";
+import { AdminUser } from "../models/AdminUser";
 import { sendConversationMentionEmail } from "../services/emailService";
 import { serializeMessages } from "../utils/encryption";
 
@@ -12,20 +13,66 @@ export const conversationMentionsRouter = express.Router();
 
 const FRONTEND_URL = (process.env.FRONTEND_URL || "http://localhost:3000").replace(/\/$/, "");
 
+/** Look up a mentionable person by id across both the User and AdminUser collections. */
+async function resolvePerson(id: string) {
+  const [u, a] = await Promise.all([
+    User.findById(id).select("fullName email businessUnit profilePicture").lean(),
+    AdminUser.findById(id).select("fullName email businessUnit profilePicture").lean(),
+  ]);
+  const person = u || a;
+  if (!person) return null;
+  return { ...person, isAdmin: !u && !!a };
+}
+
+/** Batch-resolve a set of ids across both collections into a display map. */
+async function resolvePeopleMap(ids: string[]) {
+  const uniq = [...new Set(ids.map(String))].filter((id) => mongoose.Types.ObjectId.isValid(id));
+  const objIds = uniq.map((id) => new mongoose.Types.ObjectId(id));
+  const [users, admins] = await Promise.all([
+    User.find({ _id: { $in: objIds } }).select("fullName email profilePicture").lean(),
+    AdminUser.find({ _id: { $in: objIds } }).select("fullName email profilePicture").lean(),
+  ]);
+  const map = new Map<string, { id: string; name: string; profilePicture: string | null }>();
+  for (const p of [...users, ...admins]) {
+    map.set(String(p._id), {
+      id: String(p._id),
+      name: p.fullName || p.email || "User",
+      profilePicture: p.profilePicture || null,
+    });
+  }
+  return map;
+}
+
 /** GET /api/v1/conversations/mentionable-users */
 conversationMentionsRouter.get(
   "/mentionable-users",
   authMiddleware,
   async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const users = await User.find({
-        businessUnit: req.businessUnit,
-        isActive: { $ne: false },
-        _id: { $ne: new mongoose.Types.ObjectId(req.userId!) },
-      })
-        .select("_id fullName email")
-        .sort({ fullName: 1 })
-        .lean();
+      const selfId = String(req.userId);
+      // Business users can tag both fellow employees and the admins of their BU.
+      const [employees, admins] = await Promise.all([
+        User.find({
+          businessUnit: req.businessUnit,
+          isActive: { $ne: false },
+        })
+          .select("_id fullName email profilePicture")
+          .lean(),
+        AdminUser.find({
+          businessUnit: req.businessUnit,
+          isActive: { $ne: false },
+        })
+          .select("_id fullName email profilePicture")
+          .lean(),
+      ]);
+
+      const users = [
+        ...employees.map((u) => ({ ...u, isAdmin: false })),
+        ...admins.map((a) => ({ ...a, isAdmin: true })),
+      ]
+        .filter((u) => String(u._id) !== selfId)
+        .sort((x, y) => (x.fullName || "").localeCompare(y.fullName || ""));
+
       return res.json({ users });
     } catch {
       return res.status(500).json({ error: "Internal server error" });
@@ -49,13 +96,38 @@ conversationMentionsRouter.get(
 
       const myConvs = await Conversation.findOne({ userId: new mongoose.Types.ObjectId(req.userId!) }).lean();
 
+      // Gather everyone involved in each group conversation (the mentioner/owner plus
+      // all mentioned users), so the sidebar can show their avatars.
+      const groupIds = [...new Set(mentions.map((m) => m.originalGroupId))];
+      const groupMentions = await ConversationMention.find({ originalGroupId: { $in: groupIds } })
+        .select("originalGroupId mentionerId mentionedUserId")
+        .lean();
+
+      const participantIdsByGroup = new Map<string, Set<string>>();
+      for (const gm of groupMentions) {
+        const set = participantIdsByGroup.get(gm.originalGroupId) || new Set<string>();
+        set.add(String(gm.mentionerId));
+        set.add(String(gm.mentionedUserId));
+        participantIdsByGroup.set(gm.originalGroupId, set);
+      }
+
+      const allParticipantIds = groupMentions.flatMap((gm) => [
+        String(gm.mentionerId),
+        String(gm.mentionedUserId),
+      ]);
+      const peopleMap = await resolvePeopleMap(allParticipantIds);
+
       const result = mentions.map(m => {
         const group = myConvs?.conversationGroups.find(g => g._id.toString() === m.forkedGroupId);
         if (!group) return null;
+        const participants = [...(participantIdsByGroup.get(m.originalGroupId) || [])]
+          .map((id) => peopleMap.get(id))
+          .filter(Boolean);
         return {
           mentionId: m._id,
           mentionerName: m.mentionerName,
           conversationTitle: m.conversationTitle,
+          participants,
           conversation: {
             _id: group._id,
             title: group.title,
@@ -91,8 +163,8 @@ conversationMentionsRouter.post(
       }
 
       const [mentioner, mentioned, ownerConvs] = await Promise.all([
-        User.findById(req.userId).select("fullName email").lean(),
-        User.findById(mentionedUserId).select("fullName email businessUnit").lean(),
+        resolvePerson(req.userId!),
+        resolvePerson(mentionedUserId),
         Conversation.findOne({ userId: new mongoose.Types.ObjectId(req.userId!) }),
       ]);
 
