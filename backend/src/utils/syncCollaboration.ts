@@ -1,5 +1,84 @@
-import { Conversation, ChatMessage } from "../models/Conversation";
+import { Conversation, ChatMessage, PinnedMessage } from "../models/Conversation";
 import { ConversationCollaboration } from "../models/ConversationCollaboration";
+
+async function getCollaborationTargets(sourceGroupId: string): Promise<Map<string, unknown>> {
+  const direct = await ConversationCollaboration.find({
+    $or: [{ ownerGroupId: sourceGroupId }, { collaboratorGroupId: sourceGroupId }],
+  }).lean();
+
+  if (direct.length === 0) return new Map();
+
+  const ownerGroupIds = [...new Set(direct.map((c) => c.ownerGroupId))];
+  const cluster = await ConversationCollaboration.find({
+    ownerGroupId: { $in: ownerGroupIds },
+  }).lean();
+
+  const targets = new Map<string, unknown>();
+  for (const c of cluster) {
+    targets.set(c.ownerGroupId, c.ownerId);
+    targets.set(c.collaboratorGroupId, c.collaboratorId);
+  }
+  return targets;
+}
+
+/**
+ * Sync pinned message metadata to every copy in the collaboration cluster.
+ */
+export async function syncPinnedMessageToCollaborators(
+  sourceGroupId: string,
+  pinnedMessage: PinnedMessage | null
+): Promise<void> {
+  try {
+    const targets = await getCollaborationTargets(sourceGroupId);
+    if (targets.size === 0) return;
+
+    for (const [groupId, userId] of targets) {
+      const convs = await Conversation.findOne({ userId });
+      if (!convs) continue;
+      const group = convs.conversationGroups.find((g) => g._id.toString() === groupId);
+      if (!group) continue;
+      if (pinnedMessage) {
+        (group as any).pinnedMessage = pinnedMessage;
+      } else {
+        group.set("pinnedMessage", undefined);
+      }
+      group.updatedAt = new Date();
+      convs.markModified("conversationGroups");
+      await convs.save();
+    }
+  } catch (err) {
+    console.error("[syncCollaboration] syncPinnedMessage error:", (err as Error).message);
+  }
+}
+
+/**
+ * Sync a reaction change on one message to every copy in the cluster.
+ */
+export async function syncReactionToCollaborators(
+  sourceGroupId: string,
+  messageId: string,
+  reactions: NonNullable<ChatMessage["reactions"]>
+): Promise<void> {
+  try {
+    const targets = await getCollaborationTargets(sourceGroupId);
+    if (targets.size === 0) return;
+
+    for (const [groupId, userId] of targets) {
+      const convs = await Conversation.findOne({ userId });
+      if (!convs) continue;
+      const group = convs.conversationGroups.find((g) => g._id.toString() === groupId);
+      if (!group) continue;
+      const msg = group.messages.find((m) => m.messageId === messageId);
+      if (!msg) continue;
+      msg.reactions = reactions.length > 0 ? reactions : undefined;
+      group.updatedAt = new Date();
+      convs.markModified("conversationGroups");
+      await convs.save();
+    }
+  } catch (err) {
+    console.error("[syncCollaboration] syncReaction error:", (err as Error).message);
+  }
+}
 
 /**
  * After any message save in a collaborative conversation, push the same
@@ -75,25 +154,9 @@ export async function syncToCollaborators(
 ): Promise<void> {
   try {
     // Find every collaboration record this group participates in (as owner or collaborator).
-    const direct = await ConversationCollaboration.find({
-      $or: [{ ownerGroupId: sourceGroupId }, { collaboratorGroupId: sourceGroupId }],
-    }).lean();
+    const targets = await getCollaborationTargets(sourceGroupId);
+    if (targets.size === 0) return;
 
-    if (direct.length === 0) return;
-
-    // A "cluster" is keyed by the owner group id. Pull the full cluster so a message
-    // from one collaborator also reaches the owner AND all other collaborators.
-    const ownerGroupIds = [...new Set(direct.map((c) => c.ownerGroupId))];
-    const cluster = await ConversationCollaboration.find({
-      ownerGroupId: { $in: ownerGroupIds },
-    }).lean();
-
-    // Map every participant's group -> their userId (dedup across records).
-    const targets = new Map<string, any>();
-    for (const c of cluster) {
-      targets.set(c.ownerGroupId, c.ownerId);
-      targets.set(c.collaboratorGroupId, c.collaboratorId);
-    }
     // Never echo the message back to the sender's own copy.
     targets.delete(sourceGroupId);
 

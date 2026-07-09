@@ -2,7 +2,7 @@ import express, { Response } from "express";
 import mongoose from "mongoose";
 import multer from "multer";
 import { Types } from "mongoose";
-import { Conversation } from "../models/Conversation";
+import { Conversation, ChatMessage } from "../models/Conversation";
 import { UserDocument } from "../models/UserDocument";
 import { RagDocument } from "../models/RagDocument";
 import { KnowledgeGroup } from "../models/KnowledgeGroup";
@@ -44,6 +44,8 @@ import {
   syncToCollaborators,
   getCollaborationRoomId,
   isCollaborationParticipant,
+  syncPinnedMessageToCollaborators,
+  syncReactionToCollaborators,
 } from "../utils/syncCollaboration";
 import { serializeMessages } from "../utils/encryption";
 import { sanitizeAssistantResponse } from "../utils/citationCleanup";
@@ -72,6 +74,18 @@ function cacheDocument(buffer: Buffer, filename: string, mimeType: string): stri
     if (v.expiresAt < Date.now()) docCache.delete(k);
   }
   return id;
+}
+
+/** Assign stable messageIds to legacy messages so pin/react work on older chats. */
+function ensureMessageIds(group: { messages: ChatMessage[] }): boolean {
+  let changed = false;
+  for (const m of group.messages) {
+    if (!m.messageId) {
+      m.messageId = randomUUID();
+      changed = true;
+    }
+  }
+  return changed;
 }
 
 const DOC_LABELS: Record<DocumentType, string> = {
@@ -542,6 +556,7 @@ conversationRouter.get("/", authMiddleware, async (req: AuthenticatedRequest, re
       userId: req.userId,
       title: group.title,
       messages: serializeMessages(group.messages as any[]),
+      pinnedMessage: group.pinnedMessage ?? undefined,
       createdAt: group.createdAt,
       updatedAt: group.updatedAt
     }));
@@ -609,11 +624,16 @@ conversationRouter.get("/:id", authMiddleware, async (req: AuthenticatedRequest,
       return res.status(404).json({ error: "Conversation not found" });
     }
 
+    if (ensureMessageIds(group)) {
+      await userConversations.save();
+    }
+
     const conversation = {
       _id: group._id,
       userId: req.userId,
       title: group.title,
       messages: serializeMessages(group.messages as any[]),
+      pinnedMessage: (group as any).pinnedMessage ?? undefined,
       createdAt: group.createdAt,
       updatedAt: group.updatedAt
     };
@@ -713,8 +733,40 @@ conversationRouter.delete("/:id", authMiddleware, async (req: AuthenticatedReque
 conversationRouter.post("/:id/note", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
-    const { content } = req.body;
-    if (!content?.trim()) return res.status(400).json({ error: "content is required" });
+    const isMultipart = req.headers["content-type"]?.includes("multipart/form-data");
+
+    if (isMultipart) {
+      try {
+        await runMulter(req, res);
+      } catch (multerErr: any) {
+        if (multerErr instanceof multer.MulterError || multerErr.message) {
+          return res.status(400).json({ error: multerErr.message });
+        }
+        throw multerErr;
+      }
+    }
+
+    const content: string = (req.body.content || req.body.message || "").trim();
+    const uploadedFiles = (req.files as Express.Multer.File[]) || [];
+    const imageFiles = uploadedFiles.filter((f) => IMAGE_MIME_TYPES.includes(f.mimetype));
+
+    if (!content && imageFiles.length === 0) {
+      return res.status(400).json({ error: "content or image is required" });
+    }
+
+    let replyTo: ChatMessage["replyTo"];
+    if (req.body.replyTo) {
+      try {
+        const parsed = typeof req.body.replyTo === "string" ? JSON.parse(req.body.replyTo) : req.body.replyTo;
+        if (parsed?.messageId && parsed?.content) {
+          replyTo = {
+            messageId: parsed.messageId,
+            senderName: parsed.senderName,
+            content: String(parsed.content).slice(0, 500),
+          };
+        }
+      } catch { /* ignore malformed replyTo */ }
+    }
 
     const userConvs = await Conversation.findOne({ userId: req.userId });
     if (!userConvs) return res.status(404).json({ error: "Conversation not found" });
@@ -722,12 +774,27 @@ conversationRouter.post("/:id/note", authMiddleware, async (req: AuthenticatedRe
     const group = userConvs.conversationGroups.find(g => g._id.toString() === id);
     if (!group) return res.status(404).json({ error: "Conversation not found" });
 
-    const noteMsg = {
-      role: "user" as const,
-      content: content.trim(),
+    let persistedImageUrls: string[] = [];
+    if (imageFiles.length > 0) {
+      const results = await Promise.allSettled(
+        imageFiles.map((f) =>
+          uploadChatImage(f.buffer, f.originalname || "image", String(req.userId), f.mimetype)
+        )
+      );
+      persistedImageUrls = results
+        .filter((r): r is PromiseFulfilledResult<{ secureUrl: string }> => r.status === "fulfilled")
+        .map((r) => r.value.secureUrl);
+    }
+
+    const noteMsg: ChatMessage = {
+      role: "user",
+      content: content || (persistedImageUrls.length > 0 ? "📷 Photo" : ""),
       timestamp: new Date(),
       senderId: String(req.userId),
       senderName: req.fullName || req.email || "User",
+      messageId: typeof req.body.messageId === "string" && req.body.messageId ? req.body.messageId : randomUUID(),
+      ...(persistedImageUrls.length > 0 ? { imageUrls: persistedImageUrls } : {}),
+      ...(replyTo ? { replyTo } : {}),
     };
     group.messages.push(noteMsg as any);
     group.updatedAt = new Date();
@@ -739,11 +806,144 @@ conversationRouter.post("/:id/note", authMiddleware, async (req: AuthenticatedRe
         _id: group._id,
         title: group.title,
         messages: serializeMessages(group.messages as any[]),
+        pinnedMessage: (group as any).pinnedMessage ?? undefined,
         createdAt: group.createdAt,
         updatedAt: group.updatedAt,
       }
     });
   } catch (error) {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/** POST /api/v1/conversations/:id/messages/:messageId/reactions */
+conversationRouter.post(
+  "/:id/messages/:messageId/reactions",
+  authMiddleware,
+  async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { id, messageId } = req.params;
+      const emoji = typeof req.body.emoji === "string" ? req.body.emoji.trim() : "";
+      if (!emoji) return res.status(400).json({ error: "emoji is required" });
+
+      const userConvs = await Conversation.findOne({ userId: req.userId });
+      if (!userConvs) return res.status(404).json({ error: "Conversation not found" });
+
+      const group = userConvs.conversationGroups.find((g) => g._id.toString() === id);
+      if (!group) return res.status(404).json({ error: "Conversation not found" });
+
+      ensureMessageIds(group);
+
+      const msg = group.messages.find((m) => m.messageId === messageId);
+      if (!msg) return res.status(404).json({ error: "Message not found" });
+
+      const userName = req.fullName || req.email || "User";
+      const reactions = [...(msg.reactions || [])];
+      const existingIdx = reactions.findIndex((r) => r.userId === String(req.userId));
+      if (existingIdx >= 0) {
+        if (reactions[existingIdx].emoji === emoji) {
+          reactions.splice(existingIdx, 1);
+        } else {
+          reactions[existingIdx] = { userId: String(req.userId), userName, emoji };
+        }
+      } else {
+        reactions.push({ userId: String(req.userId), userName, emoji });
+      }
+
+      msg.reactions = reactions.length > 0 ? reactions : undefined;
+      group.updatedAt = new Date();
+      await userConvs.save();
+      syncReactionToCollaborators(id, messageId, msg.reactions ?? []);
+
+      res.json({
+        conversation: {
+          _id: group._id,
+          title: group.title,
+          messages: serializeMessages(group.messages as any[]),
+          pinnedMessage: (group as any).pinnedMessage ?? undefined,
+          createdAt: group.createdAt,
+          updatedAt: group.updatedAt,
+        },
+      });
+    } catch {
+      res.status(500).json({ error: "Internal server error" });
+    }
+  }
+);
+
+/** POST /api/v1/conversations/:id/pin — pin a message to the top of a group chat. */
+conversationRouter.post("/:id/pin", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const messageId = typeof req.body.messageId === "string" ? req.body.messageId : "";
+    if (!messageId) return res.status(400).json({ error: "messageId is required" });
+
+    const userConvs = await Conversation.findOne({ userId: req.userId });
+    if (!userConvs) return res.status(404).json({ error: "Conversation not found" });
+
+    const group = userConvs.conversationGroups.find((g) => g._id.toString() === id);
+    if (!group) return res.status(404).json({ error: "Conversation not found" });
+
+    ensureMessageIds(group);
+
+    const msg = group.messages.find((m) => m.messageId === messageId);
+    if (!msg) return res.status(404).json({ error: "Message not found" });
+
+    const pinnedMessage = {
+      messageId,
+      content: msg.content.slice(0, 200),
+      senderName: msg.senderName,
+      pinnedBy: req.fullName || req.email || "User",
+      pinnedAt: new Date(),
+    };
+    (group as any).pinnedMessage = pinnedMessage;
+    group.updatedAt = new Date();
+    await userConvs.save();
+    syncPinnedMessageToCollaborators(id, pinnedMessage);
+
+    res.json({
+      conversation: {
+        _id: group._id,
+        title: group.title,
+        messages: serializeMessages(group.messages as any[]),
+        pinnedMessage,
+        createdAt: group.createdAt,
+        updatedAt: group.updatedAt,
+      },
+    });
+  } catch {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/** DELETE /api/v1/conversations/:id/pin — unpin the group message. */
+conversationRouter.delete("/:id/pin", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const userConvs = await Conversation.findOne({ userId: req.userId });
+    if (!userConvs) return res.status(404).json({ error: "Conversation not found" });
+
+    const group = userConvs.conversationGroups.find((g) => g._id.toString() === id);
+    if (!group) return res.status(404).json({ error: "Conversation not found" });
+
+    group.set("pinnedMessage", undefined);
+    group.updatedAt = new Date();
+    userConvs.markModified("conversationGroups");
+    await userConvs.save();
+    await syncPinnedMessageToCollaborators(id, null);
+
+    res.json({
+      conversation: {
+        _id: group._id,
+        title: group.title,
+        messages: serializeMessages(group.messages as any[]),
+        pinnedMessage: undefined,
+        createdAt: group.createdAt,
+        updatedAt: group.updatedAt,
+      },
+    });
+  } catch {
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -1331,6 +1531,7 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
       role: "user" as const,
       content: content + attachmentLabel,
       timestamp: new Date(),
+      messageId: randomUUID(),
       senderId: String(userId),
       senderName: (req as AuthenticatedRequest).fullName || (req as AuthenticatedRequest).email || "User",
       ...(persistedImageUrls.length > 0 ? { imageUrls: persistedImageUrls } : {})
@@ -1501,6 +1702,7 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
         role: "assistant" as const,
         content: sanitizedResponse || "I wasn't able to generate a response. Please try again.",
         timestamp: new Date(),
+        messageId: randomUUID(),
         ...(sources.length > 0 ? { sources } : {}),
         ...(attachDocument ? { generatedDocument } : {})
       };

@@ -6,13 +6,15 @@ import {
   BiUserCircle, BiCog, BiMessageSquareAdd, BiSearch, BiImage, BiCodeBlock,
   BiBoltCircle, BiShareAlt, BiHelpCircle, BiChevronDown,
   BiUpArrowAlt, BiMessageRounded, BiPlus, BiDotsHorizontalRounded,
-  BiPaperclip, BiMicrophone, BiMoon, BiSun, BiCamera, BiCopy, BiCheck, BiLink
+  BiPaperclip, BiMicrophone, BiMoon, BiSun, BiCamera, BiCopy, BiCheck, BiLink, BiReply, BiSmile, BiX
 } from "react-icons/bi";
 import { MdPushPin, MdAutoAwesome, MdCreateNewFolder, MdFolder, MdFolderOpen } from "react-icons/md";
 import { FiLogOut, FiDownload, FiTrash2, FiExternalLink, FiFileText } from "react-icons/fi";
 import { useLocation, useNavigate } from "react-router-dom";
 import { ChatGptStyleMenuIcon } from "./components/ChatGptStyleMenuIcon";
 import { WebcamCaptureModal } from "./components/WebcamCaptureModal";
+import { ReactionEmojiPicker } from "./chat/ReactionEmojiPicker";
+import { PROFILE_PIC_PROMPT_STORAGE_KEY } from "./chat/reactionEmojis";
 import { UserChatProfile } from "./UserChatProfile";
 import { Admin } from "./Admin";
 import { Login } from "./Login";
@@ -56,6 +58,9 @@ interface GeneratedDocument {
 interface Message {
   role: "user" | "assistant";
   content: string;
+  messageId?: string;
+  replyTo?: MessageReplyTo;
+  reactions?: MessageReaction[];
   senderId?: string;
   senderName?: string;
   imageUrls?: string[];
@@ -70,6 +75,7 @@ interface Conversation {
   _id: string;
   title: string;
   messages: Message[];
+  pinnedMessage?: PinnedMessage;
   createdAt: string;
   updatedAt: string;
   /** True when this conversation has multiple participants (group chat). */
@@ -141,11 +147,56 @@ const SUPPORTED_UPLOAD_EXTENSIONS = [
 const MAX_UPLOAD_FILE_SIZE_MB = 10;
 const MAX_UPLOAD_FILES_PER_MESSAGE = 5;
 
+/** Special id for @Nexa AI in group conversation mention autocomplete. */
+const NEXA_AI_ID = "__nexa_ai__";
+const NEXA_AI_MENTION = "Nexa AI";
+const NEXA_MENTION_RE = /@nexa(\s+ai)?/i;
+interface MessageReplyTo {
+  messageId: string;
+  senderName?: string;
+  content: string;
+}
+
+interface MessageReaction {
+  userId: string;
+  userName: string;
+  emoji: string;
+}
+
+interface PinnedMessage {
+  messageId: string;
+  content: string;
+  senderName?: string;
+  pinnedBy?: string;
+  pinnedAt?: string;
+}
+
 function formatCollabTypingLabel(typers: { name: string }[]): string {
   const names = typers.map((t) => t.name.split(/\s+/)[0] || t.name);
   if (names.length === 1) return `${names[0]} is typing…`;
   if (names.length === 2) return `${names[0]} and ${names[1]} are typing…`;
   return `${names[0]} and ${names.length - 1} others are typing…`;
+}
+
+function messageSnippet(content: string, max = 120): string {
+  const clean = (content || "").split("\n").filter((l) => !l.startsWith("📎")).join(" ").trim();
+  return clean.length > max ? `${clean.slice(0, max)}…` : clean;
+}
+
+function splitAttachedFiles(files: File[]) {
+  const images = files.filter((f) => f.type.startsWith("image/"));
+  const documents = files.filter((f) => !f.type.startsWith("image/"));
+  return { images, documents };
+}
+
+/** Build optimistic attachment metadata — documents use 📎 lines; images use imageUrls. */
+function buildAttachmentMeta(files: File[]) {
+  const { images, documents } = splitAttachedFiles(files);
+  const fileLabel =
+    documents.length > 0 ? `\n📎 ${documents.map((f) => f.name).join(", ")}` : "";
+  const imageUrls =
+    images.length > 0 ? images.map((f) => URL.createObjectURL(f)) : undefined;
+  return { fileLabel, imageUrls };
 }
 
 function applyTenantBrandFromSession(tenantColor: string | undefined) {
@@ -282,6 +333,14 @@ export const App: React.FC = () => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const lastTypingPingRef = useRef(0);
   const [collaborativeTypers, setCollaborativeTypers] = useState<{ userId: string; name: string }[]>([]);
+  const [replyTarget, setReplyTarget] = useState<{ messageId: string; senderName?: string; snippet: string } | null>(null);
+  const [messageMenu, setMessageMenu] = useState<{ idx: number; x: number; y: number } | null>(null);
+  const [reactPickerAnchor, setReactPickerAnchor] = useState<{
+    msgId: string;
+    messageIdx: number;
+    x: number;
+    y: number;
+  } | null>(null);
 
   const [folders, setFolders] = useState<ConversationFolder[]>([]);
   const [expandedFolderIds, setExpandedFolderIds] = useState<Set<string>>(new Set());
@@ -324,6 +383,11 @@ export const App: React.FC = () => {
   const [selectedModel, setSelectedModel] = useState<"gpt" | "claude" | "kimi" | "deepseek">("gpt");
   const [webcamOpen, setWebcamOpen] = useState(false);
   const [copiedMessageIndex, setCopiedMessageIndex] = useState<number | null>(null);
+  const [softToastMessage, setSoftToastMessage] = useState<string | null>(null);
+  const [profilePicPromptOpen, setProfilePicPromptOpen] = useState(false);
+  const [profilePicUploading, setProfilePicUploading] = useState(false);
+  const profilePicInputRef = useRef<HTMLInputElement>(null);
+  const [imageLightboxUrl, setImageLightboxUrl] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [selectedAvatar, setSelectedAvatar] = useState<string>(() => localStorage.getItem("nexa-avatar") || "");
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
@@ -333,6 +397,7 @@ export const App: React.FC = () => {
   const photosInputRef = useRef<HTMLInputElement>(null);
   const attachMenuWrapRef = useRef<HTMLDivElement>(null);
   const copyFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const softToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   // Aborts the in-flight streaming generation when the user hits "stop".
@@ -389,6 +454,92 @@ export const App: React.FC = () => {
     );
   }, [currentConversation, mentionedConversations, pendingMentions.length, user?.id]);
 
+  const canOpenMessageMenu = Boolean(currentConversation && !currentConversation.isShared);
+
+  const refreshCurrentConversation = useCallback(async (convId?: string) => {
+    const id = convId || currentConversation?._id;
+    if (!token || !id) return null;
+    try {
+      const { data } = await axios.get<{ conversation: Conversation; isCollaborative?: boolean }>(
+        `/api/v1/conversations/${id}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setCurrentConversation((prev) =>
+        prev && prev._id === id
+          ? {
+              ...prev,
+              messages: data.conversation.messages,
+              pinnedMessage: data.conversation.pinnedMessage ?? undefined,
+              updatedAt: data.conversation.updatedAt,
+              isCollaborative: data.isCollaborative ?? prev.isCollaborative,
+            }
+          : prev
+      );
+      setConversations((prev) =>
+        prev.map((c) =>
+          c._id === id
+            ? {
+                ...c,
+                messages: data.conversation.messages,
+                pinnedMessage: data.conversation.pinnedMessage ?? undefined,
+                updatedAt: data.conversation.updatedAt,
+              }
+            : c
+        )
+      );
+      return data.conversation;
+    } catch {
+      return null;
+    }
+  }, [token, currentConversation?._id]);
+
+  // Load full conversation (messageIds, pinned state) when opening a chat.
+  useEffect(() => {
+    if (!token || !currentConversation?._id || currentConversation.isShared) return;
+    void refreshCurrentConversation(currentConversation._id);
+  }, [currentConversation?._id, token, refreshCurrentConversation]);
+
+  // One-time profile picture prompt for users without an avatar (bump storage key on new releases).
+  useEffect(() => {
+    if (!isAuthenticated || !user || user.profilePicture || isUserChatProfile) {
+      setProfilePicPromptOpen(false);
+      return;
+    }
+    try {
+      if (localStorage.getItem(PROFILE_PIC_PROMPT_STORAGE_KEY)) return;
+    } catch { /* ignore */ }
+    setProfilePicPromptOpen(true);
+  }, [isAuthenticated, user?.id, user?.profilePicture, isUserChatProfile]);
+
+  useEffect(() => {
+    if (!imageLightboxUrl) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setImageLightboxUrl(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [imageLightboxUrl]);
+
+  const openMessageMenu = useCallback((idx: number, clientX: number, clientY: number) => {
+    if (!currentConversation || currentConversation.isShared) return;
+    window.getSelection()?.removeAllRanges();
+    setMessageMenu({ idx, x: clientX, y: clientY });
+    setReactPickerAnchor(null);
+  }, [currentConversation]);
+
+  const groupParticipantIds = React.useMemo(() => {
+    const ids = new Set<string>();
+    if (user?.id) ids.add(String(user.id));
+    const entry = mentionedConversations.find(
+      (m) => String(m.conversation._id) === currentConversation?._id
+    );
+    entry?.participants?.forEach((p) => ids.add(String(p.id)));
+    (currentConversation?.messages ?? []).forEach((m) => {
+      if (m.senderId) ids.add(String(m.senderId));
+    });
+    return ids;
+  }, [currentConversation?._id, currentConversation?.messages, mentionedConversations, user?.id]);
+
   const notifyCollaborativeTyping = useCallback(() => {
     if (!isActiveGroupChat || !token || !currentConversation?._id) return;
     const now = Date.now();
@@ -432,7 +583,7 @@ export const App: React.FC = () => {
   // with the inline ghost-text completion.
   const getMentionMatches = (query: string) => {
     const q = query.toLowerCase();
-    return buUsers
+    const people = buUsers
       .filter(
         u =>
           u.fullName.toLowerCase().includes(q) ||
@@ -443,8 +594,18 @@ export const App: React.FC = () => {
         const bp = b.fullName.toLowerCase().startsWith(q) ? 0 : 1;
         if (ap !== bp) return ap - bp;
         return a.fullName.localeCompare(b.fullName);
-      })
-      .slice(0, 6);
+      });
+
+    const matches: { _id: string; fullName: string; email: string; profilePicture?: string | null; isAdmin?: boolean; isNexa?: boolean }[] = [];
+    if (isActiveGroupChat && (NEXA_AI_MENTION.toLowerCase().includes(q) || "nexa".startsWith(q) || q === "")) {
+      matches.push({
+        _id: NEXA_AI_ID,
+        fullName: NEXA_AI_MENTION,
+        email: "Ask Nexa AI",
+        isNexa: true,
+      });
+    }
+    return [...matches, ...people.slice(0, 6)];
   };
 
   // Inline ghost-text completion for the current @query. Shows the remainder of
@@ -464,9 +625,12 @@ export const App: React.FC = () => {
     const atIdx = input.lastIndexOf('@');
     const newInput = (atIdx >= 0 ? input.slice(0, atIdx) : input) + `@${u.fullName} `;
     setInput(newInput);
-    setPendingMentions(prev =>
-      prev.some(m => m.userId === u._id) ? prev : [...prev, { userId: u._id, name: u.fullName }]
-    );
+    // Only queue a collaboration invite for users not already in this group.
+    if (u._id !== NEXA_AI_ID && (!isActiveGroupChat || !groupParticipantIds.has(u._id))) {
+      setPendingMentions(prev =>
+        prev.some(m => m.userId === u._id) ? prev : [...prev, { userId: u._id, name: u.fullName }]
+      );
+    }
     setMentionQuery(null);
     setMentionActiveIndex(0);
     requestAnimationFrame(() => textareaRef.current?.focus());
@@ -587,12 +751,17 @@ export const App: React.FC = () => {
           { headers: { Authorization: `Bearer ${token}` } }
         );
         const fresh = data.conversation;
-        if (fresh && fresh.messages?.length > (currentConversation.messages?.length ?? 0)) {
-          setCurrentConversation(prev => prev && prev._id === fresh._id
-            ? { ...prev, messages: fresh.messages, isCollaborative: data.isCollaborative ?? prev.isCollaborative }
-            : prev
-          );
-        }
+        setCurrentConversation((prev) => {
+          if (!prev || prev._id !== fresh._id) return prev;
+          if (fresh.updatedAt === prev.updatedAt) return prev;
+          return {
+            ...prev,
+            messages: fresh.messages,
+            pinnedMessage: fresh.pinnedMessage ?? undefined,
+            updatedAt: fresh.updatedAt,
+            isCollaborative: data.isCollaborative ?? prev.isCollaborative,
+          };
+        });
       } catch { /* silent */ }
     }, 8000);
     return () => clearInterval(interval);
@@ -866,6 +1035,156 @@ export const App: React.FC = () => {
     setCurrentConversation((prev) =>
       prev && prev._id === convId ? { ...prev, isCollaborative: true } : prev
     );
+  }
+
+  async function sendGroupMessage(content: string, convId: string, files: File[] = []) {
+    if (!token) return;
+    const messageId = crypto.randomUUID();
+    const { images } = splitAttachedFiles(files);
+    const { fileLabel, imageUrls } = buildAttachmentMeta(files);
+    const replyPayload = replyTarget
+      ? {
+          messageId: replyTarget.messageId,
+          senderName: replyTarget.senderName,
+          content: replyTarget.snippet,
+        }
+      : undefined;
+
+    const optimisticMsg: Message = {
+      role: "user",
+      content: (content || "") + fileLabel || (images.length > 0 ? "📷 Photo" : ""),
+      timestamp: new Date(),
+      messageId,
+      senderId: user?.id,
+      senderName: user?.fullName || user?.email,
+      ...(imageUrls ? { imageUrls } : {}),
+      ...(replyPayload ? { replyTo: replyPayload } : {}),
+    };
+    setCurrentConversation((prev) =>
+      prev && prev._id === convId
+        ? { ...prev, messages: [...(prev.messages || []), optimisticMsg], isCollaborative: true }
+        : prev
+    );
+
+    let data: { conversation: Conversation };
+    try {
+      if (images.length > 0) {
+        const formData = new FormData();
+        formData.append("content", content || "");
+        formData.append("messageId", messageId);
+        if (replyPayload) formData.append("replyTo", JSON.stringify(replyPayload));
+        images.forEach((f) => formData.append("files", f));
+        ({ data } = await axios.post<{ conversation: Conversation }>(
+          `/api/v1/conversations/${convId}/note`,
+          formData,
+          { headers: { Authorization: `Bearer ${token}` } }
+        ));
+      } else {
+        const payload: Record<string, unknown> = { content, messageId };
+        if (replyPayload) payload.replyTo = replyPayload;
+        ({ data } = await axios.post<{ conversation: Conversation }>(
+          `/api/v1/conversations/${convId}/note`,
+          payload,
+          { headers: { Authorization: `Bearer ${token}` } }
+        ));
+      }
+    } catch {
+      setCurrentConversation((prev) =>
+        prev && prev._id === convId
+          ? { ...prev, messages: (prev.messages || []).filter((m) => m.messageId !== messageId) }
+          : prev
+      );
+      throw new Error("Could not send group message");
+    }
+
+    setReplyTarget(null);
+    setCurrentConversation((prev) =>
+      prev && prev._id === convId
+        ? { ...prev, ...data.conversation, isCollaborative: true }
+        : data.conversation
+    );
+    setConversations((prev) =>
+      prev.map((c) => (c._id === convId ? { ...c, ...data.conversation, isCollaborative: true } : c))
+    );
+  }
+
+  async function handleMessageReaction(messageId: string, emoji: string, messageIdx?: number) {
+    if (!token || !currentConversation?._id) return;
+    let resolvedId = messageId;
+    if (resolvedId.startsWith("idx-") && messageIdx !== undefined) {
+      const fresh = await refreshCurrentConversation();
+      resolvedId = fresh?.messages?.[messageIdx]?.messageId || resolvedId;
+    }
+    if (!resolvedId || resolvedId.startsWith("idx-")) return;
+    try {
+      const { data } = await axios.post<{ conversation: Conversation }>(
+        `/api/v1/conversations/${currentConversation._id}/messages/${resolvedId}/reactions`,
+        { emoji },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setCurrentConversation((prev) =>
+        prev ? { ...prev, messages: data.conversation.messages, updatedAt: data.conversation.updatedAt } : prev
+      );
+      setReactPickerAnchor(null);
+      setMessageMenu(null);
+    } catch { /* silent */ }
+  }
+
+  async function handlePinMessage(message: Message, messageIdx?: number) {
+    if (!token || !currentConversation?._id) return;
+    let messageId = message.messageId;
+    if (!messageId && messageIdx !== undefined) {
+      const fresh = await refreshCurrentConversation();
+      messageId = fresh?.messages?.[messageIdx]?.messageId;
+    }
+    if (!messageId) {
+      alert("Could not pin this message. Please try again.");
+      return;
+    }
+    try {
+      const { data } = await axios.post<{ conversation: Conversation }>(
+        `/api/v1/conversations/${currentConversation._id}/pin`,
+        { messageId },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setCurrentConversation((prev) =>
+        prev ? { ...prev, pinnedMessage: data.conversation.pinnedMessage, updatedAt: data.conversation.updatedAt } : prev
+      );
+      setConversations((prev) =>
+        prev.map((c) =>
+          c._id === currentConversation._id
+            ? { ...c, pinnedMessage: data.conversation.pinnedMessage, updatedAt: data.conversation.updatedAt }
+            : c
+        )
+      );
+      setMessageMenu(null);
+      showSoftToast("Message pinned");
+    } catch {
+      alert("Could not pin this message. Please try again.");
+    }
+  }
+
+  async function handleUnpinMessage() {
+    if (!token || !currentConversation?._id) return;
+    try {
+      const { data } = await axios.delete<{ conversation: Conversation }>(
+        `/api/v1/conversations/${currentConversation._id}/pin`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setCurrentConversation((prev) =>
+        prev ? { ...prev, pinnedMessage: undefined, updatedAt: data.conversation.updatedAt } : prev
+      );
+      setConversations((prev) =>
+        prev.map((c) =>
+          c._id === currentConversation._id
+            ? { ...c, pinnedMessage: undefined, updatedAt: data.conversation.updatedAt }
+            : c
+        )
+      );
+      showSoftToast("Message unpinned");
+    } catch {
+      showSoftToast("Could not unpin message");
+    }
   }
 
   async function handleAccessRequest(convId: string, sharerId: string) {
@@ -1790,25 +2109,78 @@ export const App: React.FC = () => {
   useEffect(() => {
     return () => {
       if (copyFeedbackTimerRef.current) clearTimeout(copyFeedbackTimerRef.current);
+      if (softToastTimerRef.current) clearTimeout(softToastTimerRef.current);
     };
   }, []);
+
+  const showSoftToast = (message: string) => {
+    if (softToastTimerRef.current) clearTimeout(softToastTimerRef.current);
+    setSoftToastMessage(message);
+    softToastTimerRef.current = setTimeout(() => {
+      setSoftToastMessage(null);
+      softToastTimerRef.current = null;
+    }, 2200);
+  };
+
+  const dismissProfilePicPrompt = (reason: "later" | "done") => {
+    try {
+      localStorage.setItem(PROFILE_PIC_PROMPT_STORAGE_KEY, reason);
+    } catch { /* ignore */ }
+    setProfilePicPromptOpen(false);
+  };
+
+  const handleProfilePicPromptUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !token) return;
+    setProfilePicUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("avatar", file);
+      const { data } = await axios.post<{ profilePicture: string }>("/api/v1/auth/me/avatar", fd, {
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "multipart/form-data" },
+      });
+      const nextUser = { ...user!, profilePicture: data.profilePicture };
+      setUser(nextUser);
+      localStorage.setItem("nexa-user", JSON.stringify(nextUser));
+      dismissProfilePicPrompt("done");
+      showSoftToast("Profile picture updated");
+    } catch {
+      showSoftToast("Could not upload picture");
+    } finally {
+      setProfilePicUploading(false);
+      if (profilePicInputRef.current) profilePicInputRef.current.value = "";
+    }
+  };
 
   const removeAttachedFile = (index: number) => {
     setAttachedFiles(prev => prev.filter((_, i) => i !== index));
     setAttachError(null);
   };
 
-  const copyMessageText = async (text: string, messageIndex: number) => {
-    const t = text.trim();
-    if (!t || typeof navigator === "undefined" || !navigator.clipboard) return;
+  const copyMessageText = async (
+    text: string,
+    messageIndex: number,
+    options?: { closeMenu?: boolean; showToast?: boolean }
+  ) => {
+    const clean = (text || "")
+      .split("\n")
+      .filter((l) => !l.startsWith("📎"))
+      .join("\n")
+      .trim();
+    if (!clean || typeof navigator === "undefined" || !navigator.clipboard) return;
     try {
-      await navigator.clipboard.writeText(t);
+      await navigator.clipboard.writeText(clean);
       if (copyFeedbackTimerRef.current) clearTimeout(copyFeedbackTimerRef.current);
       setCopiedMessageIndex(messageIndex);
       copyFeedbackTimerRef.current = setTimeout(() => {
         setCopiedMessageIndex(null);
         copyFeedbackTimerRef.current = null;
       }, 2000);
+      if (options?.showToast !== false) showSoftToast("Message copied");
+      if (options?.closeMenu) {
+        setMessageMenu(null);
+        setReactPickerAnchor(null);
+      }
     } catch {
       // ignore
     }
@@ -1830,22 +2202,55 @@ export const App: React.FC = () => {
     if (loading || !token) return;
     if (isRateLimited) return;
 
-    // If the message contains @mentions and nothing else of substance, send as a
-    // notification-only note — no AI response generated.
-    const isMentionOnly = pendingMentions.length > 0;
+    const mentionsNexa = NEXA_MENTION_RE.test(trimmed);
+    const newInvites = pendingMentions.filter((m) => !groupParticipantIds.has(m.userId));
 
     const filesToSend = [...attachedFiles];
+    const { documents: docFiles, images: imageFiles } = splitAttachedFiles(filesToSend);
+    const needsNexa = mentionsNexa || docFiles.length > 0;
     setInput("");
     setAttachedFiles([]);
     setAttachError(null);
     setMentionQuery(null);
     stopCollaborativeTyping();
 
-    if (isMentionOnly && trimmed) {
+    // Group chat: human messages by default; Nexa only when @Nexa AI is tagged (or documents need AI).
+    if (isActiveGroupChat && !needsNexa && (trimmed || imageFiles.length > 0)) {
+      try {
+        if (!currentConversation) {
+          const createData = await axios.post<{ conversation: Conversation }>(
+            "/api/v1/conversations", {}, { headers: { Authorization: `Bearer ${token}` } }
+          );
+          const conv = createData.data.conversation;
+          await sendGroupMessage(trimmed, conv._id, imageFiles);
+          if (newInvites.length > 0) {
+            setPendingMentions(newInvites);
+            await applyPendingMentions(conv._id);
+          } else {
+            setPendingMentions([]);
+          }
+        } else {
+          await sendGroupMessage(trimmed, currentConversation._id, imageFiles);
+          if (newInvites.length > 0) {
+            setPendingMentions(newInvites);
+            await applyPendingMentions(currentConversation._id);
+          } else {
+            setPendingMentions([]);
+          }
+        }
+      } catch {
+        alert("Could not send message. Please try again.");
+      }
+      return;
+    }
+
+    // Initial invite flow (solo chat): @mention to add someone without triggering AI.
+    const isInviteOnly = !isActiveGroupChat && pendingMentions.length > 0;
+
+    if (isInviteOnly && trimmed) {
       const userMsg: Message = { role: "user", content: trimmed, timestamp: new Date() };
       try {
         if (!currentConversation) {
-          // Create a new conversation first, then save the note
           const createData = await axios.post<{ conversation: Conversation }>(
             "/api/v1/conversations", {}, { headers: { Authorization: `Bearer ${token}` } }
           );
@@ -1855,7 +2260,7 @@ export const App: React.FC = () => {
             { content: trimmed },
             { headers: { Authorization: `Bearer ${token}` } }
           );
-          const updated = { ...conv, messages: data.conversation.messages };
+          const updated = { ...conv, messages: data.conversation.messages, isCollaborative: true };
           setCurrentConversation(updated);
           setConversations(prev => [updated, ...prev]);
           applyPendingMentions(conv._id);
@@ -1865,7 +2270,7 @@ export const App: React.FC = () => {
             { content: trimmed },
             { headers: { Authorization: `Bearer ${token}` } }
           );
-          const updated = { ...currentConversation, messages: data.conversation.messages };
+          const updated = { ...currentConversation, messages: data.conversation.messages, isCollaborative: true };
           setCurrentConversation(updated);
           setConversations(prev => prev.map(c => c._id === updated._id ? updated : c));
           applyPendingMentions(currentConversation._id);
@@ -1875,6 +2280,14 @@ export const App: React.FC = () => {
         applyPendingMentions(currentConversation?._id || '');
       }
       return;
+    }
+
+    // Clear invite queue when proceeding to AI — invites already in group don't block Nexa.
+    if (newInvites.length > 0 && currentConversation) {
+      setPendingMentions(newInvites);
+      applyPendingMentions(currentConversation._id);
+    } else {
+      setPendingMentions([]);
     }
 
     // If no conversation exists, create one first
@@ -1891,8 +2304,14 @@ export const App: React.FC = () => {
         return alreadyExists ? prev : [newConv, ...prev];
       });
 
-      const fileLabel = filesToSend.length > 0 ? `\n📎 ${filesToSend.map(f => f.name).join(', ')}` : '';
-      const userMsg: Message = { role: "user", content: (trimmed || '') + fileLabel, timestamp: new Date() };
+      const { fileLabel, imageUrls } = buildAttachmentMeta(filesToSend);
+      const userMsg: Message = {
+        role: "user",
+        content: (trimmed || "") + fileLabel,
+        timestamp: new Date(),
+        ...(imageUrls ? { imageUrls } : {}),
+        ...(isActiveGroupChat ? { senderId: user?.id, senderName: user?.fullName || user?.email } : {}),
+      };
       const updatedConv = { ...newConv, messages: [userMsg] };
       setCurrentConversation(updatedConv);
       setLoading(true);
@@ -1921,8 +2340,14 @@ export const App: React.FC = () => {
       return;
     }
 
-    const fileLabel = filesToSend.length > 0 ? `\n📎 ${filesToSend.map(f => f.name).join(', ')}` : '';
-    const userMsg: Message = { role: "user", content: (trimmed || '') + fileLabel, timestamp: new Date() };
+    const { fileLabel, imageUrls } = buildAttachmentMeta(filesToSend);
+    const userMsg: Message = {
+      role: "user",
+      content: (trimmed || "") + fileLabel,
+      timestamp: new Date(),
+      ...(imageUrls ? { imageUrls } : {}),
+      ...(isActiveGroupChat ? { senderId: user?.id, senderName: user?.fullName || user?.email } : {}),
+    };
     const updatedConv = { ...currentConversation, messages: [...currentConversation.messages, userMsg] };
     setCurrentConversation(updatedConv);
     setLoading(true);
@@ -2713,6 +3138,31 @@ export const App: React.FC = () => {
             </div>
           </header>
 
+          {!isUserChatProfile &&
+            currentConversation?.pinnedMessage &&
+            !currentConversation.isShared &&
+            (currentConversation.messages?.length ?? 0) > 0 && (
+            <div className="group-pinned-bar group-pinned-bar--under-header" title="Pinned message">
+              <div className="group-pinned-bar-inner">
+                <span className="group-pinned-icon"><MdPushPin size={14} /></span>
+                <span className="group-pinned-text">
+                  {currentConversation.pinnedMessage.senderName
+                    ? `${currentConversation.pinnedMessage.senderName}: `
+                    : ""}
+                  {messageSnippet(currentConversation.pinnedMessage.content, 120)}
+                </span>
+                <button
+                  type="button"
+                  className="group-pinned-unpin"
+                  title="Unpin"
+                  onClick={() => void handleUnpinMessage()}
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+          )}
+
           {isUserChatProfile && user ? (
             <UserChatProfile
               user={user}
@@ -2936,14 +3386,29 @@ export const App: React.FC = () => {
                     const senderAvatar = m.role === 'user'
                       ? (isOwn ? (user?.profilePicture || undefined) : avatarById.get(String(m.senderId)))
                       : undefined;
+                    const msgId = m.messageId || `idx-${idx}`;
                     return (
-                    <div key={idx} className={`message-row-v2 ${m.role}${m.redacted ? ' redacted' : ''}`}>
+                    <div key={msgId} className={`message-row-v2 ${m.role}${m.redacted ? ' redacted' : ''}`}>
                       {m.role === 'assistant' && (
                         <div className="message-avatar-v2">
                           <img src={selectedAvatar || "/avatar-1.png"} alt="Nexa" className="bot-avatar-img" />
                         </div>
                       )}
-                      <div className="message-bubble-wrap-v2">
+                      <div
+                        className="message-bubble-wrap-v2"
+                        onDoubleClick={(e) => {
+                          if (!canOpenMessageMenu) return;
+                          e.preventDefault();
+                          e.stopPropagation();
+                          openMessageMenu(idx, e.clientX, e.clientY);
+                        }}
+                        onContextMenu={(e) => {
+                          if (!canOpenMessageMenu) return;
+                          e.preventDefault();
+                          e.stopPropagation();
+                          openMessageMenu(idx, e.clientX, e.clientY);
+                        }}
+                      >
                         {m.role === 'user' && (
                           <div className={`msg-user-avatar${isOwn ? ' own' : ''}`} title={isOwn ? 'You' : (m.senderName || 'Collaborator')}>
                             {senderAvatar ? (
@@ -2954,8 +3419,25 @@ export const App: React.FC = () => {
                           </div>
                         )}
                         {(() => {
-                          // Attachment cards render ABOVE the message bubble, matching the reference
-                          // design: a red icon tile with the filename + file type beside it.
+                          if (!m.imageUrls || m.imageUrls.length === 0) return null;
+                          return (
+                            <div className="message-image-attach-row">
+                              {m.imageUrls.map((url, iIdx) => (
+                                <button
+                                  key={iIdx}
+                                  type="button"
+                                  className="message-image-attach-card"
+                                  onClick={() => setImageLightboxUrl(url)}
+                                  aria-label="View attached image"
+                                >
+                                  <img src={url} alt="Attached image" />
+                                </button>
+                              ))}
+                            </div>
+                          );
+                        })()}
+                        {(() => {
+                          // Document attachment cards render ABOVE the message bubble.
                           const docFileNames = (m.content || "")
                             .split("\n")
                             .filter((l) => l.startsWith("📎"))
@@ -3021,18 +3503,15 @@ export const App: React.FC = () => {
                           );
                         })()}
                         <div className="message-bubble-v2">
-                          {m.imageUrls && m.imageUrls.length > 0 ? (
-                            <div className="message-image-grid-v2">
-                              {m.imageUrls.map((url, iIdx) => (
-                                <a key={iIdx} href={url} target="_blank" rel="noreferrer">
-                                  <img src={url} alt="Attached" className="message-image-v2" />
-                                </a>
-                              ))}
+                          {m.replyTo ? (
+                            <div className="message-reply-quote">
+                              <span className="message-reply-quote-name">{m.replyTo.senderName || "Message"}</span>
+                              <span className="message-reply-quote-text">{messageSnippet(m.replyTo.content, 100)}</span>
                             </div>
                           ) : null}
                           {(() => {
                                 // Only the text lines render inside the bubble; 📎 attachment lines
-                                // are rendered as cards above the bubble (see above).
+                                // and images are rendered as cards above the bubble.
                                 const textLines = (m.content || "").split("\n").filter(l => !l.startsWith("📎"));
                                 if (!textLines.some(l => l.trim())) return null;
                                 return (
@@ -3100,6 +3579,38 @@ export const App: React.FC = () => {
                             </div>
                           ) : null}
                         </div>
+                        {m.reactions && m.reactions.length > 0 ? (
+                          <div className="message-reactions-row">
+                            {(() => {
+                              const grouped = new Map<string, { count: number; mine: boolean }>();
+                              for (const r of m.reactions) {
+                                const entry = grouped.get(r.emoji) || { count: 0, mine: false };
+                                entry.count += 1;
+                                if (String(r.userId) === String(user?.id)) entry.mine = true;
+                                grouped.set(r.emoji, entry);
+                              }
+                              return [...grouped.entries()].map(([emoji, info]) =>
+                                info.mine ? (
+                                  <button
+                                    key={emoji}
+                                    type="button"
+                                    className="message-reaction-chip message-reaction-chip--mine"
+                                    title="Click to remove your reaction"
+                                    onClick={() => {
+                                      if (m.messageId) void handleMessageReaction(m.messageId, emoji, idx);
+                                    }}
+                                  >
+                                    {emoji}{info.count > 1 ? ` ${info.count}` : ""}
+                                  </button>
+                                ) : (
+                                  <span key={emoji} className="message-reaction-chip" title={emoji}>
+                                    {emoji}{info.count > 1 ? ` ${info.count}` : ""}
+                                  </span>
+                                )
+                              );
+                            })()}
+                          </div>
+                        ) : null}
                         <div className="message-copy-stack-v2">
                           <button
                             type="button"
@@ -3153,6 +3664,69 @@ export const App: React.FC = () => {
                       </span>
                     </div>
                   )}
+                  {messageMenu && canOpenMessageMenu && (() => {
+                    const m = currentConversation?.messages?.[messageMenu.idx];
+                    if (!m) return null;
+                    const msgId = m.messageId || `idx-${messageMenu.idx}`;
+                    return (
+                      <>
+                        <div className="message-menu-backdrop" onClick={() => { setMessageMenu(null); setReactPickerAnchor(null); }} />
+                        <div
+                          className="message-action-menu"
+                          style={{ left: Math.min(messageMenu.x, window.innerWidth - 200), top: Math.min(messageMenu.y, window.innerHeight - 220) }}
+                          role="menu"
+                        >
+                          <button type="button" role="menuitem" onClick={() => {
+                            setReplyTarget({
+                              messageId: msgId,
+                              senderName: m.role === "assistant" ? "Nexa AI" : (m.senderName || "User"),
+                              snippet: messageSnippet(m.content),
+                            });
+                            setMessageMenu(null);
+                            textareaRef.current?.focus();
+                          }}>
+                            <BiReply size={16} /> Reply
+                          </button>
+                          <button type="button" role="menuitem" onClick={() => {
+                            if (!messageMenu) return;
+                            const opening = reactPickerAnchor?.msgId !== msgId;
+                            setMessageMenu(null);
+                            setReactPickerAnchor(
+                              opening
+                                ? { msgId, messageIdx: messageMenu.idx, x: messageMenu.x, y: messageMenu.y }
+                                : null
+                            );
+                          }}>
+                            <BiSmile size={16} /> React
+                          </button>
+                          <button type="button" role="menuitem" onClick={() => void copyMessageText(m.content, messageMenu.idx, { closeMenu: true })}>
+                            <BiCopy size={16} /> Copy
+                          </button>
+                          <button type="button" role="menuitem" onClick={() => void handlePinMessage(m, messageMenu.idx)}>
+                            <MdPushPin size={16} /> Pin
+                          </button>
+                        </div>
+                      </>
+                    );
+                  })()}
+                  {reactPickerAnchor && (() => {
+                    const m = currentConversation?.messages?.[reactPickerAnchor.messageIdx];
+                    if (!m) return null;
+                    const msgId = m.messageId || `idx-${reactPickerAnchor.messageIdx}`;
+                    const myReaction =
+                      m.reactions?.find((r) => String(r.userId) === String(user?.id))?.emoji ?? null;
+                    return (
+                      <ReactionEmojiPicker
+                        anchorX={reactPickerAnchor.x}
+                        anchorY={reactPickerAnchor.y + 48}
+                        activeReaction={myReaction}
+                        onSelect={(emoji) =>
+                          void handleMessageReaction(m.messageId || msgId, emoji, reactPickerAnchor.messageIdx)
+                        }
+                        onClose={() => setReactPickerAnchor(null)}
+                      />
+                    );
+                  })()}
                   <div ref={messagesEndRef} />
                 </div>
               </div>
@@ -3176,6 +3750,18 @@ export const App: React.FC = () => {
                       <button className="remove-file-btn" onClick={() => removeAttachedFile(i)}>✕</button>
                     </div>
                   ))}
+                </div>
+              )}
+              {replyTarget && canOpenMessageMenu && (
+                <div className="reply-preview-bar">
+                  <div className="reply-preview-accent" />
+                  <div className="reply-preview-body">
+                    <div className="reply-preview-label">Replying to {replyTarget.senderName || "message"}</div>
+                    <div className="reply-preview-snippet">{replyTarget.snippet}</div>
+                  </div>
+                  <button type="button" className="reply-preview-close" aria-label="Cancel reply" onClick={() => setReplyTarget(null)}>
+                    ✕
+                  </button>
                 </div>
               )}
               <div className="footer-input-container-v2">
@@ -3207,10 +3793,14 @@ export const App: React.FC = () => {
                           {u.profilePicture ? (
                             <img className="mention-avatar mention-avatar--img" src={u.profilePicture} alt="" />
                           ) : (
-                            <span className="mention-avatar">{u.fullName.charAt(0).toUpperCase()}</span>
+                            <span className={`mention-avatar${(u as { isNexa?: boolean }).isNexa ? ' mention-avatar--nexa' : ''}`}>
+                              {(u as { isNexa?: boolean }).isNexa ? 'N' : u.fullName.charAt(0).toUpperCase()}
+                            </span>
                           )}
                           <span className="mention-name">{u.fullName}</span>
-                          {u.isAdmin && <span className="mention-role-badge">Admin</span>}
+                          {(u as { isNexa?: boolean }).isNexa ? (
+                            <span className="mention-role-badge">AI</span>
+                          ) : u.isAdmin ? <span className="mention-role-badge">Admin</span> : null}
                           <span className="mention-email">{u.email}</span>
                         </button>
                       ))}
@@ -3229,7 +3819,7 @@ export const App: React.FC = () => {
                   )}
                   <textarea
                     className="footer-textarea-v2"
-                    placeholder="Send a message... (type @ to mention someone)"
+                    placeholder={isActiveGroupChat ? "Message the group… (@Nexa AI to ask Nexa)" : "Send a message... (type @ to mention someone)"}
                     value={input}
                     onChange={(e) => handleComposerInput(e.target.value, e.target, 200)}
                     onBlur={stopCollaborativeTyping}
@@ -3277,6 +3867,12 @@ export const App: React.FC = () => {
           )}
           </>
           )}
+
+          {softToastMessage && (
+            <div className="copy-toast-v2" role="status" aria-live="polite">
+              {softToastMessage}
+            </div>
+          )}
         </main>
 
         <WebcamCaptureModal
@@ -3285,7 +3881,76 @@ export const App: React.FC = () => {
           onCapture={(file) => setAttachedFiles((prev) => [...prev, file])}
         />
 
+        {imageLightboxUrl && (
+          <div
+            className="image-lightbox-overlay"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Image preview"
+            onClick={() => setImageLightboxUrl(null)}
+          >
+            <button
+              type="button"
+              className="image-lightbox-close"
+              aria-label="Close image"
+              onClick={(e) => {
+                e.stopPropagation();
+                setImageLightboxUrl(null);
+              }}
+            >
+              <BiX size={26} />
+            </button>
+            <img
+              src={imageLightboxUrl}
+              alt="Attached image enlarged"
+              className="image-lightbox-img"
+              onClick={(e) => e.stopPropagation()}
+            />
+          </div>
+        )}
+
         {/* Modals */}
+        {profilePicPromptOpen && user && !user.profilePicture && (
+          <div className="modal-overlay-v2 profile-pic-prompt-overlay">
+            <div className="modal-card-v2 profile-pic-prompt-card">
+              <div className="profile-pic-prompt-avatar" aria-hidden="true">
+                {(user.fullName || user.email || "U").split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2)}
+              </div>
+              <div className="modal-header-v2">
+                <h3>Add a profile picture</h3>
+                <p>
+                  Help your teammates recognize you in group chats. You can upload a photo now or do it later from your profile.
+                </p>
+              </div>
+              <input
+                ref={profilePicInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/gif,image/webp"
+                style={{ display: "none" }}
+                onChange={handleProfilePicPromptUpload}
+              />
+              <div className="modal-footer-v2 profile-pic-prompt-actions">
+                <button
+                  type="button"
+                  className="modal-btn-v2 secondary"
+                  onClick={() => dismissProfilePicPrompt("later")}
+                  disabled={profilePicUploading}
+                >
+                  Upload later
+                </button>
+                <button
+                  type="button"
+                  className="modal-btn-v2 primary"
+                  disabled={profilePicUploading}
+                  onClick={() => profilePicInputRef.current?.click()}
+                >
+                  {profilePicUploading ? "Uploading…" : "Upload now"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {logoutConfirmOpen && (
           <div className="modal-overlay-v2">
             <div className="modal-card-v2">
@@ -5269,6 +5934,8 @@ export const App: React.FC = () => {
           align-items: flex-start;
           gap: 6px;
           max-width: 100%;
+          user-select: none;
+          -webkit-user-select: none;
         }
 
         .message-row-v2.user .message-bubble-wrap-v2 {
@@ -5630,6 +6297,79 @@ export const App: React.FC = () => {
         .generated-doc-btn-v2:hover { opacity: 0.85; }
         .dark-theme .generated-doc-btn-v2 { background: var(--brand-color, #ed0000); }
 
+        .message-image-attach-row {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          margin-bottom: 8px;
+          max-width: 320px;
+        }
+
+        .message-image-attach-card {
+          display: block;
+          border-radius: 14px;
+          overflow: hidden;
+          border: 1px solid rgba(0, 0, 0, 0.08);
+          background: #f4f4f5;
+          line-height: 0;
+          padding: 0;
+          cursor: zoom-in;
+        }
+
+        .message-image-attach-card img {
+          display: block;
+          width: 160px;
+          max-height: 200px;
+          object-fit: cover;
+        }
+
+        .dark-theme .message-image-attach-card {
+          border-color: rgba(255, 255, 255, 0.12);
+          background: rgba(255, 255, 255, 0.04);
+        }
+
+        .image-lightbox-overlay {
+          position: fixed;
+          inset: 0;
+          z-index: 1400;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 48px 24px 24px;
+          background: rgba(0, 0, 0, 0.88);
+          backdrop-filter: blur(6px);
+          animation: modalFadeIn 0.2s ease-out;
+        }
+
+        .image-lightbox-close {
+          position: fixed;
+          top: max(16px, env(safe-area-inset-top, 16px));
+          left: max(16px, env(safe-area-inset-left, 16px));
+          z-index: 1401;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 44px;
+          height: 44px;
+          border: none;
+          border-radius: 999px;
+          background: rgba(255, 255, 255, 0.14);
+          color: #fff;
+          cursor: pointer;
+        }
+
+        .image-lightbox-close:hover {
+          background: rgba(255, 255, 255, 0.24);
+        }
+
+        .image-lightbox-img {
+          max-width: min(960px, 100%);
+          max-height: calc(100vh - 96px);
+          object-fit: contain;
+          border-radius: 12px;
+          box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+        }
+
         .message-image-grid-v2 {
           display: grid;
           grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
@@ -5708,6 +6448,469 @@ export const App: React.FC = () => {
           width: 5px;
           height: 5px;
         }
+
+        .group-pinned-bar {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          margin: 0 0 12px 52px;
+          padding: 10px 14px;
+          border-radius: 12px;
+          background: #f5f0e8;
+          border: 1px solid rgba(0, 0, 0, 0.06);
+          box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+        }
+
+        .group-pinned-bar--under-header {
+          flex-shrink: 0;
+          margin: 0;
+          padding: 10px clamp(12px, 3vw, 28px);
+          border-radius: 0;
+          border: none;
+          border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+          background: #faf6f0;
+          box-shadow: none;
+          z-index: 4;
+        }
+
+        .group-pinned-bar-inner {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          width: 100%;
+          max-width: min(880px, 100%);
+          margin: 0 auto;
+        }
+
+        .copy-toast-v2 {
+          position: fixed;
+          left: 50%;
+          bottom: calc(96px + env(safe-area-inset-bottom, 0px));
+          transform: translateX(-50%);
+          z-index: 1300;
+          padding: 10px 20px;
+          border-radius: 999px;
+          background: rgba(17, 24, 39, 0.9);
+          color: #f9fafb;
+          font-size: 13px;
+          font-weight: 500;
+          letter-spacing: 0.01em;
+          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+          pointer-events: none;
+          animation: copyToastIn 0.22s ease-out;
+        }
+
+        @keyframes copyToastIn {
+          from {
+            opacity: 0;
+            transform: translateX(-50%) translateY(10px);
+          }
+          to {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+          }
+        }
+
+        .dark-theme .copy-toast-v2 {
+          background: rgba(255, 255, 255, 0.92);
+          color: #111827;
+          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+        }
+
+        .dark-theme .group-pinned-bar--under-header {
+          background: rgba(255, 255, 255, 0.06);
+          border-bottom-color: rgba(255, 255, 255, 0.08);
+        }
+
+        .group-pinned-icon {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 28px;
+          height: 28px;
+          border-radius: 999px;
+          background: rgba(0, 0, 0, 0.06);
+          color: #6b7280;
+          flex-shrink: 0;
+        }
+
+        .group-pinned-text {
+          font-size: 13px;
+          color: #374151;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          flex: 1;
+          min-width: 0;
+        }
+
+        .group-pinned-unpin {
+          flex-shrink: 0;
+          border: none;
+          background: transparent;
+          color: #9ca3af;
+          font-size: 18px;
+          line-height: 1;
+          cursor: pointer;
+          padding: 0 4px;
+        }
+
+        .group-pinned-unpin:hover { color: #374151; }
+
+        .reply-preview-bar {
+          display: flex;
+          align-items: stretch;
+          gap: 10px;
+          margin-bottom: 10px;
+          padding: 10px 12px;
+          border-radius: 12px;
+          background: #faf6f0;
+          border: 1px solid rgba(0, 0, 0, 0.06);
+        }
+
+        .reply-preview-accent {
+          width: 3px;
+          border-radius: 999px;
+          background: var(--brand-color, #ed0000);
+          flex-shrink: 0;
+        }
+
+        .reply-preview-body { flex: 1; min-width: 0; }
+
+        .reply-preview-label {
+          font-size: 12px;
+          font-weight: 600;
+          color: var(--brand-color, #ed0000);
+          margin-bottom: 2px;
+        }
+
+        .reply-preview-snippet {
+          font-size: 13px;
+          color: #4b5563;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        .reply-preview-close {
+          border: none;
+          background: transparent;
+          color: #9ca3af;
+          cursor: pointer;
+          font-size: 14px;
+          padding: 4px;
+        }
+
+        .message-reply-quote {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+          margin-bottom: 8px;
+          padding: 8px 10px;
+          border-left: 3px solid var(--brand-color, #ed0000);
+          border-radius: 8px;
+          background: rgba(0, 0, 0, 0.04);
+        }
+
+        .message-reply-quote-name {
+          font-size: 12px;
+          font-weight: 600;
+          color: var(--brand-color, #ed0000);
+        }
+
+        .message-reply-quote-text {
+          font-size: 12px;
+          color: #6b7280;
+        }
+
+        .message-row-v2.user .message-reply-quote {
+          background: rgba(255, 255, 255, 0.18);
+          border-left-color: rgba(255, 255, 255, 0.85);
+        }
+
+        .message-row-v2.user .message-reply-quote-name {
+          color: rgba(255, 255, 255, 0.95);
+        }
+
+        .message-row-v2.user .message-reply-quote-text {
+          color: rgba(255, 255, 255, 0.88);
+        }
+
+        .message-reactions-row {
+          display: flex;
+          gap: 4px;
+          margin-top: 4px;
+          margin-left: 4px;
+        }
+
+        .message-reaction-chip {
+          display: inline-flex;
+          align-items: center;
+          padding: 2px 8px;
+          border-radius: 999px;
+          background: #fff;
+          border: 1px solid rgba(0, 0, 0, 0.08);
+          font-size: 14px;
+          box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+        }
+
+        button.message-reaction-chip {
+          cursor: pointer;
+          font: inherit;
+        }
+
+        .message-reaction-chip--mine {
+          border-color: rgba(237, 0, 0, 0.25);
+          background: rgba(237, 0, 0, 0.06);
+        }
+
+        .message-reaction-chip--mine:hover {
+          background: rgba(237, 0, 0, 0.12);
+        }
+
+        .dark-theme .message-reaction-chip--mine {
+          border-color: rgba(255, 255, 255, 0.2);
+          background: rgba(255, 255, 255, 0.08);
+        }
+
+        .message-menu-backdrop {
+          position: fixed;
+          inset: 0;
+          z-index: 1200;
+        }
+
+        .message-action-menu {
+          position: fixed;
+          z-index: 1201;
+          min-width: 160px;
+          padding: 6px;
+          border-radius: 12px;
+          background: #fff;
+          border: 1px solid rgba(0, 0, 0, 0.08);
+          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+        }
+
+        .message-action-menu button {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          width: 100%;
+          border: none;
+          background: transparent;
+          padding: 10px 12px;
+          border-radius: 8px;
+          font-size: 14px;
+          cursor: pointer;
+          color: #111827;
+          text-align: left;
+        }
+
+        .message-action-menu button:hover {
+          background: #f3f4f6;
+        }
+
+        .reaction-picker-backdrop {
+          position: fixed;
+          inset: 0;
+          z-index: 1201;
+        }
+
+        .reaction-picker-root {
+          position: fixed;
+          z-index: 1202;
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          max-width: calc(100vw - 24px);
+        }
+
+        .reaction-quick-bar {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          padding: 6px 8px;
+          border-radius: 999px;
+          background: #fff;
+          border: 1px solid rgba(0, 0, 0, 0.08);
+          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+        }
+
+        .reaction-quick-scroll {
+          display: flex;
+          align-items: center;
+          gap: 2px;
+          max-width: min(280px, calc(100vw - 120px));
+          overflow-x: auto;
+          scrollbar-width: none;
+          -ms-overflow-style: none;
+        }
+
+        .reaction-quick-scroll::-webkit-scrollbar { display: none; }
+
+        .reaction-quick-btn {
+          border: none;
+          background: transparent;
+          font-size: 22px;
+          line-height: 1;
+          cursor: pointer;
+          padding: 4px 6px;
+          border-radius: 10px;
+          flex-shrink: 0;
+        }
+
+        .reaction-quick-btn:hover { background: #f3f4f6; }
+
+        .reaction-quick-btn--active {
+          background: rgba(237, 0, 0, 0.1);
+          box-shadow: inset 0 0 0 2px rgba(237, 0, 0, 0.35);
+        }
+
+        .reaction-plus-btn {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 36px;
+          height: 36px;
+          flex-shrink: 0;
+          border: none;
+          border-radius: 999px;
+          background: #f3f4f6;
+          color: #374151;
+          cursor: pointer;
+        }
+
+        .reaction-plus-btn:hover { background: #e5e7eb; }
+
+        .reaction-expanded-panel {
+          width: 300px;
+          max-width: calc(100vw - 24px);
+          max-height: 340px;
+          display: flex;
+          flex-direction: column;
+          border-radius: 16px;
+          background: rgba(255, 255, 255, 0.96);
+          border: 1px solid rgba(0, 0, 0, 0.08);
+          box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
+          backdrop-filter: blur(12px);
+          overflow: hidden;
+        }
+
+        .reaction-search-wrap {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          margin: 10px 10px 6px;
+          padding: 8px 12px;
+          border-radius: 12px;
+          background: #f3f4f6;
+        }
+
+        .reaction-search-icon { color: #9ca3af; flex-shrink: 0; }
+
+        .reaction-search-input {
+          flex: 1;
+          border: none;
+          background: transparent;
+          font-size: 14px;
+          outline: none;
+          color: #111827;
+        }
+
+        .reaction-section {
+          padding: 0 10px 8px;
+        }
+
+        .reaction-section--scroll {
+          flex: 1;
+          min-height: 0;
+          overflow-y: auto;
+        }
+
+        .reaction-section-label {
+          font-size: 11px;
+          font-weight: 700;
+          letter-spacing: 0.04em;
+          text-transform: uppercase;
+          color: #9ca3af;
+          margin-bottom: 6px;
+        }
+
+        .reaction-grid {
+          display: grid;
+          grid-template-columns: repeat(8, 1fr);
+          gap: 2px;
+        }
+
+        .reaction-grid-btn {
+          border: none;
+          background: transparent;
+          font-size: 22px;
+          line-height: 1;
+          padding: 6px 2px;
+          border-radius: 8px;
+          cursor: pointer;
+        }
+
+        .reaction-grid-btn:hover { background: #f3f4f6; }
+
+        .reaction-grid-btn--active {
+          background: rgba(237, 0, 0, 0.1);
+          box-shadow: inset 0 0 0 2px rgba(237, 0, 0, 0.35);
+        }
+
+        .reaction-category-tabs {
+          display: flex;
+          align-items: center;
+          gap: 2px;
+          padding: 8px 10px;
+          border-top: 1px solid rgba(0, 0, 0, 0.06);
+          overflow-x: auto;
+          scrollbar-width: none;
+        }
+
+        .reaction-category-tabs::-webkit-scrollbar { display: none; }
+
+        .reaction-category-tab {
+          border: none;
+          background: transparent;
+          font-size: 20px;
+          line-height: 1;
+          padding: 6px 8px;
+          border-radius: 10px;
+          cursor: pointer;
+          opacity: 0.55;
+          flex-shrink: 0;
+        }
+
+        .reaction-category-tab.active,
+        .reaction-category-tab:hover {
+          opacity: 1;
+          background: #f3f4f6;
+        }
+
+        .mention-avatar--nexa {
+          background: var(--brand-color, #ed0000);
+          color: #fff;
+        }
+
+        .dark-theme .group-pinned-bar { background: rgba(255, 255, 255, 0.06); }
+        .dark-theme .group-pinned-text { color: #e5e7eb; }
+        .dark-theme .reply-preview-bar { background: rgba(255, 255, 255, 0.05); }
+        .dark-theme .message-action-menu { background: #1f1f1f; border-color: rgba(255,255,255,0.1); }
+        .dark-theme .message-action-menu button { color: #f3f4f6; }
+        .dark-theme .message-action-menu button:hover { background: rgba(255,255,255,0.08); }
+        .dark-theme .reaction-quick-bar { background: #1f1f1f; border-color: rgba(255,255,255,0.1); }
+        .dark-theme .reaction-quick-btn:hover { background: rgba(255,255,255,0.08); }
+        .dark-theme .reaction-plus-btn { background: rgba(255,255,255,0.08); color: #f3f4f6; }
+        .dark-theme .reaction-expanded-panel { background: rgba(31,31,31,0.96); border-color: rgba(255,255,255,0.1); }
+        .dark-theme .reaction-search-wrap { background: rgba(255,255,255,0.06); }
+        .dark-theme .reaction-search-input { color: #f3f4f6; }
+        .dark-theme .reaction-grid-btn:hover,
+        .dark-theme .reaction-category-tab:hover,
+        .dark-theme .reaction-category-tab.active { background: rgba(255,255,255,0.08); }
 
         .dark-theme .collab-typing-label {
           color: #9ca3af;
@@ -5991,6 +7194,37 @@ export const App: React.FC = () => {
           display: flex;
           justify-content: flex-end;
           gap: 12px;
+        }
+
+        .profile-pic-prompt-overlay {
+          z-index: 1200;
+        }
+
+        .profile-pic-prompt-card {
+          text-align: center;
+        }
+
+        .profile-pic-prompt-avatar {
+          width: 72px;
+          height: 72px;
+          margin: 0 auto 16px;
+          border-radius: 999px;
+          background: var(--brand-color, #ed0000);
+          color: #fff;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 24px;
+          font-weight: 700;
+        }
+
+        .profile-pic-prompt-actions {
+          justify-content: center;
+          margin-top: 24px;
+        }
+
+        .profile-pic-prompt-card .modal-header-v2 p {
+          margin-bottom: 0;
         }
 
         .modal-btn-v2 {

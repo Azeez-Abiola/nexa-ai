@@ -15,9 +15,27 @@ export interface GeneratedDocument {
   documentType: string;
 }
 
+export interface MessageReplyTo {
+  messageId: string;
+  senderName?: string;
+  content: string;
+}
+
+export interface MessageReaction {
+  userId: string;
+  userName: string;
+  emoji: string;
+}
+
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
+  /** Stable id for reply/react/pin in group conversations. */
+  messageId?: string;
+  /** Quote reference when replying to a specific message. */
+  replyTo?: MessageReplyTo;
+  /** Emoji reactions from collaborators. */
+  reactions?: MessageReaction[];
   /** Cloudinary URLs for images attached to this message — preserved so follow-up turns can reference them. */
   imageUrls?: string[];
   /** RAG documents cited by this assistant reply — rendered as clickable pills under the message. */
@@ -30,10 +48,20 @@ export interface ChatMessage {
   senderName?: string;
 }
 
+export interface PinnedMessage {
+  messageId: string;
+  content: string;
+  senderName?: string;
+  pinnedBy?: string;
+  pinnedAt?: Date;
+}
+
 export interface ConversationGroup {
   _id: mongoose.Types.ObjectId;
   title: string;
   messages: ChatMessage[];
+  /** Pinned message shown at the top of a group conversation. */
+  pinnedMessage?: PinnedMessage;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -66,6 +94,24 @@ const GeneratedDocumentSchema = new Schema<GeneratedDocument>(
   { _id: false }
 );
 
+const MessageReplyToSchema = new Schema<MessageReplyTo>(
+  {
+    messageId: { type: String, required: true },
+    senderName: { type: String },
+    content: { type: String, required: true },
+  },
+  { _id: false }
+);
+
+const MessageReactionSchema = new Schema<MessageReaction>(
+  {
+    userId: { type: String, required: true },
+    userName: { type: String, required: true },
+    emoji: { type: String, required: true },
+  },
+  { _id: false }
+);
+
 const MessageSchema = new Schema<ChatMessage>(
   {
     role: { type: String, enum: ["user", "assistant"], required: true },
@@ -78,6 +124,9 @@ const MessageSchema = new Schema<ChatMessage>(
       // and double-encryption is what leaked `enc:` to the frontend.
       set: (v: string) => (typeof v === "string" && v.startsWith("enc:") ? v : encrypt(v)),
     },
+    messageId: { type: String, default: undefined },
+    replyTo: { type: MessageReplyToSchema, default: undefined },
+    reactions: { type: [MessageReactionSchema], default: undefined },
     imageUrls: { type: [String], default: undefined },
     sources: { type: [MessageSourceSchema], default: undefined },
     generatedDocument: { type: GeneratedDocumentSchema, default: undefined },
@@ -88,10 +137,22 @@ const MessageSchema = new Schema<ChatMessage>(
   { _id: false }
 );
 
+const PinnedMessageSchema = new Schema<PinnedMessage>(
+  {
+    messageId: { type: String, required: true },
+    content: { type: String, required: true },
+    senderName: { type: String },
+    pinnedBy: { type: String },
+    pinnedAt: { type: Date },
+  },
+  { _id: false }
+);
+
 const ConversationGroupSchema = new Schema<ConversationGroup>(
   {
     title: { type: String, default: "New Chat" },
-    messages: { type: [MessageSchema], default: [] }
+    messages: { type: [MessageSchema], default: [] },
+    pinnedMessage: { type: PinnedMessageSchema, default: undefined },
   },
   { timestamps: true }
 );
