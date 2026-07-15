@@ -168,15 +168,7 @@ app.get("/api/docs.json", (_req, res) => {
 
 app.use("/api/v1/auth", authLimiter, authRouter);
 app.use("/api/v1/admin/auth", authLimiter, adminAuthRouter);
-// Apply the AI rate limiters ONCE per request. They were previously attached to
-// every conversations sub-router, so a single message POST passed through the
-// limiter stack up to 4x and consumed 4 tokens — that's why a "50/user" budget
-// exhausted after ~10 real prompts. The limiters skip non-message requests
-// internally (see skipNonAiMessage), so mounting them at the prefix is safe.
 app.use("/api/v1/conversations", aiLimiter, aiDailyLimiter);
-// Specific-path routers MUST be mounted before conversationRouter because
-// conversationRouter contains GET /:id which catches any unmatched path and
-// returns 404, preventing the sharing/mention routes from ever being reached.
 app.use("/api/v1/conversations", conversationSharingRouter);
 app.use("/api/v1/conversations", conversationAccessRouter);
 app.use("/api/v1/conversations", conversationMentionsRouter);

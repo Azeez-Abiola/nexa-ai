@@ -377,7 +377,7 @@ function buildSystemPrompt(
     activeModel === "claude"   ? "Claude Opus 4.7" :
     activeModel === "kimi"     ? "Kimi k2.5" :
     activeModel === "deepseek" ? "DeepSeek v4" :
-    "GPT-4.1";
+    "GPT-5";
   const sections: string[] = [
     `You are Nexa AI, a helpful AI assistant for ${businessUnit}, a business unit of UACN, powered by ${modelLabel}. Today's date is ${today}. If asked which model or AI you use, say you are Nexa AI powered by ${modelLabel}. Users can switch between models at any time — if the model differs from a previous message, do not apologize or treat it as an error; simply state the current model naturally.`
   ];
@@ -782,7 +782,7 @@ conversationRouter.post("/:id/note", authMiddleware, async (req: AuthenticatedRe
         )
       );
       persistedImageUrls = results
-        .filter((r): r is PromiseFulfilledResult<{ secureUrl: string }> => r.status === "fulfilled")
+        .filter((r): r is PromiseFulfilledResult<Awaited<ReturnType<typeof uploadChatImage>>> => r.status === "fulfilled")
         .map((r) => r.value.secureUrl);
     }
 
