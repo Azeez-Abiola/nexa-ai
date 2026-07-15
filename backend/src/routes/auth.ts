@@ -68,7 +68,7 @@ function mapTenantFromBuDoc(buDoc: {
 }
 
 /** Branding + support contact for a BU (used on GET /me and helpers). */
-async function tenantProfileForBu(businessUnit: string | undefined): Promise<{
+export async function tenantProfileForBu(businessUnit: string | undefined): Promise<{
   tenantId?: string;
   tenantSlug?: string;
   tenantLogo?: string;

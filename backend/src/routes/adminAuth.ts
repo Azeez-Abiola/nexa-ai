@@ -131,7 +131,7 @@ async function recoverBuFromDuplicateKeyError(err: any) {
 }
 
 /** Admin login: match BU when stored `name` ≠ acronym (slug fallback). */
-async function findBusinessUnitForAdminLogin(businessUnit: string) {
+export async function findBusinessUnitForAdminLogin(businessUnit: string) {
   if (!businessUnit || businessUnit === "SUPERADMIN") return null;
   const asSlug = sanitizeTenantSlug(businessUnit);
   if (asSlug) {

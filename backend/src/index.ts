@@ -16,6 +16,7 @@ import { chatRouter } from "./routes/chat";
 import { adminPoliciesRouter } from "./routes/adminPolicies";
 import { authRouter } from "./routes/auth";
 import { adminAuthRouter } from "./routes/adminAuth";
+import { ssoAuthRouter } from "./routes/ssoAuth";
 import { conversationRouter } from "./routes/conversation";
 import { conversationSharingRouter } from "./routes/conversationSharing";
 import { conversationAccessRouter } from "./routes/conversationAccess";
@@ -168,6 +169,7 @@ app.get("/api/docs.json", (_req, res) => {
 
 app.use("/api/v1/auth", authLimiter, authRouter);
 app.use("/api/v1/admin/auth", authLimiter, adminAuthRouter);
+app.use("/api/v1/auth/sso", authLimiter, ssoAuthRouter);
 app.use("/api/v1/conversations", aiLimiter, aiDailyLimiter);
 app.use("/api/v1/conversations", conversationSharingRouter);
 app.use("/api/v1/conversations", conversationAccessRouter);

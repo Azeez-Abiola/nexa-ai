@@ -22,6 +22,9 @@ export interface AdminUserDocument extends Document {
   /** Hashed (sha256) second-factor login OTP; cleared once verified or expired. */
   loginOTP?: string;
   loginOTPExpiry?: Date;
+  /** Azure AD object id, bound on first successful Microsoft SSO login. */
+  microsoftId?: string;
+  lastLogin?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -47,7 +50,9 @@ const AdminUserSchema = new Schema<AdminUserDocument>(
     resetTokenExpiry: { type: Date, default: null },
     tokenVersion: { type: Number, default: 0 },
     loginOTP: { type: String, default: null },
-    loginOTPExpiry: { type: Date, default: null }
+    loginOTPExpiry: { type: Date, default: null },
+    microsoftId: { type: String, default: null, index: true, unique: true, sparse: true },
+    lastLogin: { type: Date, default: null }
   },
   { timestamps: true }
 );
