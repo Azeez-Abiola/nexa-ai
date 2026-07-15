@@ -4,12 +4,14 @@ import dotenv from "dotenv";
 dotenv.config();
 
 import express from "express";
+import helmet from "helmet";
 import swaggerUi from "swagger-ui-express";
 import { swaggerSpec } from "./config/swagger";
 import cors from "cors";
 import mongoose from "mongoose";
 import { json } from "body-parser";
 import path from "path";
+import crypto from "crypto";
 import { chatRouter } from "./routes/chat";
 import { adminPoliciesRouter } from "./routes/adminPolicies";
 import { authRouter } from "./routes/auth";
@@ -28,8 +30,9 @@ import { BusinessUnit } from "./models/BusinessUnit";
 import { tenantMiddleware } from "./middleware/tenant";
 import { authLimiter, aiLimiter, aiDailyLimiter } from "./middleware/rateLimiter";
 import logger from "./utils/logger";
-import { sendContactFormInquiry, sendAccessRequestNotification, sendAccessRequestReceived } from "./services/emailService";
+import { sendContactFormInquiry, sendAccessRequestNotification, sendAccessRequestReceived, sendAccessRequestOtpEmail } from "./services/emailService";
 import { TenantRequest } from "./models/TenantRequest";
+import { PendingAccessRequest } from "./models/PendingAccessRequest";
 import { startWorker } from "./queue/documentWorker";
 import { startUserDocumentWorker } from "./queue/userDocumentWorker";
 import { userDocumentsRouter } from "./routes/userDocuments";
@@ -72,6 +75,42 @@ app.use(
   })
 );
 app.use(json());
+
+// Security headers (CSP, X-Frame-Options, X-Content-Type-Options, etc). HSTS is left off here
+// since the deployment's edge/proxy already sends a correct Strict-Transport-Security header —
+// setting it again here risks duplicate/conflicting header values.
+// frameAncestors is 'self' (not 'none') because super-admin/AskNexa.tsx embeds /user-chat in a
+// same-origin iframe; blocking all framing would break that feature.
+app.use(
+  helmet({
+    hsts: false,
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+        fontSrc: ["'self'", "https://fonts.gstatic.com"],
+        imgSrc: ["'self'", "https://res.cloudinary.com", "data:"],
+        mediaSrc: ["'self'"],
+        connectSrc: ["'self'"],
+        objectSrc: ["'none'"],
+        baseUri: ["'self'"],
+        frameAncestors: ["'self'"],
+      },
+    },
+    frameguard: { action: "sameorigin" },
+  })
+);
+
+// swagger-ui-express (mounted below at /api/docs) injects inline <script>/<style> to boot the
+// UI — relax CSP for just that path rather than loosening it for the whole app.
+app.use("/api/docs", (_req, res, next) => {
+  res.setHeader(
+    "Content-Security-Policy",
+    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:;"
+  );
+  next();
+});
 
 // Resolve tenant from subdomain on every request (e.g. ufl.nexa.ai → tenantId, businessUnit)
 app.use(tenantMiddleware);
@@ -196,8 +235,12 @@ app.post("/api/v1/public/contact", async (req, res) => {
   }
 });
 
-// No account is created here — a super-admin reviews the request and provisions the tenant separately.
-app.post("/api/v1/public/request-access", async (req, res) => {
+// Step 1 of 2. No TenantRequest is created and no admin/requester email is sent here — only an
+// OTP is emailed to workEmail. Nothing reaches the admin review queue (or the requester's own
+// inbox) until ownership of that email is proven via POST /request-access/verify-otp below.
+// This stops the endpoint from being used to flood the queue or spam an email the requester
+// doesn't actually own.
+app.post("/api/v1/public/request-access", authLimiter, async (req, res) => {
   try {
     const { companyName, workEmail, phone, employeeCount } = req.body as Record<string, string | number | undefined>;
 
@@ -221,12 +264,73 @@ app.post("/api/v1/public/request-access", async (req, res) => {
       return res.status(409).json({ error: "A request is already pending for this email address" });
     }
 
-    const request = await TenantRequest.create({
-      companyName: String(companyName).trim(),
-      workEmail: normalizedEmail,
-      phone: String(phone).trim(),
-      employeeCount: count
+    const trimmedCompanyName = String(companyName).trim();
+    const otp = crypto.randomInt(100000, 1000000).toString();
+    const otpHash = crypto.createHash("sha256").update(otp).digest("hex");
+
+    // Overwrite any previous unverified attempt for this email rather than accumulating rows.
+    await PendingAccessRequest.findOneAndUpdate(
+      { workEmail: normalizedEmail },
+      {
+        companyName: trimmedCompanyName,
+        workEmail: normalizedEmail,
+        phone: String(phone).trim(),
+        employeeCount: count,
+        otp: otpHash,
+        otpExpiry: new Date(Date.now() + 10 * 60 * 1000)
+      },
+      { upsert: true }
+    );
+
+    try {
+      await sendAccessRequestOtpEmail(normalizedEmail, otp, trimmedCompanyName);
+    } catch (emailError) {
+      logger.error("Access request OTP email failed", { error: emailError });
+      return res.status(500).json({ error: "Failed to send confirmation code. Please try again." });
+    }
+
+    res.status(200).json({
+      message: "Enter the code we sent to your email to confirm your request.",
+      requiresOtp: true
     });
+  } catch (error) {
+    logger.error("Request access error", { error });
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Step 2 of 2. Only once the OTP is verified does the actual TenantRequest get created and
+// admins/requester notified — this is the point equivalent to the old single-step endpoint.
+app.post("/api/v1/public/request-access/verify-otp", authLimiter, async (req, res) => {
+  try {
+    const { workEmail, otp } = req.body as Record<string, string | undefined>;
+
+    if (!workEmail || !otp) {
+      return res.status(400).json({ error: "workEmail and otp are required" });
+    }
+
+    const normalizedEmail = String(workEmail).trim().toLowerCase();
+    const otpHash = crypto.createHash("sha256").update(String(otp)).digest("hex");
+
+    const pending = await PendingAccessRequest.findOne({ workEmail: normalizedEmail });
+    if (!pending || pending.otp !== otpHash || pending.otpExpiry < new Date()) {
+      return res.status(401).json({ error: "Invalid or expired code" });
+    }
+
+    const duplicate = await TenantRequest.findOne({ workEmail: normalizedEmail, status: "pending" });
+    if (duplicate) {
+      await pending.deleteOne();
+      return res.status(409).json({ error: "A request is already pending for this email address" });
+    }
+
+    const request = await TenantRequest.create({
+      companyName: pending.companyName,
+      workEmail: pending.workEmail,
+      phone: pending.phone,
+      employeeCount: pending.employeeCount
+    });
+
+    await pending.deleteOne();
 
     const reviewUrl = `${process.env.FRONTEND_URL || "http://localhost:3000"}/admin/access-requests`;
     const submittedAt = new Date().toLocaleString("en-GB", { timeZone: "Africa/Lagos" });
@@ -253,7 +357,7 @@ app.post("/api/v1/public/request-access", async (req, res) => {
 
     res.status(201).json({ message: "Request submitted successfully. We'll be in touch." });
   } catch (error) {
-    logger.error("Request access error", { error });
+    logger.error("Request access OTP verify error", { error });
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -285,7 +389,13 @@ app.get('*', (req, res, next) => {
 // Rate-limit store failures (e.g. Redis unreachable) fail CLOSED with a 503 rather than
 // silently falling through to Express's default handler, which produced the inconsistent
 // block/allow behavior seen when the login rate limiter's Redis had issues.
-app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+  // Streaming (SSE) responses may already have written headers/chunks before failing internally;
+  // those routes handle their own errors and don't reach here, but if headers are already sent,
+  // Express requires delegating to the default handler instead of calling res.status(...) again.
+  if (res.headersSent) {
+    return next(err);
+  }
   if (err?.isRateLimitStoreError) {
     return res.status(503).json({ error: "Service temporarily unavailable. Please try again in a moment." });
   }

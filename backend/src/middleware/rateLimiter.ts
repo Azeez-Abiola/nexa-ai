@@ -127,6 +127,8 @@ const AUTH_SENSITIVE_PATHS: RegExp[] = [
   /\/resend-verification\/?$/,
   /\/forgot-password\/?$/,
   /\/reset-password\/?$/,
+  /\/request-access\/?$/,
+  /\/request-access\/verify-otp\/?$/,
 ];
 
 function skipNonAuthSensitive(req: Request): boolean {

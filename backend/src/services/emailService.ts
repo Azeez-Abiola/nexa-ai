@@ -326,6 +326,24 @@ export async function sendWelcomeEmail(
   }
 }
 
+export async function sendAccessRequestOtpEmail(
+  workEmail: string,
+  otp: string,
+  companyName: string
+): Promise<void> {
+  try {
+    const html = await renderTemplate("access-request-otp", {
+      companyName,
+      otp,
+      year: new Date().getFullYear()
+    });
+    await sendEmail(workEmail, "Confirm your Nexa AI access request", html);
+  } catch (error) {
+    console.error("[EmailService] Failed to send access-request OTP email:", error);
+    throw error;
+  }
+}
+
 export async function sendAccessRequestNotification(payload: {
   companyName: string;
   workEmail: string;

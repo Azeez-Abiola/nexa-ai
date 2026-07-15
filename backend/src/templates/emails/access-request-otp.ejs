@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Confirm Your Access Request — Nexa AI</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f4f5;font-family:'Helvetica Neue',Arial,sans-serif;-webkit-font-smoothing:antialiased;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;padding:40px 16px;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.06);">
+
+          <!-- Header -->
+          <tr>
+            <td style="background:#18181b;padding:36px 40px;text-align:left;">
+              <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td width="48" style="vertical-align:middle;">
+                    <img src="<%= nexaLogoUrl %>" alt="Nexa" width="36" style="display:block;border-radius:8px;filter:brightness(0) invert(1);" />
+                  </td>
+                  <td style="vertical-align:middle;padding-left:14px;">
+                    <p style="color:#ffffff;margin:0;font-size:18px;font-weight:800;letter-spacing:-0.3px;">Nexa AI</p>
+                    <p style="color:rgba(255,255,255,0.5);margin:2px 0 0;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;">Access Request</p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="background:#ffffff;padding:44px 40px 40px;">
+              <p style="color:#18181b;font-size:18px;font-weight:700;margin:0 0 8px;">Confirm your request</p>
+              <p style="color:#52525b;font-size:15px;line-height:1.7;margin:0 0 32px;">
+                Someone requested Nexa AI access for <strong style="color:#18181b;"><%= companyName %></strong> using this email address. Enter the code below to confirm and send the request to our team for review.
+              </p>
+
+              <!-- OTP Code Block -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 28px;">
+                <tr>
+                  <td align="center">
+                    <table cellpadding="0" cellspacing="0" style="background:#fafafa;border:2px solid #e4e4e7;border-radius:16px;padding:28px 48px;text-align:center;">
+                      <tr>
+                        <td>
+                          <p style="color:#a1a1aa;font-size:11px;font-weight:700;margin:0 0 12px;text-transform:uppercase;letter-spacing:0.12em;">Confirmation Code</p>
+                          <p style="font-size:42px;font-weight:800;color:#ed0000;margin:0;letter-spacing:12px;font-family:'Courier New',monospace;"><%= otp %></p>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Timer notice -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 32px;">
+                <tr>
+                  <td align="center">
+                    <table cellpadding="0" cellspacing="0" style="background:#fef2f2;border-radius:10px;padding:12px 20px;">
+                      <tr>
+                        <td style="padding-right:10px;vertical-align:middle;font-size:16px;">⏱</td>
+                        <td>
+                          <p style="color:#991b1b;font-size:13px;font-weight:600;margin:0;">This code expires in <strong>10 minutes</strong></p>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Separator -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 24px;">
+                <tr>
+                  <td style="border-top:1px solid #f0f0f0;"></td>
+                </tr>
+              </table>
+
+              <!-- Security note -->
+              <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td width="36" style="vertical-align:top;padding-top:2px;">
+                    <div style="width:28px;height:28px;border-radius:8px;background:#f4f4f5;text-align:center;line-height:28px;font-size:14px;">🔐</div>
+                  </td>
+                  <td style="padding-left:12px;">
+                    <p style="color:#71717a;font-size:13px;line-height:1.6;margin:0;">
+                      <strong style="color:#52525b;">Didn't request this?</strong> If you didn't request Nexa AI access, you can safely ignore this email. No request will be sent without this code.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background:#fafafa;padding:28px 40px;text-align:center;border-top:1px solid #f0f0f0;">
+              <p style="color:#a1a1aa;font-size:11px;margin:0 0 8px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;">&copy; <%= year %> Nexa AI. All rights reserved.</p>
+              <p style="color:#d4d4d8;font-size:10px;margin:0;font-weight:700;">POWERED BY 1879 TECHHUB</p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
