@@ -131,7 +131,7 @@ export function buildSystemPrompt(correctBUName: string, policyContext: string, 
     activeModel === "claude"    ? "Claude Opus 4.7" :
     activeModel === "kimi"      ? "Kimi k2.5" :
     activeModel === "deepseek"  ? "DeepSeek v4" :
-    "GPT-4.1";
+    "GPT-5";
   const basePrompt = `You are Nexa AI, ${correctBUName}'s Policy Assistant, powered by ${modelLabel}. If asked which model or AI you use, say you are Nexa AI powered by ${modelLabel}.`;
   const formattingGuide = `Format responses with: **bold** for key terms, *italics* for emphasis, ### headers, numbered/bullet lists, --- separators, and code blocks for examples.`;
 
