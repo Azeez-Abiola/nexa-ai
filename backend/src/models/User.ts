@@ -18,6 +18,9 @@ export interface UserDocument extends Document {
   resetTokenExpiry?: Date;
   /** Bumped on logout/password change to invalidate all previously-issued JWTs. */
   tokenVersion: number;
+  /** Hashed (sha256) second-factor login OTP; cleared once verified or expired. */
+  loginOTP?: string;
+  loginOTPExpiry?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -36,7 +39,9 @@ const UserSchema = new Schema<UserDocument>(
     emailVerificationOTPExpiry: { type: Date, default: null },
     resetToken: { type: String, default: null },
     resetTokenExpiry: { type: Date, default: null },
-    tokenVersion: { type: Number, default: 0 }
+    tokenVersion: { type: Number, default: 0 },
+    loginOTP: { type: String, default: null },
+    loginOTPExpiry: { type: Date, default: null }
   },
   { timestamps: true }
 );

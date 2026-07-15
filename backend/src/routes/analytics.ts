@@ -12,6 +12,7 @@ import {
   AuthenticatedRequest
 } from "../middleware/auth";
 import { resolveUserDirectoryBusinessUnit } from "../utils/tenantResolution";
+import { validatePasswordStrength } from "../utils/passwordPolicy";
 import bcrypt from "bcryptjs";
 
 export const analyticsRouter = express.Router();
@@ -272,8 +273,12 @@ analyticsRouter.post("/reset-password", superAdminMiddleware, async (req: Authen
   try {
     const { userId, newPassword } = req.body;
 
-    if (!userId || !newPassword || newPassword.length < 6) {
-      return res.status(400).json({ error: "userId and newPassword (min 6 chars) are required" });
+    if (!userId || !newPassword) {
+      return res.status(400).json({ error: "userId and newPassword are required" });
+    }
+    const passwordError = validatePasswordStrength(newPassword);
+    if (passwordError) {
+      return res.status(400).json({ error: passwordError });
     }
 
     const hashedPassword = await bcrypt.hash(newPassword, 10);

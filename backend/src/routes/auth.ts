@@ -6,10 +6,11 @@ import crypto from "crypto";
 import { User, BusinessUnit } from "../models/User";
 import { AdminUser } from "../models/AdminUser";
 import { BusinessUnit as BusinessUnitModel } from "../models/BusinessUnit";
-import { sendVerificationEmail, sendPasswordResetEmail, sendWelcomeEmail } from "../services/emailService";
+import { sendVerificationEmail, sendPasswordResetEmail, sendWelcomeEmail, sendLoginOtpEmail } from "../services/emailService";
 import { authMiddleware, AuthenticatedRequest } from "../middleware/auth";
 import { uploadProfilePicture } from "../services/cloudinaryService";
 import { logEvent } from "../services/auditService";
+import { validatePasswordStrength } from "../utils/passwordPolicy";
 
 export const authRouter = express.Router();
 
@@ -218,7 +219,13 @@ authRouter.post("/resend-verification", async (req: Request<{}, {}, { email: str
   }
 });
 
+function generateLoginOTP(): string {
+  return crypto.randomInt(100000, 1000000).toString();
+}
+
 // Looks up both the User and AdminUser collections — this single endpoint serves both account types.
+// On a valid password, this only sends a one-time code to the account's email; it does NOT log the
+// user in. POST /login/verify-otp below is what actually issues the session token.
 authRouter.post("/login", async (req: Request<{}, {}, AuthRequest>, res: Response) => {
   try {
     const { email, password } = req.body;
@@ -248,7 +255,7 @@ authRouter.post("/login", async (req: Request<{}, {}, AuthRequest>, res: Respons
     }
 
     if (!user.emailVerified && user.businessUnit !== "SUPERADMIN") {
-      return res.status(403).json({ 
+      return res.status(403).json({
         error: "Please verify your email before logging in",
         requiresVerification: true,
         email: user.email,
@@ -261,6 +268,60 @@ authRouter.post("/login", async (req: Request<{}, {}, AuthRequest>, res: Respons
       return res.status(401).json({ error: "Invalid email or password" });
     }
 
+    const otp = generateLoginOTP();
+    user.loginOTP = generateToken(otp);
+    user.loginOTPExpiry = new Date(Date.now() + 10 * 60 * 1000);
+    await user.save();
+
+    try {
+      await sendLoginOtpEmail(user.email, otp, user.fullName);
+    } catch (emailError) {
+      console.error("Failed to send login OTP email:", emailError);
+      return res.status(500).json({ error: "Failed to send sign-in code. Please try again." });
+    }
+
+    res.json({
+      message: "A sign-in code has been sent to your email address.",
+      requiresOtp: true,
+      email: user.email
+    });
+  } catch (error) {
+    console.error("Unified login error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Second factor for /login — verifies the emailed OTP and, only then, issues the session token.
+authRouter.post("/login/verify-otp", async (req: Request<{}, {}, { email: string; otp: string }>, res: Response) => {
+  try {
+    const { email, otp } = req.body;
+
+    if (!email || !otp) {
+      return res.status(400).json({ error: "Email and OTP are required" });
+    }
+
+    let user: any = await User.findOne({ email: email.toLowerCase() });
+    let isAdminAccount = false;
+
+    if (!user) {
+      user = await AdminUser.findOne({ email: email.toLowerCase() });
+      if (user) isAdminAccount = true;
+    }
+
+    if (
+      !user ||
+      !user.loginOTP ||
+      !user.loginOTPExpiry ||
+      user.loginOTPExpiry < new Date() ||
+      user.loginOTP !== generateToken(otp)
+    ) {
+      return res.status(401).json({ error: "Invalid or expired code" });
+    }
+
+    user.loginOTP = undefined;
+    user.loginOTPExpiry = undefined;
+    await user.save();
+
     let tenant: Awaited<ReturnType<typeof tenantProfileForBu>> = {};
     if (user.businessUnit !== "SUPERADMIN") {
       const buDoc = await findBusinessUnitDoc(user.businessUnit);
@@ -272,12 +333,12 @@ authRouter.post("/login", async (req: Request<{}, {}, AuthRequest>, res: Respons
       if (buDoc) tenant = mapTenantFromBuDoc(buDoc);
     }
 
-    const payload: any = { 
-      userId: user._id, 
-      email: user.email, 
+    const payload: any = {
+      userId: user._id,
+      email: user.email,
       businessUnit: user.businessUnit,
       department: (user as any).department,
-      tenantId: tenant.tenantId, 
+      tenantId: tenant.tenantId,
       tenantSlug: tenant.tenantSlug,
       tenantLogo: tenant.tenantLogo,
       tenantColor: tenant.tenantColor,
@@ -312,7 +373,7 @@ authRouter.post("/login", async (req: Request<{}, {}, AuthRequest>, res: Respons
       }
     });
   } catch (error) {
-    console.error("Unified login error:", error);
+    console.error("Login OTP verify error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -385,8 +446,9 @@ authRouter.post("/reset-password", async (req: Request<{}, {}, { token: string; 
       return res.status(400).json({ error: "Token, email, and new password are required" });
     }
 
-    if (newPassword.length < 6) {
-      return res.status(400).json({ error: "Password must be at least 6 characters long" });
+    const passwordError = validatePasswordStrength(newPassword);
+    if (passwordError) {
+      return res.status(400).json({ error: passwordError });
     }
 
     const resetTokenHash = generateToken(token);
@@ -495,8 +557,12 @@ authRouter.put("/me/password", authMiddleware, async (req: AuthenticatedRequest,
       return res.status(403).json({ error: "Use the admin console to change your administrator password." });
     }
     const { currentPassword, newPassword } = req.body as { currentPassword?: string; newPassword?: string };
-    if (!currentPassword || !newPassword || newPassword.length < 6) {
-      return res.status(400).json({ error: "Current password and new password (min 6 characters) are required" });
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ error: "Current password and new password are required" });
+    }
+    const passwordError = validatePasswordStrength(newPassword);
+    if (passwordError) {
+      return res.status(400).json({ error: passwordError });
     }
     const user = await User.findById(req.userId);
     if (!user) {

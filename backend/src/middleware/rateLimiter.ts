@@ -96,6 +96,7 @@ const AI_LIMIT_PER_DAY = parseInt(process.env.RATE_LIMIT_AI_PER_DAY ?? "50", 10)
 // token via adminAuthMiddleware, so it shouldn't share the login IP bucket.
 const AUTH_SENSITIVE_PATHS: RegExp[] = [
   /\/login\/?$/,
+  /\/login\/verify-otp\/?$/,
   /\/verify-email\/?$/,
   /\/resend-verification\/?$/,
   /\/forgot-password\/?$/,

@@ -15,7 +15,8 @@ import {
   sendPasswordResetEmail,
   sendWelcomeEmail,
   sendTenantCredentialsEmail,
-  sendEmployeeInviteEmail
+  sendEmployeeInviteEmail,
+  sendLoginOtpEmail
 } from "../services/emailService";
 import { AdminInvite } from "../models/AdminInvite";
 import { EmployeeInvite } from "../models/EmployeeInvite";
@@ -28,6 +29,7 @@ import {
   BUILTIN_NAMES
 } from "../models/DocumentCategory";
 import { hashInviteToken } from "../utils/inviteToken";
+import { validatePasswordStrength } from "../utils/passwordPolicy";
 import {
   adminAuthMiddleware,
   superAdminMiddleware,
@@ -171,13 +173,15 @@ interface AdminAuthRequest {
 const JWT_SECRET = process.env.NEXA_AI_JWT_SECRET!;
 
 function generateOTP(): string {
-  return Math.floor(100000 + Math.random() * 900000).toString();
+  return crypto.randomInt(100000, 1000000).toString();
 }
 
 function generateToken(token: string): string {
   return crypto.createHash("sha256").update(token).digest("hex");
 }
 
+// On a valid password, this only sends a one-time code to the admin's email; it does NOT log
+// them in. POST /login/verify-otp below is what actually issues the session token.
 adminAuthRouter.post("/login", async (req: Request<{}, {}, AdminAuthRequest>, res: Response) => {
   try {
     const { email, password } = req.body;
@@ -203,6 +207,54 @@ adminAuthRouter.post("/login", async (req: Request<{}, {}, AdminAuthRequest>, re
     if (!passwordMatch) {
       return res.status(401).json({ error: "Invalid email or password" });
     }
+
+    const otp = generateOTP();
+    admin.loginOTP = generateToken(otp);
+    admin.loginOTPExpiry = new Date(Date.now() + 10 * 60 * 1000);
+    await admin.save();
+
+    try {
+      await sendLoginOtpEmail(admin.email, otp, admin.fullName);
+    } catch (emailError) {
+      console.error("Failed to send admin login OTP email:", emailError);
+      return res.status(500).json({ error: "Failed to send sign-in code. Please try again." });
+    }
+
+    res.json({
+      message: "A sign-in code has been sent to your email address.",
+      requiresOtp: true,
+      email: admin.email
+    });
+  } catch (error) {
+    console.error("Admin login error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Second factor for /login — verifies the emailed OTP and, only then, issues the session token.
+adminAuthRouter.post("/login/verify-otp", async (req: Request<{}, {}, { email: string; otp: string }>, res: Response) => {
+  try {
+    const { email, otp } = req.body;
+
+    if (!email || !otp) {
+      return res.status(400).json({ error: "Email and OTP are required" });
+    }
+
+    const admin = await AdminUser.findOne({ email: email.toLowerCase() });
+
+    if (
+      !admin ||
+      !admin.loginOTP ||
+      !admin.loginOTPExpiry ||
+      admin.loginOTPExpiry < new Date() ||
+      admin.loginOTP !== generateToken(otp)
+    ) {
+      return res.status(401).json({ error: "Invalid or expired code" });
+    }
+
+    admin.loginOTP = undefined;
+    admin.loginOTPExpiry = undefined;
+    await admin.save();
 
     let tenantId: string | undefined;
     let tenantSlug: string | undefined;
@@ -272,7 +324,7 @@ adminAuthRouter.post("/login", async (req: Request<{}, {}, AdminAuthRequest>, re
       }
     });
   } catch (error) {
-    console.error("Admin login error:", error);
+    console.error("Admin login OTP verify error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -298,8 +350,12 @@ adminAuthRouter.post("/logout", adminAuthMiddleware, async (req: AuthenticatedRe
 adminAuthRouter.post("/change-password-first-login", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { newPassword } = req.body as { newPassword?: string };
-    if (!newPassword || typeof newPassword !== "string" || newPassword.length < 8) {
-      return res.status(400).json({ error: "newPassword is required and must be at least 8 characters." });
+    if (!newPassword || typeof newPassword !== "string") {
+      return res.status(400).json({ error: "newPassword is required." });
+    }
+    const passwordError = validatePasswordStrength(newPassword);
+    if (passwordError) {
+      return res.status(400).json({ error: passwordError });
     }
     if (!req.adminId) {
       return res.status(401).json({ error: "Authenticated admin context missing." });
@@ -441,8 +497,9 @@ adminAuthRouter.post("/reset-password", async (req: Request<{}, {}, { token: str
     if (!token || !newPassword || !email) {
       return res.status(400).json({ error: "Token, email, and new password are required" });
     }
-    if (newPassword.length < 6) {
-      return res.status(400).json({ error: "Password must be at least 6 characters long" });
+    const passwordError = validatePasswordStrength(newPassword);
+    if (passwordError) {
+      return res.status(400).json({ error: passwordError });
     }
 
     const admin = await AdminUser.findOne({
@@ -591,6 +648,11 @@ adminAuthRouter.post("/users", adminAuthMiddleware, async (req: AuthenticatedReq
       return res.status(400).json({
         error: "email, password, firstName and lastName are required"
       });
+    }
+
+    const passwordError = validatePasswordStrength(password);
+    if (passwordError) {
+      return res.status(400).json({ error: passwordError });
     }
 
     const existingUser = await User.findOne({ email: email.toLowerCase() });
@@ -966,7 +1028,7 @@ adminAuthRouter.post(
           continue;
         }
 
-        const generated = !passwordCell || passwordCell.length < 6;
+        const generated = !passwordCell || validatePasswordStrength(passwordCell) !== null;
         const password = generated
           ? crypto.randomBytes(8).toString("base64url").slice(0, 12)
           : passwordCell;
@@ -1271,8 +1333,12 @@ adminAuthRouter.put("/change-password", adminAuthMiddleware, async (req: Authent
     const { adminId } = req;
     const { currentPassword, newPassword } = req.body;
 
-    if (!currentPassword || !newPassword || newPassword.length < 6) {
-      return res.status(400).json({ error: "Current password and new password (min 6 chars) are required" });
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ error: "Current password and new password are required" });
+    }
+    const passwordError = validatePasswordStrength(newPassword);
+    if (passwordError) {
+      return res.status(400).json({ error: passwordError });
     }
 
     const admin = await AdminUser.findById(adminId);
@@ -1417,6 +1483,11 @@ adminAuthRouter.post("/create-direct", superAdminMiddleware, async (req: Authent
 
     if (!email || !password || !fullName || !businessUnit) {
       return res.status(400).json({ error: "All fields are required" });
+    }
+
+    const passwordError = validatePasswordStrength(password);
+    if (passwordError) {
+      return res.status(400).json({ error: passwordError });
     }
 
     const existingAdmin = await AdminUser.findOne({ email: email.toLowerCase() });

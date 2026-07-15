@@ -39,10 +39,32 @@ import { notifySuperAdminsAccessRequest } from "./services/notificationService";
 
 const app = express();
 
-// origin: true allows all origins — needed since tenants are served from different subdomains.
+const TRUSTED_ORIGIN_ROOT = process.env.TRUSTED_ORIGIN_ROOT;
+if (!TRUSTED_ORIGIN_ROOT && process.env.NODE_ENV === "production") {
+  throw new Error("TRUSTED_ORIGIN_ROOT must be set in production for CORS to allow the frontend");
+}
+
+function isAllowedOrigin(origin: string): boolean {
+  if (process.env.NODE_ENV !== "production" && /^https?:\/\/localhost(:\d+)?$/.test(origin)) {
+    return true;
+  }
+  if (!TRUSTED_ORIGIN_ROOT) return false;
+  try {
+    const { protocol, hostname } = new URL(origin);
+    if (protocol !== "https:") return false;
+    return hostname === TRUSTED_ORIGIN_ROOT || hostname.endsWith(`.${TRUSTED_ORIGIN_ROOT}`);
+  } catch {
+    return false;
+  }
+}
+
 app.use(
   cors({
-    origin: true,
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      if (isAllowedOrigin(origin)) return callback(null, true);
+      callback(new Error("Not allowed by CORS"));
+    },
     credentials: true,
     // Expose draft-7 rate-limit headers so the frontend can show remaining
     // message quota and a countdown to when the limit refreshes.

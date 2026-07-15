@@ -54,6 +54,25 @@ export async function sendVerificationEmail(
   }
 }
 
+export async function sendLoginOtpEmail(
+  email: string,
+  otp: string,
+  fullName: string
+): Promise<void> {
+  try {
+    const html = await renderTemplate("login-otp", {
+      fullName,
+      otp,
+      year: new Date().getFullYear()
+    });
+    await sendEmail(email, "Your Nexa AI Sign-In Code", html);
+    console.log(`Login OTP sent to ${email}`);
+  } catch (error) {
+    console.error("Error sending login OTP email:", error);
+    throw error;
+  }
+}
+
 export async function sendPasswordResetEmail(
   email: string,
   resetToken: string,
