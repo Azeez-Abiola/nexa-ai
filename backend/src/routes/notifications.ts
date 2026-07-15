@@ -3,6 +3,8 @@ import jwt from "jsonwebtoken";
 import mongoose from "mongoose";
 import { Notification } from "../models/Notification";
 import { AuthenticatedRequest } from "../middleware/auth";
+import { User } from "../models/User";
+import { AdminUser } from "../models/AdminUser";
 
 export const notificationsRouter = express.Router();
 
@@ -13,13 +15,22 @@ const JWT_SECRET = process.env.NEXA_AI_JWT_SECRET!;
  * (adminId in payload). Notifications belong to either, so we resolve the recipient id
  * from whatever's in the token.
  */
-function eitherAuth(req: AuthenticatedRequest, res: Response, next: express.NextFunction) {
+async function eitherAuth(req: AuthenticatedRequest, res: Response, next: express.NextFunction) {
   const token = req.headers.authorization?.split(" ")[1];
   if (!token) return res.status(401).json({ error: "Authorization token required" });
   try {
     const decoded = jwt.verify(token, JWT_SECRET) as any;
     const id = decoded.adminId || decoded.userId;
     if (!id) return res.status(401).json({ error: "Token has no recipient id" });
+
+    // Reject tokens issued before the account's last logout/password change.
+    const account = decoded.isAdmin
+      ? await AdminUser.findById(id).select("tokenVersion")
+      : await User.findById(id).select("tokenVersion");
+    if (!account || (account.tokenVersion || 0) !== (decoded.tokenVersion || 0)) {
+      return res.status(401).json({ error: "Invalid or expired token" });
+    }
+
     req.userId = decoded.userId;
     req.adminId = decoded.adminId;
     req.email = decoded.email;

@@ -228,7 +228,8 @@ adminAuthRouter.post("/login", async (req: Request<{}, {}, AdminAuthRequest>, re
         tenantId,
         tenantSlug,
         tenantName,
-        isAdmin: true
+        isAdmin: true,
+        tokenVersion: admin.tokenVersion || 0
       },
       JWT_SECRET,
       { expiresIn: "7d" }
@@ -276,7 +277,10 @@ adminAuthRouter.post("/login", async (req: Request<{}, {}, AdminAuthRequest>, re
   }
 });
 
-adminAuthRouter.post("/logout", adminAuthMiddleware, (req: AuthenticatedRequest, res: Response) => {
+adminAuthRouter.post("/logout", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  // Bump tokenVersion so this and every other outstanding admin token is rejected from now on.
+  await AdminUser.findByIdAndUpdate(req.adminId, { $inc: { tokenVersion: 1 } });
+
   logEvent("admin_logout", {
     adminId: req.adminId,
     adminEmail: req.email,
@@ -306,9 +310,23 @@ adminAuthRouter.post("/change-password-first-login", adminAuthMiddleware, async 
 
     admin.password = await bcryptjs.hash(newPassword, 10);
     admin.mustChangePassword = false;
+    admin.tokenVersion = (admin.tokenVersion || 0) + 1;
     await admin.save();
 
-    res.json({ message: "Password updated. You can keep using the platform." });
+    const token = jwt.sign(
+      {
+        adminId: admin._id.toString(),
+        email: admin.email,
+        fullName: admin.fullName,
+        businessUnit: admin.businessUnit,
+        isAdmin: true,
+        tokenVersion: admin.tokenVersion
+      },
+      JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+
+    res.json({ message: "Password updated. You can keep using the platform.", token });
   } catch (error) {
     console.error("Change password (first login) error:", error);
     res.status(500).json({ error: "Internal server error" });
@@ -440,6 +458,7 @@ adminAuthRouter.post("/reset-password", async (req: Request<{}, {}, { token: str
     admin.password = await bcryptjs.hash(newPassword, 10);
     admin.resetToken = undefined;
     admin.resetTokenExpiry = undefined;
+    admin.tokenVersion = (admin.tokenVersion || 0) + 1;
     await admin.save();
 
     res.json({ message: "Password reset successfully. You can now login with your new password." });
@@ -1265,9 +1284,25 @@ adminAuthRouter.put("/change-password", adminAuthMiddleware, async (req: Authent
     }
 
     admin.password = await bcryptjs.hash(newPassword, 10);
+    admin.tokenVersion = (admin.tokenVersion || 0) + 1;
     await admin.save();
 
-    res.json({ message: "Password updated successfully" });
+    // Reissue a token bound to the new tokenVersion so this session keeps working;
+    // every other outstanding admin token is now rejected.
+    const token = jwt.sign(
+      {
+        adminId: admin._id.toString(),
+        email: admin.email,
+        fullName: admin.fullName,
+        businessUnit: admin.businessUnit,
+        isAdmin: true,
+        tokenVersion: admin.tokenVersion
+      },
+      JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+
+    res.json({ message: "Password updated successfully", token });
   } catch (error) {
     console.error("Change password error:", error);
     res.status(500).json({ error: "Internal server error" });

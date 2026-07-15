@@ -280,7 +280,7 @@ analyticsRouter.post("/reset-password", superAdminMiddleware, async (req: Authen
 
     const user = await User.findByIdAndUpdate(
       userId,
-      { password: hashedPassword },
+      { password: hashedPassword, $inc: { tokenVersion: 1 } },
       { new: true }
     ).select("-password");
 

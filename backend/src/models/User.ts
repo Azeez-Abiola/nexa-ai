@@ -16,6 +16,8 @@ export interface UserDocument extends Document {
   emailVerificationOTPExpiry?: Date;
   resetToken?: string;
   resetTokenExpiry?: Date;
+  /** Bumped on logout/password change to invalidate all previously-issued JWTs. */
+  tokenVersion: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -33,7 +35,8 @@ const UserSchema = new Schema<UserDocument>(
     emailVerificationOTP: { type: String, default: null },
     emailVerificationOTPExpiry: { type: Date, default: null },
     resetToken: { type: String, default: null },
-    resetTokenExpiry: { type: Date, default: null }
+    resetTokenExpiry: { type: Date, default: null },
+    tokenVersion: { type: Number, default: 0 }
   },
   { timestamps: true }
 );

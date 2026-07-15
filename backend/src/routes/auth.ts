@@ -146,7 +146,8 @@ authRouter.post("/verify-email", async (req: Request<{}, {}, { email: string; ot
       tenantSlug: tenant.tenantSlug,
       tenantLogo: tenant.tenantLogo,
       tenantColor: tenant.tenantColor,
-      isAdmin: user.businessUnit === "SUPERADMIN"
+      isAdmin: user.businessUnit === "SUPERADMIN",
+      tokenVersion: user.tokenVersion || 0
     };
     const token = jwt.sign(payload, JWT_SECRET, { expiresIn: "7d" });
 
@@ -280,7 +281,8 @@ authRouter.post("/login", async (req: Request<{}, {}, AuthRequest>, res: Respons
       tenantSlug: tenant.tenantSlug,
       tenantLogo: tenant.tenantLogo,
       tenantColor: tenant.tenantColor,
-      isAdmin: isAdminAccount || user.businessUnit === "SUPERADMIN"
+      isAdmin: isAdminAccount || user.businessUnit === "SUPERADMIN",
+      tokenVersion: user.tokenVersion || 0
     };
 
     const token = jwt.sign(payload, JWT_SECRET, { expiresIn: "7d" });
@@ -315,7 +317,15 @@ authRouter.post("/login", async (req: Request<{}, {}, AuthRequest>, res: Respons
   }
 });
 
-authRouter.post("/logout", authMiddleware, (req: AuthenticatedRequest, res: Response) => {
+authRouter.post("/logout", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  // Bump tokenVersion so this and every other outstanding token for the account is
+  // rejected by authMiddleware/adminAuthMiddleware from now on.
+  if (req.isAdmin) {
+    await AdminUser.findByIdAndUpdate(req.adminId, { $inc: { tokenVersion: 1 } });
+  } else {
+    await User.findByIdAndUpdate(req.userId, { $inc: { tokenVersion: 1 } });
+  }
+
   logEvent(req.isAdmin ? "admin_logout" : "user_logout", {
     adminId: req.isAdmin ? req.userId : undefined,
     userId: !req.isAdmin ? req.userId : undefined,
@@ -396,6 +406,7 @@ authRouter.post("/reset-password", async (req: Request<{}, {}, { token: string; 
     user.password = hashedPassword;
     user.resetToken = undefined;
     user.resetTokenExpiry = undefined;
+    user.tokenVersion = (user.tokenVersion || 0) + 1;
     await user.save();
 
     res.json({
@@ -496,8 +507,27 @@ authRouter.put("/me/password", authMiddleware, async (req: AuthenticatedRequest,
       return res.status(401).json({ error: "Current password is incorrect" });
     }
     user.password = await bcryptjs.hash(newPassword, 10);
+    user.tokenVersion = (user.tokenVersion || 0) + 1;
     await user.save();
-    res.json({ message: "Password updated successfully" });
+
+    // Reissue a token bound to the new tokenVersion so this session keeps working;
+    // every other outstanding token for this account is now rejected.
+    const tenant = await tenantProfileForBu(user.businessUnit);
+    const payload = {
+      userId: user._id,
+      email: user.email,
+      businessUnit: user.businessUnit,
+      department: user.department,
+      tenantId: tenant.tenantId,
+      tenantSlug: tenant.tenantSlug,
+      tenantLogo: tenant.tenantLogo,
+      tenantColor: tenant.tenantColor,
+      isAdmin: false,
+      tokenVersion: user.tokenVersion
+    };
+    const token = jwt.sign(payload, JWT_SECRET, { expiresIn: "7d" });
+
+    res.json({ message: "Password updated successfully", token });
   } catch (error) {
     console.error("PUT /auth/me/password error:", error);
     res.status(500).json({ error: "Internal server error" });

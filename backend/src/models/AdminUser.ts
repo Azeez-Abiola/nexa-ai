@@ -17,6 +17,8 @@ export interface AdminUserDocument extends Document {
   isActive: boolean;
   /** True when the password was auto-generated and the admin must change it on first sign-in. */
   mustChangePassword: boolean;
+  /** Bumped on logout/password change to invalidate all previously-issued JWTs. */
+  tokenVersion: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -39,7 +41,8 @@ const AdminUserSchema = new Schema<AdminUserDocument>(
     emailVerificationOTP: { type: String, default: null },
     emailVerificationOTPExpiry: { type: Date, default: null },
     resetToken: { type: String, default: null },
-    resetTokenExpiry: { type: Date, default: null }
+    resetTokenExpiry: { type: Date, default: null },
+    tokenVersion: { type: Number, default: 0 }
   },
   { timestamps: true }
 );
