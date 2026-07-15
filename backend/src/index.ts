@@ -281,6 +281,18 @@ app.get('*', (req, res, next) => {
   res.sendFile(frontendIndex);
 });
 
+// Global error handler — must be registered after all routes/middleware.
+// Rate-limit store failures (e.g. Redis unreachable) fail CLOSED with a 503 rather than
+// silently falling through to Express's default handler, which produced the inconsistent
+// block/allow behavior seen when the login rate limiter's Redis had issues.
+app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  if (err?.isRateLimitStoreError) {
+    return res.status(503).json({ error: "Service temporarily unavailable. Please try again in a moment." });
+  }
+  logger.error("Unhandled error", { message: err?.message, stack: err?.stack });
+  res.status(500).json({ error: "Internal server error" });
+});
+
 
 
 const mongoUri = process.env.MONGODB_URI!;
