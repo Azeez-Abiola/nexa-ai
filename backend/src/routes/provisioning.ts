@@ -12,6 +12,7 @@ import { AdminInvite } from "../models/AdminInvite";
 import { TenantRequest } from "../models/TenantRequest";
 import { superAdminMiddleware, AuthenticatedRequest } from "../middleware/auth";
 import { sendTenantCredentialsEmail, sendAccessRequestRejected } from "../services/emailService";
+import { validatePasswordStrength } from "../utils/passwordPolicy";
 
 export const provisioningRouter = express.Router();
 
@@ -372,8 +373,9 @@ provisioningRouter.post("/invite/accept", async (req, res) => {
     if (!token || !password) {
       return res.status(400).json({ error: "Token and password are required" });
     }
-    if (password.length < 6) {
-      return res.status(400).json({ error: "Password must be at least 6 characters" });
+    const passwordError = validatePasswordStrength(password);
+    if (passwordError) {
+      return res.status(400).json({ error: passwordError });
     }
 
     const invite = await AdminInvite.findOne({

@@ -6,8 +6,8 @@ import logger from "../utils/logger";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-const MODEL                = process.env.OPEN_AI_MODEL || "gpt-4.1";
-const tokenEncoder         = encodingForModel("gpt-4o"); // gpt-4.1 uses the same o200k_base tokenizer
+const MODEL                = process.env.OPEN_AI_MODEL || "gpt-5";
+const tokenEncoder         = encodingForModel("gpt-4o"); // gpt-5 uses the same o200k_base tokenizer
 
 const SOFT_CONTEXT_CEILING = 200_000;
 const HISTORY_TOKEN_BUDGET = 4_000;
@@ -131,7 +131,7 @@ export function buildSystemPrompt(correctBUName: string, policyContext: string, 
     activeModel === "claude"    ? "Claude Opus 4.7" :
     activeModel === "kimi"      ? "Kimi k2.5" :
     activeModel === "deepseek"  ? "DeepSeek v4" :
-    "GPT-4.1";
+    "GPT-5";
   const basePrompt = `You are Nexa AI, ${correctBUName}'s Policy Assistant, powered by ${modelLabel}. If asked which model or AI you use, say you are Nexa AI powered by ${modelLabel}.`;
   const formattingGuide = `Format responses with: **bold** for key terms, *italics* for emphasis, ### headers, numbered/bullet lists, --- separators, and code blocks for examples.`;
 

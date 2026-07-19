@@ -7,6 +7,7 @@ import { BusinessUnit as BusinessUnitModel } from "../models/BusinessUnit";
 import { BusinessUnitEmailMapping } from "../models/BusinessUnitEmailMapping";
 import { sendWelcomeEmail } from "../services/emailService";
 import { hashInviteToken } from "../utils/inviteToken";
+import { validatePasswordStrength } from "../utils/passwordPolicy";
 
 export const employeeInviteRouter = express.Router();
 
@@ -49,8 +50,9 @@ employeeInviteRouter.post("/accept", async (req: Request, res: Response) => {
     if (!token || !password) {
       return res.status(400).json({ error: "Token and password are required" });
     }
-    if (password.length < 6) {
-      return res.status(400).json({ error: "Password must be at least 6 characters" });
+    const passwordError = validatePasswordStrength(password);
+    if (passwordError) {
+      return res.status(400).json({ error: passwordError });
     }
 
     const invite = await EmployeeInvite.findOne({

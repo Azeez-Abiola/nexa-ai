@@ -8,10 +8,16 @@ import logger from "../utils/logger";
 // Dedicated Redis client — separate from the BullMQ connection which requires
 // maxRetriesPerRequest: null (a BullMQ-specific option that causes short-lived
 // rate-limit commands to hang instead of failing fast).
+// maxRetriesPerRequest/commandTimeout are deliberately tight: this store backs the login
+// rate limiter, which must fail FAST (see makeStore below) rather than let a slow/unreachable
+// Redis leave a request hanging for the default ~20-retry queue (that's what produced silent
+// timeouts under real testing instead of a clean block-or-allow decision).
 const rateLimitRedis = process.env.REDIS_URL
   ? new Redis(process.env.REDIS_URL, {
       enableReadyCheck: false,
       connectTimeout: 10000,
+      commandTimeout: 2000,
+      maxRetriesPerRequest: 1,
       lazyConnect: true,
     })
   : new Redis({
@@ -20,6 +26,8 @@ const rateLimitRedis = process.env.REDIS_URL
       password: process.env.REDIS_PASSWORD || undefined,
       enableReadyCheck: false,
       connectTimeout: 10000,
+      commandTimeout: 2000,
+      maxRetriesPerRequest: 1,
       lazyConnect: true,
     });
 
@@ -30,10 +38,28 @@ rateLimitRedis.on("connect", () => {
   logger.info("[RateLimit Redis] Connected");
 });
 
+// Marks an error as originating from the rate-limit Redis store so the global error handler
+// (index.ts) can fail CLOSED with a clean 503 instead of falling through to Express's default
+// error page — an unreachable/slow Redis must never silently let a login attempt through
+// unthrottled, since that's exactly the brute-force protection this store exists to provide.
+class RateLimitStoreError extends Error {
+  isRateLimitStoreError = true;
+}
+
 function makeStore(prefix: string) {
   return new RedisStore({
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    sendCommand: (...args: string[]) => rateLimitRedis.call(...(args as [string, ...string[]])) as any,
+    sendCommand: async (...args: string[]) => {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return (await rateLimitRedis.call(...(args as [string, ...string[]]))) as any;
+      } catch (err) {
+        logger.error("[RateLimit Redis] Command failed — failing closed", {
+          prefix,
+          message: (err as Error).message,
+        });
+        throw new RateLimitStoreError("Rate limit store unavailable");
+      }
+    },
     prefix,
   });
 }
@@ -96,10 +122,13 @@ const AI_LIMIT_PER_DAY = parseInt(process.env.RATE_LIMIT_AI_PER_DAY ?? "50", 10)
 // token via adminAuthMiddleware, so it shouldn't share the login IP bucket.
 const AUTH_SENSITIVE_PATHS: RegExp[] = [
   /\/login\/?$/,
+  /\/login\/verify-otp\/?$/,
   /\/verify-email\/?$/,
   /\/resend-verification\/?$/,
   /\/forgot-password\/?$/,
   /\/reset-password\/?$/,
+  /\/request-access\/?$/,
+  /\/request-access\/verify-otp\/?$/,
 ];
 
 function skipNonAuthSensitive(req: Request): boolean {
@@ -108,35 +137,45 @@ function skipNonAuthSensitive(req: Request): boolean {
   return !AUTH_SENSITIVE_PATHS.some((re) => re.test(pathname));
 }
 
-// Brute-force protection on login/OTP/password-reset endpoints — AUTH_LIMIT req per 15 min per IP
+// Brute-force protection on login/OTP/password-reset endpoints — AUTH_LIMIT req per 15 min per IP.
+// This IS a security control, so it fails CLOSED (passOnStoreError: false, the default — kept
+// explicit here for clarity): if Redis is unreachable, the global error handler in index.ts
+// returns 503 rather than letting brute-force attempts through uncounted.
 export const authLimiter = rateLimit({
   ...sharedOptions,
   windowMs: 15 * 60 * 1000,
   limit: AUTH_LIMIT,
   keyGenerator: (req) => req.ip ?? "unknown",
   skip: skipNonAuthSensitive,
+  passOnStoreError: false,
   message: { error: "Too many login attempts. Please try again in 15 minutes." },
   store: makeStore("rl:auth:"),
 });
 
-// AI burst control — AI_LIMIT_PER_MINUTE messages per minute per user
+// AI burst control — AI_LIMIT_PER_MINUTE messages per minute per user.
+// Unlike authLimiter, this is a usage/cost cap, not a security control — if Redis is
+// unreachable we fail OPEN (let the message through uncounted) rather than break chat,
+// the app's core function, over a transient Redis blip. The failure is still logged
+// inside makeStore()'s sendCommand for visibility.
 export const aiLimiter = rateLimit({
   ...sharedOptions,
   windowMs: 60 * 1000,
   limit: AI_LIMIT_PER_MINUTE,
   keyGenerator: aiKeyGenerator,
   skip: skipNonAiMessage,
+  passOnStoreError: true,
   message: { error: "Too many requests. Please wait a moment before sending another message." },
   store: makeStore("rl:ai:"),
 });
 
-// AI daily cap — AI_LIMIT_PER_DAY messages per day per user
+// AI daily cap — AI_LIMIT_PER_DAY messages per day per user. Same fail-open reasoning as aiLimiter.
 export const aiDailyLimiter = rateLimit({
   ...sharedOptions,
   windowMs: 24 * 60 * 60 * 1000,
   limit: AI_LIMIT_PER_DAY,
   keyGenerator: aiKeyGenerator,
   skip: skipNonAiMessage,
+  passOnStoreError: true,
   store: makeStore("rl:ai-daily:"),
   handler: (_req, res) => {
     res.status(429).json({

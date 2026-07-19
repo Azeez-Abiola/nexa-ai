@@ -20,7 +20,21 @@ const SuperAdminLogin: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  // Two-step sign-in: after the password step the backend emails a 6-digit code.
+  const [otpStep, setOtpStep] = useState(false);
+  const [otp, setOtp] = useState("");
+  const [pendingEmail, setPendingEmail] = useState("");
+  const [otpLoading, setOtpLoading] = useState(false);
+  const [otpError, setOtpError] = useState("");
+  const [otpResending, setOtpResending] = useState(false);
+  const [otpNotice, setOtpNotice] = useState("");
   const navigate = useNavigate();
+
+  const completeLogin = (data: any) => {
+    localStorage.setItem('cpanelToken', data.token);
+    localStorage.setItem('cpanelUser', JSON.stringify(data.admin));
+    navigate('/super-admin/dashboard');
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -29,14 +43,62 @@ const SuperAdminLogin: React.FC = () => {
 
     try {
       const { data } = await axios.post('/api/v1/admin/auth/login', { email, password });
-      localStorage.setItem('cpanelToken', data.token);
-      localStorage.setItem('cpanelUser', JSON.stringify(data.admin));
-      navigate('/super-admin/dashboard');
+      if (data?.requiresOtp) {
+        // Password accepted — a one-time code was emailed. Move to verification.
+        setPendingEmail(data.email || email);
+        setOtp("");
+        setOtpError("");
+        setOtpNotice("");
+        setOtpStep(true);
+        return;
+      }
+      // Fallback for a backend that still returns the token directly (pre-OTP deploy).
+      completeLogin(data);
     } catch (err: any) {
       setError(err.response?.data?.error || "Authentication failed. Access denied.");
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleVerifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setOtpError("");
+    const code = otp.trim();
+    if (code.length < 4) {
+      setOtpError("Enter the code from your email.");
+      return;
+    }
+    setOtpLoading(true);
+    try {
+      const { data } = await axios.post('/api/v1/admin/auth/login/verify-otp', { email: pendingEmail, otp: code });
+      completeLogin(data);
+    } catch (err: any) {
+      setOtpError(err.response?.data?.error || "Invalid or expired code");
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
+  const handleResendOtp = async () => {
+    setOtpError("");
+    setOtpNotice("");
+    setOtpResending(true);
+    try {
+      await axios.post('/api/v1/admin/auth/login', { email: pendingEmail, password });
+      setOtpNotice("A new code has been sent to your email.");
+    } catch (err: any) {
+      setOtpError(err.response?.data?.error || "Could not resend the code. Please try signing in again.");
+    } finally {
+      setOtpResending(false);
+    }
+  };
+
+  const exitOtpStep = () => {
+    setOtpStep(false);
+    setOtp("");
+    setOtpError("");
+    setOtpNotice("");
   };
 
   return (
@@ -127,13 +189,80 @@ const SuperAdminLogin: React.FC = () => {
 
           <div className="mb-12">
             <h2 className="text-3xl font-semibold text-[#1A1A1A] mb-3 font-sans tracking-tight">
-              Sign In to Control Panel
+              {otpStep ? "Enter your sign-in code" : "Sign In to Control Panel"}
             </h2>
             <p className="text-lg text-muted-foreground font-normal">
-              Enter your admin credentials to manage tenants.
+              {otpStep
+                ? "We emailed a 6-digit code to verify it's you."
+                : "Enter your admin credentials to manage tenants."}
             </p>
           </div>
 
+          {otpStep ? (
+            <form onSubmit={handleVerifyOtp} className="space-y-6 flex-1">
+              <div className="p-5 rounded-2xl bg-red-500/5 border border-red-500/15 text-sm text-[#1A1A1A] font-medium leading-relaxed">
+                We sent a 6-digit code to <strong>{pendingEmail}</strong>. Enter it below to finish signing in — the code expires in 10 minutes.
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-bold text-[#1A1A1A] ml-1">Verification code</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  maxLength={6}
+                  placeholder="••••••"
+                  value={otp}
+                  onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  autoFocus
+                  className="w-full px-5 py-5 bg-[#F8F9FF] border border-border/60 rounded-2xl focus:outline-none focus:border-red-500/40 focus:ring-4 focus:ring-red-500/5 transition-all font-bold text-[#1A1A1A] text-center text-2xl tracking-[0.5em]"
+                />
+              </div>
+
+              {otpNotice && (
+                <div className="p-4 rounded-2xl bg-green-500/5 border border-green-500/20 text-green-700 text-sm font-bold">
+                  {otpNotice}
+                </div>
+              )}
+
+              {otpError && (
+                <motion.div
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  className="p-5 rounded-2xl bg-red-50 border border-red-100 text-red-600 text-sm font-bold flex items-center gap-3"
+                >
+                  <FiAlertCircle size={18} className="shrink-0" />
+                  {otpError}
+                </motion.div>
+              )}
+
+              <Button
+                type="submit"
+                disabled={otpLoading}
+                className="w-full py-7 rounded-2xl bg-red-600 hover:bg-red-700 text-white font-semibold text-lg shadow-2xl shadow-red-500/20 transition-all flex items-center justify-center gap-3 group mt-2"
+              >
+                {otpLoading ? "Verifying..." : (
+                  <>
+                    Verify &amp; Sign In
+                    <FiArrowRight className="group-hover:translate-x-1 transition-transform w-5 h-5" />
+                  </>
+                )}
+              </Button>
+
+              <div className="flex items-center justify-between px-1 text-sm">
+                <button type="button" onClick={exitOtpStep} className="font-bold text-slate-400 hover:text-slate-900 transition-colors">
+                  Back
+                </button>
+                <button
+                  type="button"
+                  onClick={handleResendOtp}
+                  disabled={otpResending}
+                  className="font-bold text-red-600 hover:underline disabled:opacity-50"
+                >
+                  {otpResending ? "Sending..." : "Resend code"}
+                </button>
+              </div>
+            </form>
+          ) : (
           <form onSubmit={handleLogin} className="space-y-6 flex-1">
             <div className="space-y-2">
               <label className="text-sm font-bold text-[#1A1A1A] ml-1">Admin Email Address</label>
@@ -198,6 +327,7 @@ const SuperAdminLogin: React.FC = () => {
               )}
             </Button>
           </form>
+          )}
 
           <div className="mt-24 flex items-center justify-center gap-3">
             <img src="/1879-22.png" alt="1879 Logo" className="w-6 h-6 object-contain opacity-50" />

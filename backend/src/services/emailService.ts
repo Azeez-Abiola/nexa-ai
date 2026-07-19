@@ -54,6 +54,25 @@ export async function sendVerificationEmail(
   }
 }
 
+export async function sendLoginOtpEmail(
+  email: string,
+  otp: string,
+  fullName: string
+): Promise<void> {
+  try {
+    const html = await renderTemplate("login-otp", {
+      fullName,
+      otp,
+      year: new Date().getFullYear()
+    });
+    await sendEmail(email, "Your Nexa AI Sign-In Code", html);
+    console.log(`Login OTP sent to ${email}`);
+  } catch (error) {
+    console.error("Error sending login OTP email:", error);
+    throw error;
+  }
+}
+
 export async function sendPasswordResetEmail(
   email: string,
   resetToken: string,
@@ -303,6 +322,24 @@ export async function sendWelcomeEmail(
     console.log(`Welcome email sent to ${email}`);
   } catch (error) {
     console.error("Error sending welcome email:", error);
+    throw error;
+  }
+}
+
+export async function sendAccessRequestOtpEmail(
+  workEmail: string,
+  otp: string,
+  companyName: string
+): Promise<void> {
+  try {
+    const html = await renderTemplate("access-request-otp", {
+      companyName,
+      otp,
+      year: new Date().getFullYear()
+    });
+    await sendEmail(workEmail, "Confirm your Nexa AI access request", html);
+  } catch (error) {
+    console.error("[EmailService] Failed to send access-request OTP email:", error);
     throw error;
   }
 }
