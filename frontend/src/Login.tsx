@@ -19,6 +19,14 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  // Two-step sign-in: after the password step the backend emails a 6-digit code and we collect it here.
+  const [otpStep, setOtpStep] = useState(false);
+  const [otp, setOtp] = useState("");
+  const [pendingEmail, setPendingEmail] = useState("");
+  const [otpLoading, setOtpLoading] = useState(false);
+  const [otpError, setOtpError] = useState("");
+  const [otpResending, setOtpResending] = useState(false);
+  const [otpNotice, setOtpNotice] = useState("");
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [forgotEmail, setForgotEmail] = useState("");
   const [forgotLoading, setForgotLoading] = useState(false);
@@ -32,6 +40,14 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
   const [phone, setPhone] = useState("");
   const [employeeCount, setEmployeeCount] = useState("");
   const [requestSubmitted, setRequestSubmitted] = useState(false);
+  // Request-access is now OTP-gated: the first POST emails a code, a second call verifies it.
+  const [requestOtpStep, setRequestOtpStep] = useState(false);
+  const [requestOtp, setRequestOtp] = useState("");
+  const [pendingWorkEmail, setPendingWorkEmail] = useState("");
+  const [requestOtpLoading, setRequestOtpLoading] = useState(false);
+  const [requestOtpError, setRequestOtpError] = useState("");
+  const [requestOtpResending, setRequestOtpResending] = useState(false);
+  const [requestOtpNotice, setRequestOtpNotice] = useState("");
 
   useEffect(() => {
     if (typeof window === "undefined" || isAdminView) return;
@@ -61,12 +77,23 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
       }
       setLoading(true);
       try {
-        await axios.post("/api/v1/public/request-access", {
+        const { data } = await axios.post("/api/v1/public/request-access", {
           companyName: companyName.trim(),
           workEmail: workEmail.trim(),
           phone: phone.trim(),
           employeeCount: employees,
         });
+        if (data?.requiresOtp) {
+          // A verification code was emailed — collect it before the request is actually filed.
+          // Keep the form fields so "Resend code" can re-send the same request.
+          setPendingWorkEmail(workEmail.trim());
+          setRequestOtp("");
+          setRequestOtpError("");
+          setRequestOtpNotice("");
+          setRequestOtpStep(true);
+          return;
+        }
+        // Fallback for a backend that still files the request directly (pre-OTP deploy).
         setRequestSubmitted(true);
         setCompanyName("");
         setWorkEmail("");
@@ -87,6 +114,18 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
       const endpoint = `${base}/login`;
       const payload = { email, password };
       const { data } = await axios.post(endpoint, payload);
+      if (data?.requiresOtp) {
+        // Password accepted — a one-time code was emailed. Move to the verification step
+        // instead of logging in directly. (No token is returned at this stage.)
+        setPendingEmail(data.email || email);
+        setOtp("");
+        setOtpError("");
+        setOtpNotice("");
+        setOtpStep(true);
+        localStorage.removeItem("authInProgress");
+        return;
+      }
+      // Fallback for a backend that still returns the token directly (pre-OTP deploy).
       localStorage.setItem("nexa-token", data.token);
       localStorage.setItem("nexa-user", JSON.stringify(data.user || data.admin));
       localStorage.removeItem("authInProgress");
@@ -97,6 +136,108 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleVerifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setOtpError("");
+    const code = otp.trim();
+    if (code.length < 4) {
+      setOtpError("Enter the code from your email.");
+      return;
+    }
+    setOtpLoading(true);
+    localStorage.setItem("authInProgress", "true");
+    try {
+      const base = isAdminView ? "/api/v1/admin/auth" : "/api/v1/auth";
+      const { data } = await axios.post(`${base}/login/verify-otp`, { email: pendingEmail, otp: code });
+      localStorage.setItem("nexa-token", data.token);
+      localStorage.setItem("nexa-user", JSON.stringify(data.user || data.admin));
+      localStorage.removeItem("authInProgress");
+      onLoginSuccess(data.token, data.user || data.admin);
+    } catch (err: any) {
+      setOtpError(err.response?.data?.error || "Invalid or expired code");
+      localStorage.removeItem("authInProgress");
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
+  const handleResendOtp = async () => {
+    setOtpError("");
+    setOtpNotice("");
+    setOtpResending(true);
+    try {
+      const base = isAdminView ? "/api/v1/admin/auth" : "/api/v1/auth";
+      await axios.post(`${base}/login`, { email: pendingEmail, password });
+      setOtpNotice("A new code has been sent to your email.");
+    } catch (err: any) {
+      setOtpError(err.response?.data?.error || "Could not resend the code. Please try signing in again.");
+    } finally {
+      setOtpResending(false);
+    }
+  };
+
+  const exitOtpStep = () => {
+    setOtpStep(false);
+    setOtp("");
+    setOtpError("");
+    setOtpNotice("");
+  };
+
+  const handleVerifyRequestOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setRequestOtpError("");
+    const code = requestOtp.trim();
+    if (code.length < 4) {
+      setRequestOtpError("Enter the code from your email.");
+      return;
+    }
+    setRequestOtpLoading(true);
+    try {
+      await axios.post("/api/v1/public/request-access/verify-otp", {
+        workEmail: pendingWorkEmail,
+        otp: code,
+      });
+      setRequestOtpStep(false);
+      setRequestSubmitted(true);
+      setCompanyName("");
+      setWorkEmail("");
+      setPhone("");
+      setEmployeeCount("");
+      setRequestOtp("");
+    } catch (err: any) {
+      setRequestOtpError(err.response?.data?.error || "Invalid or expired code");
+    } finally {
+      setRequestOtpLoading(false);
+    }
+  };
+
+  const handleResendRequestOtp = async () => {
+    setRequestOtpError("");
+    setRequestOtpNotice("");
+    const employees = parseInt(employeeCount, 10);
+    setRequestOtpResending(true);
+    try {
+      await axios.post("/api/v1/public/request-access", {
+        companyName: companyName.trim(),
+        workEmail: pendingWorkEmail,
+        phone: phone.trim(),
+        employeeCount: Number.isFinite(employees) ? employees : undefined,
+      });
+      setRequestOtpNotice("A new code has been sent to your email.");
+    } catch (err: any) {
+      setRequestOtpError(err.response?.data?.error || "Could not resend the code. Please try again.");
+    } finally {
+      setRequestOtpResending(false);
+    }
+  };
+
+  const exitRequestOtpStep = () => {
+    setRequestOtpStep(false);
+    setRequestOtp("");
+    setRequestOtpError("");
+    setRequestOtpNotice("");
   };
 
   const handleForgotPassword = async (e: React.FormEvent) => {
@@ -223,7 +364,139 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
             </p>
           </div>
 
-          {!isLogin && requestSubmitted ? (
+          {otpStep ? (
+            <form onSubmit={handleVerifyOtp} className="space-y-6">
+              <div className="p-5 rounded-2xl bg-primary/5 border border-primary/15 text-sm text-[#1A1A1A] font-medium leading-relaxed">
+                We sent a 6-digit code to <strong>{pendingEmail}</strong>. Enter it below to finish signing in — the code expires in 10 minutes.
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-bold text-[#1A1A1A] ml-1">Verification code</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  maxLength={6}
+                  placeholder="••••••"
+                  value={otp}
+                  onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  autoFocus
+                  className="w-full px-5 py-5 bg-[#F8F9FF] border border-border/60 rounded-2xl focus:outline-none focus:border-primary/40 focus:ring-4 focus:ring-primary/5 transition-all font-bold text-[#1A1A1A] text-center text-2xl tracking-[0.5em]"
+                />
+              </div>
+
+              {otpNotice && (
+                <div className="p-4 rounded-2xl bg-green-500/5 border border-green-500/20 text-green-700 text-sm font-bold">
+                  {otpNotice}
+                </div>
+              )}
+
+              {otpError && (
+                <motion.div
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  className="p-5 rounded-2xl bg-destructive/5 border border-destructive/20 text-destructive text-sm font-bold flex items-center gap-3"
+                >
+                  <div className="w-6 h-6 rounded-full bg-destructive/10 flex items-center justify-center shrink-0">
+                    <FiX size={14} />
+                  </div>
+                  {otpError}
+                </motion.div>
+              )}
+
+              <Button
+                type="submit"
+                disabled={otpLoading}
+                className="w-full py-7 rounded-2xl bg-primary hover:bg-primary/90 text-white font-semibold text-lg shadow-2xl shadow-primary/20 transition-all flex items-center justify-center gap-3 group mt-2"
+              >
+                {otpLoading ? "Verifying..." : (
+                  <>
+                    Verify &amp; Sign In
+                    <FiArrowRight className="group-hover:translate-x-1 transition-transform w-5 h-5" />
+                  </>
+                )}
+              </Button>
+
+              <div className="flex items-center justify-between px-1 text-sm">
+                <button type="button" onClick={exitOtpStep} className="font-bold text-muted-foreground hover:text-primary transition-colors">
+                  Back
+                </button>
+                <button
+                  type="button"
+                  onClick={handleResendOtp}
+                  disabled={otpResending}
+                  className="font-bold text-primary hover:underline disabled:opacity-50"
+                >
+                  {otpResending ? "Sending..." : "Resend code"}
+                </button>
+              </div>
+            </form>
+          ) : requestOtpStep ? (
+            <form onSubmit={handleVerifyRequestOtp} className="space-y-6">
+              <div className="p-5 rounded-2xl bg-primary/5 border border-primary/15 text-sm text-[#1A1A1A] font-medium leading-relaxed">
+                We sent a 6-digit code to <strong>{pendingWorkEmail}</strong>. Enter it below to submit your access request — the code expires in 10 minutes.
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-bold text-[#1A1A1A] ml-1">Verification code</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  maxLength={6}
+                  placeholder="••••••"
+                  value={requestOtp}
+                  onChange={(e) => setRequestOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  autoFocus
+                  className="w-full px-5 py-5 bg-[#F8F9FF] border border-border/60 rounded-2xl focus:outline-none focus:border-primary/40 focus:ring-4 focus:ring-primary/5 transition-all font-bold text-[#1A1A1A] text-center text-2xl tracking-[0.5em]"
+                />
+              </div>
+
+              {requestOtpNotice && (
+                <div className="p-4 rounded-2xl bg-green-500/5 border border-green-500/20 text-green-700 text-sm font-bold">
+                  {requestOtpNotice}
+                </div>
+              )}
+
+              {requestOtpError && (
+                <motion.div
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  className="p-5 rounded-2xl bg-destructive/5 border border-destructive/20 text-destructive text-sm font-bold flex items-center gap-3"
+                >
+                  <div className="w-6 h-6 rounded-full bg-destructive/10 flex items-center justify-center shrink-0">
+                    <FiX size={14} />
+                  </div>
+                  {requestOtpError}
+                </motion.div>
+              )}
+
+              <Button
+                type="submit"
+                disabled={requestOtpLoading}
+                className="w-full py-7 rounded-2xl bg-primary hover:bg-primary/90 text-white font-semibold text-lg shadow-2xl shadow-primary/20 transition-all flex items-center justify-center gap-3 group mt-2"
+              >
+                {requestOtpLoading ? "Verifying..." : (
+                  <>
+                    Submit Request
+                    <FiArrowRight className="group-hover:translate-x-1 transition-transform w-5 h-5" />
+                  </>
+                )}
+              </Button>
+
+              <div className="flex items-center justify-between px-1 text-sm">
+                <button type="button" onClick={exitRequestOtpStep} className="font-bold text-muted-foreground hover:text-primary transition-colors">
+                  Back
+                </button>
+                <button
+                  type="button"
+                  onClick={handleResendRequestOtp}
+                  disabled={requestOtpResending}
+                  className="font-bold text-primary hover:underline disabled:opacity-50"
+                >
+                  {requestOtpResending ? "Sending..." : "Resend code"}
+                </button>
+              </div>
+            </form>
+          ) : !isLogin && requestSubmitted ? (
             <div className="space-y-6">
               <div className="p-6 rounded-2xl bg-green-500/5 border border-green-500/20 flex items-start gap-4">
                 <div className="w-10 h-10 rounded-full bg-green-500/10 flex items-center justify-center shrink-0">

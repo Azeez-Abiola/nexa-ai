@@ -26,8 +26,8 @@ const ForceChangePasswordModal: React.FC<ForceChangePasswordModalProps> = ({ ope
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
-    if (newPassword.length < 8) {
-      setError("Password must be at least 8 characters.");
+    if (newPassword.length < 10) {
+      setError("Password must be at least 10 characters.");
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -36,12 +36,20 @@ const ForceChangePasswordModal: React.FC<ForceChangePasswordModalProps> = ({ ope
     }
     setSubmitting(true);
     try {
-      const token = localStorage.getItem("cpanelToken") || localStorage.getItem("nexa-token");
-      await axios.post(
+      const usingCpanel = !!localStorage.getItem("cpanelToken");
+      const token = usingCpanel ? localStorage.getItem("cpanelToken") : localStorage.getItem("nexa-token");
+      const { data } = await axios.post(
         "/api/v1/admin/auth/change-password-first-login",
         { newPassword },
         { headers: { Authorization: `Bearer ${token}` } }
       );
+
+      // The server rotates the auth token on password change and invalidates the old one,
+      // so swap in the fresh token to avoid being logged out on the next request.
+      if (data?.token) {
+        localStorage.setItem(usingCpanel ? "cpanelToken" : "nexa-token", data.token);
+        axios.defaults.headers.common["Authorization"] = `Bearer ${data.token}`;
+      }
 
       // Clear the flag locally so the modal doesn't reopen on refresh.
       const userKeys: ("nexa-user" | "cpanelUser")[] = ["nexa-user", "cpanelUser"];

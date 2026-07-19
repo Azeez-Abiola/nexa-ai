@@ -23,6 +23,7 @@ import NewLandingPage from "./landing";
 import ContactPage from "./landing/ContactPage";
 import PrivacyPage from "./landing/PrivacyPage";
 import TermsPage from "./landing/TermsPage";
+import ResetPassword from "./ResetPassword";
 import { AcceptInvite } from "./AcceptInvite";
 import { AcceptEmployeeInvite } from "./AcceptEmployeeInvite";
 import SuperAdminMain from "./super-admin/SuperAdminMain";
@@ -2413,6 +2414,12 @@ export const App: React.FC = () => {
   }
   if (location.pathname === "/terms") {
     return <TermsPage />;
+  }
+
+  // Password-reset page — public, reached from the reset email link (/reset-password?token=…).
+  // Previously unhandled, so the link fell through to the landing page (VAPT Finding 5).
+  if (location.pathname === "/reset-password") {
+    return <ResetPassword />;
   }
 
   // If user is visiting the old admin URL, redirect to new one

@@ -184,16 +184,22 @@ const BusinessProfile: React.FC = () => {
     try {
       setIsChangingPassword(true);
       const isSuper = window.location.pathname.startsWith('/super-admin');
-      const activeToken = isSuper 
-        ? (localStorage.getItem('cpanelToken') || localStorage.getItem('nexa-token'))
-        : localStorage.getItem('nexa-token');
-      
-      await axios.put('/api/v1/admin/auth/change-password', {
+      const tokenKey = isSuper && localStorage.getItem('cpanelToken') ? 'cpanelToken' : 'nexa-token';
+      const activeToken = localStorage.getItem(tokenKey);
+
+      const { data } = await axios.put('/api/v1/admin/auth/change-password', {
         currentPassword: passwordData.currentPassword,
         newPassword: passwordData.newPassword
       }, {
         headers: { Authorization: `Bearer ${activeToken}` }
       });
+
+      // The server rotates the auth token on password change and invalidates the old one,
+      // so swap in the fresh token to avoid being logged out on the next request.
+      if (data?.token) {
+        localStorage.setItem(tokenKey, data.token);
+        axios.defaults.headers.common["Authorization"] = `Bearer ${data.token}`;
+      }
 
       toast({
         title: "Security Updated",

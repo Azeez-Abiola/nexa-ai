@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import axios from "axios";
-import { BiArrowBack, BiInfoCircle, BiLock, BiUser, BiCamera, BiTrash } from "react-icons/bi";
+import { BiArrowBack, BiInfoCircle, BiLock, BiUser, BiCamera, BiTrash, BiShow, BiHide } from "react-icons/bi";
 
 const AVATARS = ["/avatar-1.png", "/avatar-2.png"] as const;
 
@@ -45,6 +45,9 @@ export const UserChatProfile: React.FC<Props> = ({
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [showCurrentPw, setShowCurrentPw] = useState(false);
+  const [showNewPw, setShowNewPw] = useState(false);
+  const [showConfirmPw, setShowConfirmPw] = useState(false);
   const [savingPw, setSavingPw] = useState(false);
   const [pwMsg, setPwMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
 
@@ -143,8 +146,8 @@ export const UserChatProfile: React.FC<Props> = ({
   const savePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setPwMsg(null);
-    if (newPassword.length < 6) {
-      setPwMsg({ type: "err", text: "New password must be at least 6 characters." });
+    if (newPassword.length < 10) {
+      setPwMsg({ type: "err", text: "New password must be at least 10 characters." });
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -153,10 +156,16 @@ export const UserChatProfile: React.FC<Props> = ({
     }
     setSavingPw(true);
     try {
-      await axios.put("/api/v1/auth/me/password", {
+      const { data } = await axios.put("/api/v1/auth/me/password", {
         currentPassword,
         newPassword,
       });
+      // The server rotates the auth token on password change and invalidates the old one,
+      // so swap in the fresh token to avoid being logged out on the next request.
+      if (data?.token) {
+        localStorage.setItem("nexa-token", data.token);
+        axios.defaults.headers.common["Authorization"] = `Bearer ${data.token}`;
+      }
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
@@ -368,39 +377,69 @@ export const UserChatProfile: React.FC<Props> = ({
           <form onSubmit={savePassword} className="space-y-4">
             <div>
               <label className={`mb-1 block text-xs font-semibold ${isDark ? d.label : "text-slate-400"}`}>Current password</label>
-              <input
-                type="password"
-                autoComplete="current-password"
-                value={currentPassword}
-                onChange={(e) => setCurrentPassword(e.target.value)}
-                className={`h-12 w-full rounded-xl border px-4 text-sm outline-none focus:ring-2 ${
-                  isDark ? d.input : "border-slate-200 bg-slate-50 text-slate-900 focus:ring-2 focus:ring-[var(--brand-color)]/20"
-                }`}
-              />
+              <div className="relative">
+                <input
+                  type={showCurrentPw ? "text" : "password"}
+                  autoComplete="current-password"
+                  value={currentPassword}
+                  onChange={(e) => setCurrentPassword(e.target.value)}
+                  className={`h-12 w-full rounded-xl border px-4 pr-11 text-sm outline-none focus:ring-2 ${
+                    isDark ? d.input : "border-slate-200 bg-slate-50 text-slate-900 focus:ring-2 focus:ring-[var(--brand-color)]/20"
+                  }`}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowCurrentPw((s) => !s)}
+                  aria-label={showCurrentPw ? "Hide password" : "Show password"}
+                  className={`absolute right-3 top-1/2 -translate-y-1/2 ${isDark ? d.label : "text-slate-400"} hover:opacity-80`}
+                >
+                  {showCurrentPw ? <BiHide size={20} /> : <BiShow size={20} />}
+                </button>
+              </div>
             </div>
             <div>
               <label className={`mb-1 block text-xs font-semibold ${isDark ? d.label : "text-slate-400"}`}>New password</label>
-              <input
-                type="password"
-                autoComplete="new-password"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                className={`h-12 w-full rounded-xl border px-4 text-sm outline-none focus:ring-2 ${
-                  isDark ? d.input : "border-slate-200 bg-slate-50 text-slate-900 focus:ring-2 focus:ring-[var(--brand-color)]/20"
-                }`}
-              />
+              <div className="relative">
+                <input
+                  type={showNewPw ? "text" : "password"}
+                  autoComplete="new-password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  className={`h-12 w-full rounded-xl border px-4 pr-11 text-sm outline-none focus:ring-2 ${
+                    isDark ? d.input : "border-slate-200 bg-slate-50 text-slate-900 focus:ring-2 focus:ring-[var(--brand-color)]/20"
+                  }`}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowNewPw((s) => !s)}
+                  aria-label={showNewPw ? "Hide password" : "Show password"}
+                  className={`absolute right-3 top-1/2 -translate-y-1/2 ${isDark ? d.label : "text-slate-400"} hover:opacity-80`}
+                >
+                  {showNewPw ? <BiHide size={20} /> : <BiShow size={20} />}
+                </button>
+              </div>
             </div>
             <div>
               <label className={`mb-1 block text-xs font-semibold ${isDark ? d.label : "text-slate-400"}`}>Confirm new password</label>
-              <input
-                type="password"
-                autoComplete="new-password"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                className={`h-12 w-full rounded-xl border px-4 text-sm outline-none focus:ring-2 ${
-                  isDark ? d.input : "border-slate-200 bg-slate-50 text-slate-900 focus:ring-2 focus:ring-[var(--brand-color)]/20"
-                }`}
-              />
+              <div className="relative">
+                <input
+                  type={showConfirmPw ? "text" : "password"}
+                  autoComplete="new-password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  className={`h-12 w-full rounded-xl border px-4 pr-11 text-sm outline-none focus:ring-2 ${
+                    isDark ? d.input : "border-slate-200 bg-slate-50 text-slate-900 focus:ring-2 focus:ring-[var(--brand-color)]/20"
+                  }`}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmPw((s) => !s)}
+                  aria-label={showConfirmPw ? "Hide password" : "Show password"}
+                  className={`absolute right-3 top-1/2 -translate-y-1/2 ${isDark ? d.label : "text-slate-400"} hover:opacity-80`}
+                >
+                  {showConfirmPw ? <BiHide size={20} /> : <BiShow size={20} />}
+                </button>
+              </div>
             </div>
             {pwMsg ? (
               <p className={`text-sm font-medium ${pwMsg.type === "ok" ? (isDark ? d.success : "text-emerald-600") : isDark ? d.error : "text-red-600"}`}>
