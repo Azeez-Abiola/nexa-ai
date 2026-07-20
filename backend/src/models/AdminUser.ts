@@ -51,10 +51,18 @@ const AdminUserSchema = new Schema<AdminUserDocument>(
     tokenVersion: { type: Number, default: 0 },
     loginOTP: { type: String, default: null },
     loginOTPExpiry: { type: Date, default: null },
-    microsoftId: { type: String, default: null, index: true, unique: true, sparse: true },
+    microsoftId: { type: String },
     lastLogin: { type: Date, default: null }
   },
   { timestamps: true }
+);
+
+// Unique only across accounts actually bound to Microsoft SSO. A sparse index is
+// not enough here: documents predating this change carry an explicit
+// `microsoftId: null`, which sparse still indexes.
+AdminUserSchema.index(
+  { microsoftId: 1 },
+  { unique: true, partialFilterExpression: { microsoftId: { $type: "string" } } }
 );
 
 export const AdminUser = mongoose.model<AdminUserDocument>("AdminUser", AdminUserSchema);
