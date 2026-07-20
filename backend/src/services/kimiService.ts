@@ -14,7 +14,7 @@ const kimi = new OpenAI({
   apiKey: process.env.KIMI_API_KEY,
   baseURL: "https://api.moonshot.ai/v1",
 });
-const MODEL = process.env.KIMI_MODEL || "kimi-k2.5";
+export const MODEL = process.env.KIMI_MODEL || "kimi-k2.5";
 
 const STREAM_MAX_ATTEMPTS  = 3;
 const RETRY_BASE_DELAY_MS  = 1_000;

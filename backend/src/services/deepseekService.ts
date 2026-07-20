@@ -14,7 +14,7 @@ const deepseek = new OpenAI({
   apiKey: process.env.DEEPSEEK_API_KEY,
   baseURL: "https://api.deepseek.com",
 });
-const MODEL = process.env.DEEPSEEK_MODEL || "deepseek-v4-flash";
+export const MODEL = process.env.DEEPSEEK_MODEL || "deepseek-v4-flash";
 
 const STREAM_MAX_ATTEMPTS  = 3;
 const RETRY_BASE_DELAY_MS  = 1_000;

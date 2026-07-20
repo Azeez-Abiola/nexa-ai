@@ -11,7 +11,7 @@ import {
   generateConversationTitle,
   ImageAttachment
 } from "../services/openaiService";
-import { parseModel, getStreamAIResponse, getGenerateAIResponse, AIModel } from "../services/aiRouter";
+import { parseModel, getStreamAIResponse, getGenerateAIResponse, getModelLabel, AIModel } from "../services/aiRouter";
 import { buildContextForQuery } from "../utils/contextBuilder";
 import { KNOWLEDGE_BASE_VERSIONING_RULES } from "../prompts/knowledgeBaseBehavior";
 import { uploadDocument, uploadChatImage } from "../services/cloudinaryService";
@@ -373,11 +373,9 @@ function buildSystemPrompt(
   failedFileNames: string[] = []
 ): string {
   const today = new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
-  const modelLabel =
-    activeModel === "claude"   ? "Claude Opus 4.8" :
-    activeModel === "kimi"     ? "Kimi k2.5" :
-    activeModel === "deepseek" ? "DeepSeek v4" :
-    "GPT-5";
+  // Derived from the model actually configured for this provider (see aiRouter),
+  // so the assistant can never report a different model than the one answering.
+  const modelLabel = getModelLabel(activeModel);
   const sections: string[] = [
     `You are Nexa AI, a helpful AI assistant for ${businessUnit}, a business unit of UACN, powered by ${modelLabel}. Today's date is ${today}. If asked which model or AI you use, say you are Nexa AI powered by ${modelLabel}. Users can switch between models at any time — if the model differs from a previous message, do not apologize or treat it as an error; simply state the current model naturally.`
   ];

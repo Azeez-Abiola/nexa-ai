@@ -6,7 +6,7 @@ import logger from "../utils/logger";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-const MODEL                = process.env.OPEN_AI_MODEL || "gpt-5";
+export const MODEL                = process.env.OPEN_AI_MODEL || "gpt-5";
 const tokenEncoder         = encodingForModel("gpt-4o"); // gpt-5 uses the same o200k_base tokenizer
 
 const SOFT_CONTEXT_CEILING = 200_000;
