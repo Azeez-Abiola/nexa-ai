@@ -2519,7 +2519,7 @@ export const App: React.FC = () => {
       aria-label="AI Model"
     >
       <option value="gpt">GPT-5</option>
-      {/* <option value="claude">Claude Opus 4.7</option> */}
+      <option value="claude">Claude Opus 4.8</option>
       <option value="kimi">Kimi k2.5</option>
       <option value="deepseek">DeepSeek v4</option>
     </select>

@@ -374,7 +374,7 @@ function buildSystemPrompt(
 ): string {
   const today = new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
   const modelLabel =
-    activeModel === "claude"   ? "Claude Opus 4.7" :
+    activeModel === "claude"   ? "Claude Opus 4.8" :
     activeModel === "kimi"     ? "Kimi k2.5" :
     activeModel === "deepseek" ? "DeepSeek v4" :
     "GPT-5";
