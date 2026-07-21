@@ -9,6 +9,10 @@ import { extractTextFromXlsx } from "../utils/xlsxParser";
 import { extractTextFromPptx } from "../utils/pptxParser";
 import logger from "../utils/logger";
 
+// Upper bound on the verbatim text kept per document. Guards the 16MB BSON document
+// limit; anything longer still works via chunk retrieval.
+const MAX_STORED_TEXT_CHARS = 400000;
+
 export interface UserProcessingJob {
   documentId: string;
   cloudinaryPublicId: string;
@@ -98,11 +102,14 @@ export async function processUserDocument(job: UserProcessingJob): Promise<void>
     await UserDocumentChunk.insertMany(chunkDocs, { ordered: false });
     logger.info("[UserDocProcessing] Chunks stored", { documentId, count: chunkDocs.length });
 
-    // Step 6: Mark document as ready
+    // Step 6: Mark document as ready. Store the extracted text too, so follow-up turns
+    // can re-read the document verbatim instead of relying on top-K chunk retrieval
+    // (chunks overlap, so they can't be reassembled into clean text).
     await UserDocument.findByIdAndUpdate(documentId, {
       status: "ready",
       totalChunks: chunkDocs.length,
-      processingError: null
+      processingError: null,
+      extractedText: text.slice(0, MAX_STORED_TEXT_CHARS)
     });
 
     logger.info("[UserDocProcessing] Completed successfully", {

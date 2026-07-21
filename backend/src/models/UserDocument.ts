@@ -14,6 +14,13 @@ export interface UserDocumentDocument extends Document {
   processingError?: string;
   totalChunks: number;
   summary?: string;
+  /**
+   * Full extracted text, kept so follow-up turns can re-read the document verbatim.
+   * Chunks carry 10–20% overlap, so they cannot be concatenated back into clean text.
+   * Empty for documents processed before this field existed — callers fall back to
+   * semantic chunk retrieval in that case.
+   */
+  extractedText?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -35,7 +42,8 @@ const UserDocumentSchema = new Schema<UserDocumentDocument>(
     },
     processingError: { type: String, default: null },
     totalChunks: { type: Number, default: 0 },
-    summary: { type: String, default: null }
+    summary: { type: String, default: null },
+    extractedText: { type: String, default: "" }
   },
   { timestamps: true }
 );

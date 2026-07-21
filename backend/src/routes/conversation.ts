@@ -20,6 +20,7 @@ import {
   hasReadySessionChunks,
   retrieveSessionChunks,
   buildSessionRAGContext,
+  getSessionDocumentsText,
   getSessionDocumentStatus
 } from "../services/sessionRagService";
 import logger from "../utils/logger";
@@ -287,13 +288,35 @@ async function handleFileUploads(
   return results;
 }
 
-const MAX_INLINE_TEXT_CHARS = 15000;
+// How much of an uploaded document is read inline on the turn it is attached.
+// Sized against the model's context window (~30k tokens), not an arbitrary floor —
+// the previous 15k cap silently dropped everything past ~6 pages, so the model
+// answered as though it had read a whole document it had only partly seen.
+// Documents longer than this still truncate, but the excerpt is explicitly labelled
+// (see below) so the model can say what it is missing instead of inventing it.
+const MAX_INLINE_TEXT_CHARS = 120000;
 
-async function extractTextFromFile(file: Express.Multer.File): Promise<{ text: string; ok: boolean }> {
+type ExtractionFailureReason = "scanned_pdf" | "unsupported_type" | "error";
+
+async function extractTextFromFile(
+  file: Express.Multer.File
+): Promise<{ text: string; ok: boolean; reason?: ExtractionFailureReason }> {
   try {
     switch (file.mimetype) {
-      case "application/pdf":
-        return { text: await extractTextFromPdf(file.buffer), ok: true };
+      case "application/pdf": {
+        const pdfText = await extractTextFromPdf(file.buffer);
+        // A PDF with no recoverable text layer is almost always a scan or photo.
+        // Extraction here is text-layer only (no OCR), so say so specifically rather
+        // than reporting a generic processing failure the user can't act on.
+        if (!pdfText || pdfText.trim().length < 20) {
+          logger.warn("[Conversation] PDF has no extractable text layer (likely scanned)", {
+            fileName: file.originalname,
+            bytes: file.size
+          });
+          return { text: "", ok: false, reason: "scanned_pdf" };
+        }
+        return { text: pdfText, ok: true };
+      }
       case "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
         return { text: await extractTextFromDocx(file.buffer), ok: true };
       case "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
@@ -305,11 +328,11 @@ async function extractTextFromFile(file: Express.Multer.File): Promise<{ text: s
       case "text/csv":
         return { text: file.buffer.toString("utf-8"), ok: true };
       default:
-        return { text: "", ok: false };
+        return { text: "", ok: false, reason: "unsupported_type" };
     }
   } catch (err: any) {
     logger.warn("[Conversation] Inline text extraction failed", { fileName: file.originalname, error: err.message });
-    return { text: "", ok: false };
+    return { text: "", ok: false, reason: "error" };
   }
 }
 
@@ -370,7 +393,8 @@ function buildSystemPrompt(
   hasGlobalContext: boolean,
   contextSource: "rag" | "keyword" | "google_only" | "none" = "none",
   activeModel: "gpt" | "claude" | "kimi" | "deepseek" = "gpt",
-  failedFileNames: string[] = []
+  failedFileNames: string[] = [],
+  scannedFileNames: string[] = []
 ): string {
   const today = new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
   // Derived from the model actually configured for this provider (see aiRouter),
@@ -389,6 +413,12 @@ function buildSystemPrompt(
   if (failedFileNames.length > 0) {
     sections.push(
       `❌ NOTE: The following uploaded document(s) failed to process and cannot be analyzed:\n${failedFileNames.map((f) => `  • ${f}`).join("\n")}\nIf the user asks about these files, explain that processing failed and suggest re-uploading in a supported format (PDF, DOCX, XLSX, PPTX, TXT, CSV) or using a text-based version.`
+    );
+  }
+
+  if (scannedFileNames.length > 0) {
+    sections.push(
+      `🖼️ NOTE: The following PDF(s) contain no readable text layer — they are scanned images or photographs of pages:\n${scannedFileNames.map((f) => `  • ${f}`).join("\n")}\nYou received NO content from them, so you cannot answer anything about what they contain. Do not guess. Tell the user the file appears to be a scanned/image-based PDF that cannot be read as text, and ask for a text-based PDF, the original Word/Excel file, or the text pasted into the chat.`
     );
   }
 
@@ -1377,17 +1407,13 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
       return res.status(400).json({ error: "Message content or file is required" });
     }
 
-    // Detected early so generation can run in parallel with the rest of this handler.
+    // Detect here, but do NOT start generating yet. Generation used to be kicked off at
+    // this point "to run in parallel", which meant it only ever saw the user's sentence —
+    // an upload plus "turn this into a PDF" produced a document *about turning things into
+    // PDFs*, because the source document had not been extracted yet. It is started further
+    // down, once the uploaded/session document text is available.
     const docRequest = content ? detectDocumentRequest(content) : null;
     let documentGenPromise: Promise<GeneratedDocResult | null> | null = null;
-    if (docRequest) {
-      documentGenPromise = generateAndCacheDocument(content, docRequest.type, model)
-        .catch((err) => {
-          const msg = err instanceof Error ? err.message : JSON.stringify(err);
-          logger.error("[DocumentGen] Generation failed", { userId, documentType: docRequest.type, error: msg });
-          return null;
-        });
-    }
 
     const imageFiles = uploadedFiles.filter(f => IMAGE_MIME_TYPES.includes(f.mimetype));
     const documentFiles = uploadedFiles.filter(f => !IMAGE_MIME_TYPES.includes(f.mimetype));
@@ -1464,18 +1490,45 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
 
     let inlineDocumentText = "";
     const extractionFailedNames: string[] = [];
+    const scannedPdfNames: string[] = [];
+    const truncatedDocNames: string[] = [];
     if (documentFiles.length > 0) {
       const extractions = await Promise.all(
         documentFiles.map(async (f) => {
-          const { text, ok } = await extractTextFromFile(f);
+          const { text, ok, reason } = await extractTextFromFile(f);
           if (!ok || !text.trim()) {
-            extractionFailedNames.push(f.originalname);
+            if (reason === "scanned_pdf") scannedPdfNames.push(f.originalname);
+            else extractionFailedNames.push(f.originalname);
             return "";
           }
-          return `--- Document: ${f.originalname} ---\n${text.slice(0, MAX_INLINE_TEXT_CHARS)}`;
+          if (text.length <= MAX_INLINE_TEXT_CHARS) {
+            return `--- Document: ${f.originalname} (complete) ---\n${text}`;
+          }
+          // Too long to send in full. Label the excerpt explicitly — an unlabelled
+          // truncation is what makes the model answer confidently about pages it
+          // never received.
+          truncatedDocNames.push(f.originalname);
+          const shownPct = Math.max(1, Math.round((MAX_INLINE_TEXT_CHARS / text.length) * 100));
+          return (
+            `--- Document: ${f.originalname} (PARTIAL — first ${MAX_INLINE_TEXT_CHARS.toLocaleString()} of ` +
+            `${text.length.toLocaleString()} characters, roughly the first ${shownPct}% of the document) ---\n` +
+            `${text.slice(0, MAX_INLINE_TEXT_CHARS)}\n` +
+            `--- END OF EXCERPT for ${f.originalname}. The remaining ~${100 - shownPct}% was NOT given to you. ` +
+            `Do not treat this excerpt as the whole document or assume it ends here. If the user asks about ` +
+            `anything that could appear later in it, say clearly that you only received the first ~${shownPct}% ` +
+            `and ask which section they want. ---`
+          );
         })
       );
       inlineDocumentText = extractions.filter(Boolean).join("\n\n");
+      if (truncatedDocNames.length > 0) {
+        logger.info("[Conversation] Document(s) truncated for inline analysis", {
+          userId,
+          chatSessionId,
+          files: truncatedDocNames,
+          limit: MAX_INLINE_TEXT_CHARS,
+        });
+      }
     }
 
     const uploadedDocsWithMeta = uploadedDocs.map((d) => ({
@@ -1615,13 +1668,55 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
     }
 
     let sessionContextString = "";
-    if (hasSessionChunks && speculativeSessionRAG.chunks.length > 0) {
+    // On a turn where the user re-attached the file, inlineDocumentText already carries it.
+    // Otherwise prefer the stored verbatim text over top-K chunks: follow-up questions are
+    // often holistic ("summarise this", "any risks?") and match no single chunk well.
+    if (!inlineDocumentText && hasSessionChunks) {
+      const fullDocs = await getSessionDocumentsText(userId, chatSessionId, MAX_INLINE_TEXT_CHARS);
+      if (fullDocs.fitsInFull && fullDocs.text) {
+        sessionContextString = `📄 DOCUMENTS UPLOADED IN THIS CONVERSATION (full text):\n\n${fullDocs.text}`;
+        logger.info("[Conversation/Stream] Session docs served in full", {
+          userId,
+          chatSessionId,
+          files: fullDocs.fileNames,
+          chars: fullDocs.text.length
+        });
+      }
+    }
+
+    // Fall back to semantic chunks when the documents are too large to inline, predate the
+    // stored-text field, or the user re-attached the file on this turn.
+    if (!sessionContextString && hasSessionChunks && speculativeSessionRAG.chunks.length > 0) {
       sessionContextString = buildSessionRAGContext(speculativeSessionRAG.chunks);
       logger.info("[Conversation/Stream] Session RAG hit", {
         userId,
         chatSessionId,
         chunksUsed: speculativeSessionRAG.chunks.length
       });
+    }
+
+    // Now that the uploaded document / session context is resolved, start generating the
+    // requested file with that material as its source. Runs in parallel with the chat
+    // response below, so this still overlaps the streaming turn.
+    if (docRequest) {
+      const sourceMaterial = [inlineDocumentText, sessionContextString].filter(Boolean).join("\n\n");
+      const genPrompt = sourceMaterial
+        ? `${content}\n\n=== SOURCE MATERIAL ===\nBase the document entirely on the material below. Reproduce and reorganise its actual content — do NOT write a generic guide about the user's request, and do NOT invent topics that are not present here.\n\n${sourceMaterial}`
+        : content;
+
+      logger.info("[DocumentGen] Starting generation", {
+        userId,
+        documentType: docRequest.type,
+        hasSourceMaterial: Boolean(sourceMaterial),
+        sourceChars: sourceMaterial.length
+      });
+
+      documentGenPromise = generateAndCacheDocument(genPrompt, docRequest.type, model)
+        .catch((err) => {
+          const msg = err instanceof Error ? err.message : JSON.stringify(err);
+          logger.error("[DocumentGen] Generation failed", { userId, documentType: docRequest.type, error: msg });
+          return null;
+        });
     }
 
     const hasGlobalContext = globalContext.source !== "none" && !globalContext.accessDenied;
@@ -1634,7 +1729,8 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
       hasGlobalContext,
       globalContext.source,
       model,
-      failedDocNames
+      failedDocNames,
+      scannedPdfNames
     );
     if (docRequest) {
       systemPrompt += `\n\n📎 DOCUMENT GENERATION: The user has requested a ${docRequest.label}. Confirm you are generating it and briefly describe (1–2 sentences) what the file will contain. Do NOT mention a download link — the system will attach it automatically below your message.`;

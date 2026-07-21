@@ -34,7 +34,10 @@ export interface SessionDocumentStatus {
 }
 
 const SCORE_THRESHOLD = parseFloat(process.env.SESSION_RAG_SCORE_THRESHOLD || process.env.RAG_SCORE_THRESHOLD || "0.70");
-const DEFAULT_TOP_K = parseInt(process.env.RAG_TOP_K || "5");
+// Follow-up turns (no file re-attached) see only these chunks — not the inline text —
+// so 5 was far too thin for "analyse this" / "give feedback" style questions, which
+// don't match any single chunk well. Overridable via SESSION_RAG_TOP_K.
+const DEFAULT_TOP_K = parseInt(process.env.SESSION_RAG_TOP_K || process.env.RAG_TOP_K || "15");
 
 /**
  * Check if the session has any ready chunks to search against.
@@ -78,6 +81,60 @@ export async function getSessionDocumentStatus(
   const ready = docs.filter((d) => d.status === "ready").length;
 
   return { totalDocs: docs.length, pendingOrProcessing, ready, failed };
+}
+
+/**
+ * Verbatim text of every ready document in this conversation, for turns where the user
+ * did not re-attach the file.
+ *
+ * Follow-up questions previously saw only the top-K semantically similar chunks, which
+ * fails on holistic asks ("analyse this", "give feedback") because no single chunk
+ * matches them. When the session's documents fit inside `maxChars` we hand back the
+ * whole thing instead; callers fall back to chunk retrieval when they don't fit, or
+ * when the documents predate the stored-text field.
+ *
+ * Scoped across the collaboration cluster, so a group conversation sees documents any
+ * participant uploaded.
+ */
+export async function getSessionDocumentsText(
+  userId: string,
+  chatSessionId: string,
+  maxChars: number
+): Promise<{ text: string; fileNames: string[]; fitsInFull: boolean }> {
+  const empty = { text: "", fileNames: [] as string[], fitsInFull: false };
+  try {
+    const { userIds, sessionIds } = await getConversationCluster(chatSessionId, userId);
+    const docs = await UserDocument.find(
+      {
+        userId: { $in: userIds },
+        chatSessionId: { $in: sessionIds },
+        status: "ready",
+        extractedText: { $nin: [null, ""] }
+      },
+      { fileName: 1, extractedText: 1 }
+    )
+      .sort({ createdAt: 1 })
+      .lean();
+
+    if (docs.length === 0) return empty;
+
+    const total = docs.reduce((sum, d: any) => sum + (d.extractedText?.length || 0), 0);
+    if (total > maxChars) {
+      // Too large to inline — the caller should use semantic retrieval instead.
+      return { text: "", fileNames: docs.map((d: any) => d.fileName), fitsInFull: false };
+    }
+
+    const text = docs
+      .map((d: any) => `--- Document: ${d.fileName} (complete) ---\n${d.extractedText}`)
+      .join("\n\n");
+
+    return { text, fileNames: docs.map((d: any) => d.fileName), fitsInFull: true };
+  } catch (err) {
+    logger.warn("[SessionRAG] Failed to load full session document text", {
+      error: (err as Error).message
+    });
+    return empty;
+  }
 }
 
 /**
