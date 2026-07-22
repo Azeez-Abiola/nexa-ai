@@ -6141,7 +6141,7 @@ export const App: React.FC = () => {
         }
 
         .message-row-v2.user .message-bubble-v2 {
-          background: var(--brand-color, #ed0000);
+          background: #18181b;
           color: white;
           border-bottom-right-radius: 2px;
         }
@@ -6398,6 +6398,12 @@ export const App: React.FC = () => {
         }
 
         /* Dark Mode */
+        .dark-theme .message-row-v2.user .message-bubble-v2 {
+          background: #27272a;
+          border: 1px solid #3f3f46;
+          color: #ffffff;
+        }
+
         .dark-theme .message-row-v2.assistant .message-bubble-v2 {
           background: #2a2a2a;
           border-color: #3f3f3f;

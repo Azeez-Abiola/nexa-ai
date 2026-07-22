@@ -164,7 +164,7 @@ const AdminTestChat: React.FC<AdminTestChatProps> = ({ adminToken, businessUnit,
   const textColor = isDark ? "#f3f4f6" : "#111827";
   const subText = isDark ? "#9ca3af" : "#6b7280";
   const inputBg = isDark ? "rgba(255,255,255,0.06)" : "#f3f4f6";
-  const userBubbleBg = "#ed0000";
+  const userBubbleBg = isDark ? "#27272a" : "#18181b";
   const aiBubbleBg = isDark ? "rgba(255,255,255,0.07)" : "#f1f5f9";
 
   return (
