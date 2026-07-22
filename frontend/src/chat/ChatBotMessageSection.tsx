@@ -73,11 +73,15 @@ const ChatBotMessageSection = () => {
     }
   }, [messages, conversationId]);
 
-  // Auto-scroll to bottom - with delay to ensure DOM is rendered
+  // Auto-scroll to bottom - only if user is near the bottom
   useEffect(() => {
     const scrollTimer = setTimeout(() => {
       if (messageListContentRef.current) {
-        messageListContentRef.current.scrollTop = messageListContentRef.current.scrollHeight;
+        const el = messageListContentRef.current;
+        const distanceFromBottom = el.scrollHeight - (el.scrollTop + el.clientHeight);
+        if (distanceFromBottom <= 150) {
+          el.scrollTop = el.scrollHeight;
+        }
       }
     }, 0);
     

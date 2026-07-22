@@ -688,13 +688,17 @@ export const App: React.FC = () => {
 
       const { scrollHeight, scrollTop, clientHeight } = messagesContainerRef.current;
 
-      // Only scroll if we haven't already (or force is true)
-      if (force || scrollTop + clientHeight < scrollHeight - 10) {
+      // Only auto-scroll if force is true OR user is near the bottom (within 150px).
+      // If user has scrolled up to read earlier messages, do not force jump to bottom.
+      const distanceFromBottom = scrollHeight - (scrollTop + clientHeight);
+      const isNearBottom = distanceFromBottom <= 150;
+
+      if (force || isNearBottom) {
         messagesContainerRef.current.scrollTop = scrollHeight;
       }
 
-      // Retry a few times to ensure we capture the final scroll height
-      if (attempt < 3) {
+      // Retry a few times to ensure we capture the final scroll height if still near bottom
+      if (attempt < 3 && (force || isNearBottom)) {
         requestAnimationFrame(() => attemptScroll(attempt + 1));
       }
     };
@@ -5939,8 +5943,8 @@ export const App: React.FC = () => {
           align-items: flex-start;
           gap: 6px;
           max-width: 100%;
-          user-select: none;
-          -webkit-user-select: none;
+          user-select: text;
+          -webkit-user-select: text;
         }
 
         .message-row-v2.user .message-bubble-wrap-v2 {
@@ -6131,6 +6135,8 @@ export const App: React.FC = () => {
           box-shadow: 0 1px 2px rgba(0,0,0,0.05);
           max-width: min(100%, calc(100vw - 5.5rem));
           word-break: break-word;
+          user-select: text;
+          -webkit-user-select: text;
         }
 
         @media (min-width: 640px) {

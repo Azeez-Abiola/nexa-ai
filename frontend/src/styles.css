@@ -348,6 +348,8 @@ body {
   align-items: flex-end;
   touch-action: auto;
   transition: background 0.2s ease;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .message-row:hover {

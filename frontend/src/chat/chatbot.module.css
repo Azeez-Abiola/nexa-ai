@@ -785,6 +785,8 @@
     border-radius: 0.875rem;
     max-width: 17rem;
     color: var(--gray-mid);
+    user-select: text;
+    -webkit-user-select: text;
 }
 
 .messageListItemWrapper p {
@@ -854,6 +856,8 @@
     color: var(--gray-mid);
     overflow-wrap: break-word;
     overflow-x: auto;
+    user-select: text;
+    -webkit-user-select: text;
 }
 
 .messageListUserItemDetails {
