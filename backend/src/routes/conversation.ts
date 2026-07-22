@@ -391,14 +391,12 @@ function buildSystemPrompt(
   globalContextString: string,
   pendingFileNames: string[],
   hasGlobalContext: boolean,
-  contextSource: "rag" | "keyword" | "google_only" | "none" = "none",
+  contextSource: "rag" | "keyword" | "none" = "none",
   activeModel: "gpt" | "claude" | "kimi" | "deepseek" = "gpt",
   failedFileNames: string[] = [],
   scannedFileNames: string[] = []
 ): string {
   const today = new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
-  // Derived from the model actually configured for this provider (see aiRouter),
-  // so the assistant can never report a different model than the one answering.
   const modelLabel = getModelLabel(activeModel);
   const sections: string[] = [
     `You are Nexa AI, a helpful AI assistant for ${businessUnit}, a business unit of UACN, powered by ${modelLabel}. Today's date is ${today}. If asked which model or AI you use, say you are Nexa AI powered by ${modelLabel}. Users can switch between models at any time — if the model differs from a previous message, do not apologize or treat it as an error; simply state the current model naturally.`
@@ -427,31 +425,23 @@ function buildSystemPrompt(
   }
 
   if (globalContextString && hasGlobalContext) {
-    // The label must match the actual source — when it's pure web results, the old
-    // "COMPANY KNOWLEDGE BASE" label confused the model into ignoring them for
-    // time-sensitive questions and falling back to its training cutoff.
-    const isWebOnly = contextSource === "google_only";
-    const header = isWebOnly
-      ? `🌐 FRESH WEB SEARCH RESULTS (from Google, pulled at request time — these are authoritative for current events, dates, news, sports, prices, and anything time-sensitive):`
-      : `📋 COMPANY KNOWLEDGE BASE (general policies & external sources):`;
-    sections.push(`${header}\n\n${globalContextString}`);
+    sections.push(`📋 COMPANY KNOWLEDGE BASE (general policies & internal documents):\n\n${globalContextString}`);
   }
 
   sections.push(`INSTRUCTIONS:
 1. When answering questions about the user's uploaded documents, use the "YOUR UPLOADED DOCUMENTS" context as your PRIMARY source.
 2. For HR policies or general company knowledge, use the "COMPANY KNOWLEDGE BASE" section as your PRIMARY source.
-3. **When FRESH WEB SEARCH RESULTS are present in context, they are your source for this answer.** CRITICAL RULES for using them:
-   - ONLY state facts that are LITERALLY written in the provided snippets. Do NOT invent, extrapolate, or "fill in" specific details (match times, scores, dates, names, prices) that aren't explicitly stated in the snippets.
-   - If the snippets mention a topic but lack specific details the user wants, say: "Based on the search results, [quote what IS there]. For the full details, I'd recommend checking [source name/URL from the snippet]."
-   - NEVER fabricate fixture lists, match times, specific scores, or event details by guessing. If the snippet says "Premier League matches tomorrow" but doesn't list the actual matches, say that — don't make up a list.
-   - Do NOT add disclaimers like "my knowledge is limited to 2023" or "I can't access the internet" — the web results are right there. Just use them honestly without overpromising on specifics they don't contain.
-4. For questions outside all provided sources, answer from your own training knowledge. Only if information may be stale, add a brief "(based on what I know — details may have changed)" note. Never refuse outright.
+3. **You have a live web_search tool. USE IT whenever the question involves current events, recent developments, news, sports, prices, dates, or anything that may have changed since your training cutoff.** When you use it:
+   - Base your answer on what the search results actually say. Do NOT invent specific details (match times, scores, dates, names, prices) that the results don't state.
+   - Cite the sources you used. If the results are thin on a detail the user wants, say what you found and point them to the source rather than guessing.
+   - Do NOT add disclaimers like "my knowledge is limited to 2023" or "I can't access the internet" — you can search the web. Just search and answer honestly.
+4. For questions outside all provided sources that don't need fresh data, answer from your own training knowledge. If information may be stale, add a brief "(based on what I know — details may have changed)" note. Never refuse outright.
 5. You can perform ANY task: summarization, Q&A, extraction, analysis, transformation, explanation, brainstorming, writing help.
 6. If context from uploaded documents is insufficient or missing for a document-specific question, say so honestly — do NOT hallucinate document-specific facts. This only applies to questions ABOUT uploaded documents, not general questions.
 7. Only label the source of your answer when it improves clarity:
    - 📄 for user-uploaded document answers
    - 📋 for company knowledge base answers
-   - 🌐 for external web sources provided in context
+   - 🌐 for external web sources you searched
    - No badge for general knowledge / conversational replies.
 8. Be professional, helpful, and concise.
 
@@ -1602,8 +1592,8 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
     let sessionStatus: SessionStatusResult = { totalDocs: 0, pendingOrProcessing: [], ready: 0, failed: [] };
     let hasSessionChunks = false;
     let globalContext: Awaited<ReturnType<typeof buildContextForQuery>> = {
-      hybridContextString: "", ragChunks: [], policies: [], googleResults: [],
-      accessDenied: false, source: "none", googleFooter: ""
+      hybridContextString: "", ragChunks: [], policies: [],
+      accessDenied: false, source: "none"
     };
     let speculativeSessionRAG: { chunks: { content: string; score: number; fileName: string; chunkIndex: number; documentId: string }[] } = { chunks: [] };
 
@@ -1627,7 +1617,6 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
       const contextStatusMsg =
         globalContext.source === "rag" ? "Found relevant documents. Generating response..." :
         globalContext.source === "keyword" ? "Found matching policies. Generating response..." :
-        globalContext.source === "google_only" ? "Found web results. Generating response..." :
         "Generating response...";
       res.write(`data: ${JSON.stringify({ status: contextStatusMsg })}\n\n`);
     }
@@ -1749,6 +1738,7 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
       : content;
 
     let fullResponse = "";
+    const webSources: { title: string; link: string }[] = [];
     try {
       const generator = getStreamAIResponse(model)(
         aiUserMessage,
@@ -1760,7 +1750,8 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
         })),
         businessUnit,
         systemPrompt,
-        imageAttachments.length > 0 ? imageAttachments : undefined
+        imageAttachments.length > 0 ? imageAttachments : undefined,
+        webSources
       );
 
       let firstChunk = true;
@@ -1775,8 +1766,8 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
       if (globalContext.source === "rag" && globalContext.ragChunks.length > 0) {
         sources = await buildRagMessageSources(globalContext.ragChunks);
       }
-      if (globalContext.googleResults.length > 0) {
-        sources = [...sources, ...buildWebMessageSources(globalContext.googleResults)];
+      if (webSources.length > 0) {
+        sources = [...sources, ...buildWebMessageSources(webSources)];
       }
 
       let generatedDocument: { url: string; filename: string; documentType: string } | undefined;

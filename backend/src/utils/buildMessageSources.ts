@@ -63,14 +63,14 @@ export async function buildRagMessageSources(
     .slice(0, MAX_SOURCES);
 }
 
-/** Build source pills from web search results. */
+/** Build source pills from web search citations. */
 export function buildWebMessageSources(
-  googleResults: Array<{ title?: string; link?: string }>
+  webResults: Array<{ title?: string; link?: string }>
 ): MessageSourcePayload[] {
   const seen = new Set<string>();
   const sources: MessageSourcePayload[] = [];
 
-  for (const r of googleResults) {
+  for (const r of webResults) {
     const link = r.link?.trim();
     if (!link || seen.has(link)) continue;
     seen.add(link);

@@ -1,11 +1,7 @@
 import express from "express";
 import { authMiddleware, AuthenticatedRequest } from "../middleware/auth";
 import { getBusinessUnitLabel, getAllBusinessUnits } from "../config/businessUnits";
-import {
-  searchGoogle,
-  formatSearchResultsForChat
-} from "../services/googleSearchService";
-import { parseModel, getStreamAIResponse } from "../services/aiRouter";
+import { parseModel, getStreamAIResponse, getGenerateAIResponse } from "../services/aiRouter";
 import { buildContextForQuery } from "../utils/contextBuilder";
 
 import { RagDocument } from "../models/RagDocument";
@@ -77,9 +73,6 @@ interface ChatMessage {
 }
 
 
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const OPENAI_MODEL = process.env.OPEN_AI_MODEL || "gpt-5";
-
 const GREETING_PATTERNS = [
   /^(hello|hi|hey|greetings|good morning|good afternoon|good evening|sup|howdy|yo)\b/i,
   /\b(hello|hi|hey|greetings|good morning|good afternoon|good evening|sup|howdy|yo)\s*[,!?]?\s*$/i,
@@ -100,32 +93,6 @@ const getGreetingResponse = async (businessUnit: string): Promise<string> => {
   ];
   return greetings[Math.floor(Math.random() * greetings.length)];
 };
-
-async function callOpenAIAPI(systemPrompt: string, userMessage: string) {
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${OPENAI_API_KEY}`
-    },
-    body: JSON.stringify({
-      model: OPENAI_MODEL,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userMessage }
-      ],
-      max_completion_tokens: 1024
-    })
-  });
-
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(`OpenAI API error: ${error.error?.message || "Unknown error"}`);
-  }
-
-  const data = await response.json();
-  return data.choices[0].message.content;
-}
 
 chatRouter.post("/", authMiddleware, async (req: AuthenticatedRequest, res) => {
   const { messages } = req.body as { messages: ChatMessage[] };
@@ -163,35 +130,29 @@ chatRouter.post("/", authMiddleware, async (req: AuthenticatedRequest, res) => {
     }
 
     const hasContext = context.source !== "none";
-    const hasExternalSources = context.googleResults.length > 0;
+    const priorHistory = messages.slice(0, -1).filter((m) => m.role !== "system");
 
     if (hasContext) {
       const systemPrompt = `You are Nexa AI, a helpful assistant for ${buName} (${buAbbr}), a business unit of UACN, powered by GPT-5. If asked which model or AI you use, say you are Nexa AI powered by GPT-5.
 
-You have been provided with information from company documents and/or external sources:
+You have been provided with information from company documents:
 
 ${context.hybridContextString}
 
 IMPORTANT INSTRUCTIONS:
 1. Prioritize company documents (📋) when answering questions - they are the official source of truth
-2. Use external sources (🌐) to provide additional context, best practices, or industry standards
+2. You have a live web_search tool — use it for current events, recent info, prices, news, or anything time-sensitive, and cite the sources
 3. Clearly indicate which source you're referencing
-4. If company documents conflict with external sources, follow company documents
+4. If company documents conflict with web sources, follow company documents
 5. Format responses clearly with bullet points and headers where appropriate
 6. Be professional, helpful, and concise
 7. Direct users to HR & Compliance for policy clarifications or disputes`;
 
       try {
-        const reply = await callOpenAIAPI(systemPrompt, userMessage);
-        let finalReply = reply;
-        if (hasExternalSources) {
-          finalReply += context.googleFooter;
-          finalReply += "\n\n💡 **Note:** External sources complement company documents but company documents take precedence.";
-        }
-        return res.json({ reply: finalReply });
+        const reply = await getGenerateAIResponse("gpt")(userMessage, [], priorHistory, businessUnit, systemPrompt);
+        return res.json({ reply });
       } catch (error) {
         let response = context.hybridContextString;
-        if (hasExternalSources) response += "\n\n" + context.googleFooter;
         response += `\n\n**Need More Help?**\n• Contact HR & Compliance for policy questions`;
         return res.json({ reply: response });
       }
@@ -199,13 +160,10 @@ IMPORTANT INSTRUCTIONS:
 
     const noMatchSystemPrompt = `You are Nexa AI, a helpful assistant for ${buName} (${buAbbr}), a business unit of UACN, powered by GPT-5. If asked which model or AI you use, say you are Nexa AI powered by GPT-5.
 
-The user asked a question that doesn't have specific information in company documents OR external sources.
-
-Politely explain that you couldn't find relevant information and direct them to HR & Compliance.
-Be helpful and professional.`;
+The user asked a question with no specific match in company documents. You have a live web_search tool — if the question is about current events, recent info, or anything time-sensitive, search the web and answer with cited sources. Otherwise, answer from your own knowledge, or politely direct them to HR & Compliance for company-specific policy questions. Be helpful and professional.`;
 
     try {
-      const reply = await callOpenAIAPI(noMatchSystemPrompt, userMessage);
+      const reply = await getGenerateAIResponse("gpt")(userMessage, [], priorHistory, businessUnit, noMatchSystemPrompt);
       return res.json({ reply });
     } catch (error) {
       return res.json({
@@ -234,19 +192,14 @@ chatRouter.post("/public", async (req, res) => {
 
   try {
     const userMessage = messages[messages.length - 1]?.content || "";
-    
+
     console.log(`[Chat/Public] ========== NEW REQUEST ==========`);
     console.log(`[Chat/Public] User message: "${userMessage}"`);
-
-    console.log(`[Chat/Public] Starting Google search...`);
-    const googleResults = await searchGoogle(userMessage, 3);
-    
-    console.log(`[Chat/Public] Google search complete:`, googleResults.success ? `✓ ${googleResults.results?.length || 0} results` : `✗ Error: ${googleResults.error}`);
 
     const allBUs = await getAllBusinessUnits();
     const businessUnitsList = allBUs.map(bu => `- ${bu.label}`).join("\n");
 
-    let systemPrompt = `You are Nexa AI, a friendly and helpful assistant for UACN (United African Capital Limited), powered by GPT-5. If asked which model or AI you use, say you are Nexa AI powered by GPT-5.
+    const systemPrompt = `You are Nexa AI, a friendly and helpful assistant for UACN (United African Capital Limited), powered by GPT-5. If asked which model or AI you use, say you are Nexa AI powered by GPT-5.
 
 UACN is a conglomerate with several business units including:
 ${businessUnitsList}
@@ -255,23 +208,12 @@ About UACN:
 - It's one of Nigeria's largest and oldest diversified business conglomerates
 - Founded with a strong legacy of entrepreneurship and innovation
 - Operates across multiple sectors of the Nigerian economy
-- Committed to creating sustainable value for stakeholders`;
-
-    if (googleResults.success && googleResults.results && googleResults.results.length > 0) {
-      const externalContext = googleResults.results
-        .map((r, i) => `[${i + 1}] ${r.title}: ${r.snippet} (${r.link})`)
-        .join("\n");
-      
-      systemPrompt += `\n\nEXTERNAL SOURCES (from Google):
-${externalContext}`;
-    }
-
-    systemPrompt += `
+- Committed to creating sustainable value for stakeholders
 
 Your role:
 1. Provide helpful information about UACN and its business units
 2. Answer general questions about UACN's operations, history, and services
-3. Use external sources to supplement your responses when relevant
+3. You have a live web_search tool — use it for current events, recent info, or anything time-sensitive, and cite the sources
 4. Guide visitors to appropriate business units for specific services
 5. Be professional, friendly, and informative
 6. If asked about specific employee policies or confidential information, direct them to contact HR or the relevant department
@@ -279,17 +221,13 @@ Your role:
 
 Always maintain a professional tone and be helpful to potential customers, investors, and visitors.`;
 
+    const priorHistory = messages.slice(0, -1).filter((m) => m.role !== "system");
+
     try {
-      const reply = await callOpenAIAPI(systemPrompt, userMessage);
-      
-      let finalReply = reply;
-      if (googleResults.success && googleResults.results && googleResults.results.length > 0) {
-        const externalSourcesFooter = formatSearchResultsForChat(googleResults.results);
-        finalReply += externalSourcesFooter;
-      }
-      
+      const reply = await getGenerateAIResponse("gpt")(userMessage, [], priorHistory, "", systemPrompt);
+
       console.log(`[Chat/Public] Sending response`);
-      return res.json({ reply: finalReply });
+      return res.json({ reply });
     } catch (error) {
       console.error("[Chat/Public] OpenAI error:", error);
       return res.json({

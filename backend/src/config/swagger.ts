@@ -879,7 +879,7 @@ Accepts **multipart/form-data** (with files) or **application/json** (text-only)
         post: {
           tags: ["Chat"],
           summary: "Unauthenticated public chat about UACN",
-          description: "No authentication required. Uses Google search for context. Does not query internal policy documents.",
+          description: "No authentication required. The assistant can search the web via the model's native web-search tool. Does not query internal policy documents.",
           requestBody: {
             required: true,
             content: {

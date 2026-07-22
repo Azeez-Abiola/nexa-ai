@@ -9,22 +9,60 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 export const MODEL                = process.env.OPEN_AI_MODEL || "gpt-5";
 const tokenEncoder         = encodingForModel("gpt-4o"); // gpt-5 uses the same o200k_base tokenizer
 
+const WEB_SEARCH_ENABLED = process.env.WEB_SEARCH_ENABLED !== "false";
+const WEB_SEARCH_FORCE   = process.env.WEB_SEARCH_FORCE === "true";
+
+const REASONING_EFFORT =
+  (process.env.OPENAI_REASONING_EFFORT as OpenAI.Reasoning["effort"]) || "low";
+
+/** Sink for web citations surfaced during a response, used to build source pills. */
+export interface WebSource {
+  title: string;
+  link: string;
+}
+
+const WEB_SEARCH_TOOL = { type: "web_search" as const };
+
+/** Push a deduped web citation into the collector (by url). */
+function collectWebSource(
+  collector: WebSource[] | undefined,
+  url: unknown,
+  title: unknown
+): void {
+  if (!collector) return;
+  const link = typeof url === "string" ? url.trim() : "";
+  if (!link || collector.some((s) => s.link === link)) return;
+  collector.push({ link, title: (typeof title === "string" && title.trim()) || link });
+}
+
+/** Extract url_citation annotations from a fully-assembled Response into the collector. */
+function collectSourcesFromResponse(
+  response: OpenAI.Responses.Response | undefined,
+  collector: WebSource[] | undefined
+): void {
+  if (!collector || !response?.output) return;
+  for (const item of response.output as any[]) {
+    if (item?.type !== "message" || !Array.isArray(item.content)) continue;
+    for (const part of item.content) {
+      for (const ann of part?.annotations ?? []) {
+        if (ann?.type === "url_citation") collectWebSource(collector, ann.url, ann.title);
+      }
+    }
+  }
+}
+
 const SOFT_CONTEXT_CEILING = 200_000;
 const HISTORY_TOKEN_BUDGET = 4_000;
 const RESPONSE_BUFFER      = 500;
 const IMAGE_TOKEN_ESTIMATE = 500;
 
-const STREAM_TIMEOUT_MS    = 90_000;
+// Web search legitimately runs longer (multiple server-side searches + page reads), so give
+// the stream more headroom than the old 90s text-only ceiling. Tunable via OPENAI_STREAM_TIMEOUT_MS.
+const STREAM_TIMEOUT_MS    = Number(process.env.OPENAI_STREAM_TIMEOUT_MS) || 120_000;
 const STREAM_MAX_ATTEMPTS  = 3;
 const RETRY_BASE_DELAY_MS  = 1_000; // delays: 1 s, 2 s for attempts 2 and 3
 
-// gpt-5 uses extended reasoning tokens before producing output — 1500 is exhausted
-// before any text delta events fire, causing response.incomplete. Use a much higher cap.
-// The SOFT_CONTEXT_CEILING is the real upper bound; this just prevents over-allocating.
 const MAX_RESPONSE_TOKENS_OVERRIDE = 16_384;
-
-// Used when isSimpleQuery() is true: minimal instruction payload + strict output
-// cap keeps TTFT under 1 s for greetings and conversational filler.
 const LIGHT_PROMPT           = "You are Nexa AI, a friendly assistant. Respond naturally and briefly.";
 const LIGHT_MAX_OUTPUT_TOKENS = 1_000;
 
@@ -163,6 +201,18 @@ interface RequestParams {
   /** Approximate prompt tokens — 0 in light mode (not worth computing). */
   estimatedTokens:  number;
   imageCount:       number;
+  /** Hosted web-search tool, enabled for full-mode requests only. */
+  tools?:           OpenAI.Responses.Tool[];
+  toolChoice?:      OpenAI.Responses.ToolChoiceOptions;
+}
+
+/** Web-search tool + choice for a request, or empty when disabled/light mode. */
+function webSearchConfig(lightMode: boolean): Pick<RequestParams, "tools" | "toolChoice"> {
+  if (lightMode || !WEB_SEARCH_ENABLED) return {};
+  return {
+    tools: [WEB_SEARCH_TOOL],
+    ...(WEB_SEARCH_FORCE ? { toolChoice: "required" as const } : {}),
+  };
 }
 
 /**
@@ -199,6 +249,7 @@ function buildRequestParams(
       lightMode:       true,
       estimatedTokens: 0,
       imageCount:      0,
+      ...webSearchConfig(true),
     };
   }
 
@@ -219,6 +270,7 @@ function buildRequestParams(
     lightMode:       false,
     estimatedTokens,
     imageCount,
+    ...webSearchConfig(false),
   };
 }
 
@@ -265,17 +317,18 @@ export async function generateAIResponse(
   policies: PolicyContext[],
   conversationHistory: Message[],
   businessUnit: string = "",
-  customSystemPrompt?: string
+  customSystemPrompt?: string,
+  webSources?: WebSource[]
 ): Promise<string> {
   try {
     const buLabel = await getBusinessUnitLabel(businessUnit);
-    const { instructions, input, maxOutputTokens, lightMode, estimatedTokens } = buildRequestParams(
+    const { instructions, input, maxOutputTokens, lightMode, estimatedTokens, tools, toolChoice } = buildRequestParams(
       userMessage, policies, conversationHistory, buLabel, customSystemPrompt
     );
 
     logger.info("[OpenAI/NonStream] Request", {
       model: MODEL, lightMode, instructionChars: instructions.length,
-      maxOutputTokens, estimatedTokens,
+      maxOutputTokens, estimatedTokens, webSearch: Boolean(tools?.length),
     });
 
     const controller = new AbortController();
@@ -287,8 +340,12 @@ export async function generateAIResponse(
         instructions,
         input,
         max_output_tokens: maxOutputTokens,
+        reasoning:         { effort: REASONING_EFFORT },
+        ...(tools ? { tools } : {}),
+        ...(toolChoice ? { tool_choice: toolChoice } : {}),
       }, { signal: controller.signal });
 
+      collectSourcesFromResponse(response, webSources);
       return formatResponse(extractOutputText(response));
     } finally {
       clearTimeout(timeoutId);
@@ -305,11 +362,12 @@ export async function* streamAIResponse(
   conversationHistory: Message[],
   businessUnit: string = "",
   customSystemPrompt?: string,
-  imageAttachments?: ImageAttachment[]
+  imageAttachments?: ImageAttachment[],
+  webSources?: WebSource[]
 ): AsyncGenerator<string, void, unknown> {
   const buLabel = await getBusinessUnitLabel(businessUnit);
   const {
-    instructions, input, maxOutputTokens, lightMode, estimatedTokens, imageCount,
+    instructions, input, maxOutputTokens, lightMode, estimatedTokens, imageCount, tools, toolChoice,
   } = buildRequestParams(
     userMessage, policies, conversationHistory, buLabel, customSystemPrompt, imageAttachments
   );
@@ -323,6 +381,7 @@ export async function* streamAIResponse(
     imageCount,
     maxOutputTokens,
     estimatedTokens,
+    webSearch:        Boolean(tools?.length),
   });
 
   // The Responses API uses `instructions` + `input` — no legacy `messages` field.
@@ -331,6 +390,9 @@ export async function* streamAIResponse(
     instructions,
     input,
     max_output_tokens: maxOutputTokens,
+    reasoning:         { effort: REASONING_EFFORT },
+    ...(tools ? { tools } : {}),
+    ...(toolChoice ? { tool_choice: toolChoice } : {}),
   } as const;
 
   let hasYielded   = false;
@@ -382,6 +444,10 @@ export async function* streamAIResponse(
         if (event.type === "response.output_text.delta") {
           const delta = (event as any).delta ?? "";
           if (delta) { yield delta; hasYielded = true; }
+        } else if (event.type === "response.output_text.annotation.added") {
+          // Web search citations arrive as url_citation annotations — collect for source pills.
+          const ann = (event as any).annotation;
+          if (ann?.type === "url_citation") collectWebSource(webSources, ann.url, ann.title);
         } else if (event.type === "response.output_text.done") {
           // gpt-5 may deliver the full text only via the done event (no per-character deltas).
           const text = (event as any).text ?? "";
@@ -418,17 +484,21 @@ export async function* streamAIResponse(
 
       // Ultimate fallback: after the stream closes normally, ask the SDK for the
       // fully-assembled Response object. Covers any event-type gap between gpt-5
-      // and what the iterator exposes (e.g. text only in response.completed).
-      if (!hasYielded && !doneFallback.trim()) {
+      // and what the iterator exposes (e.g. text only in response.completed), and
+      // sweeps url_citation annotations in case they weren't emitted as stream events.
+      if ((!hasYielded && !doneFallback.trim()) || webSources) {
         try {
           const finalResp = await stream.finalResponse();
-          const text = extractOutputText(finalResp as unknown as OpenAI.Responses.Response);
-          if (text && !text.includes("couldn't generate")) {
-            doneFallback = text;
-            logger.info("[OpenAI/Stream] Recovered text via finalResponse()", {
-              attempt: attempt + 1,
-              chars:   text.length,
-            });
+          collectSourcesFromResponse(finalResp as unknown as OpenAI.Responses.Response, webSources);
+          if (!hasYielded && !doneFallback.trim()) {
+            const text = extractOutputText(finalResp as unknown as OpenAI.Responses.Response);
+            if (text && !text.includes("couldn't generate")) {
+              doneFallback = text;
+              logger.info("[OpenAI/Stream] Recovered text via finalResponse()", {
+                attempt: attempt + 1,
+                chars:   text.length,
+              });
+            }
           }
         } catch (finalErr) {
           logger.warn("[OpenAI/Stream] finalResponse() unavailable after stream", {

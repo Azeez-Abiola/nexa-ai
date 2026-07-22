@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { getBusinessUnitLabel } from "../config/businessUnits";
 import { buildSystemPrompt } from "./openaiService";
-import { PolicyContext, ImageAttachment } from "./openaiService";
+import { PolicyContext, ImageAttachment, WebSource } from "./openaiService";
 import logger from "../utils/logger";
 
 if (!process.env.ANTHROPIC_API_KEY) {
@@ -14,6 +14,36 @@ export const MODEL = process.env.CLAUDE_MODEL || "claude-opus-4-8";
 const STREAM_MAX_ATTEMPTS = 3;
 const RETRY_BASE_DELAY_MS = 1_000;
 const STREAM_TIMEOUT_MS   = 90_000;
+
+// Native (hosted) web search — Claude runs the search server-side and returns cited text.
+const WEB_SEARCH_ENABLED  = process.env.WEB_SEARCH_ENABLED !== "false";
+const WEB_SEARCH_MAX_USES = Number(process.env.WEB_SEARCH_MAX_USES) || 3;
+
+/** Hosted web-search tool, or empty array when disabled. */
+function webSearchTools(): Anthropic.Messages.ToolUnion[] {
+  if (!WEB_SEARCH_ENABLED) return [];
+  return [{ type: "web_search_20250305", name: "web_search", max_uses: WEB_SEARCH_MAX_USES }];
+}
+
+/** Push a deduped web citation (by url) into the collector. */
+function collectWebSource(collector: WebSource[] | undefined, url: unknown, title: unknown): void {
+  if (!collector) return;
+  const link = typeof url === "string" ? url.trim() : "";
+  if (!link || collector.some((s) => s.link === link)) return;
+  collector.push({ link, title: (typeof title === "string" && title.trim()) || link });
+}
+
+/** Extract citations from web_search_tool_result content blocks into the collector. */
+function collectSourcesFromContent(content: unknown, collector: WebSource[] | undefined): void {
+  if (!collector || !Array.isArray(content)) return;
+  for (const block of content as any[]) {
+    if (block?.type === "web_search_tool_result" && Array.isArray(block.content)) {
+      for (const r of block.content) {
+        if (r?.type === "web_search_result") collectWebSource(collector, r.url, r.title);
+      }
+    }
+  }
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -122,22 +152,26 @@ export async function generateAIResponse(
   policies: PolicyContext[],
   conversationHistory: Message[],
   businessUnit: string = "",
-  customSystemPrompt?: string
+  customSystemPrompt?: string,
+  webSources?: WebSource[]
 ): Promise<string> {
   const buLabel = await getBusinessUnitLabel(businessUnit);
   const system  = buildSystem(businessUnit, buLabel, policies, customSystemPrompt);
   const messages = buildClaudeMessages(conversationHistory, userMessage);
+  const tools    = webSearchTools();
 
   const controller = new AbortController();
   const timeoutId  = setTimeout(() => controller.abort(), STREAM_TIMEOUT_MS);
 
   try {
-    logger.info("[Claude/NonStream] Request", { model: MODEL, system: system.length });
+    logger.info("[Claude/NonStream] Request", { model: MODEL, system: system.length, webSearch: tools.length > 0 });
 
     const response = await claude.messages.create(
-      { model: MODEL, system, messages, max_tokens: 8192 },
+      { model: MODEL, system, messages, max_tokens: 8192, ...(tools.length ? { tools } : {}) },
       { signal: controller.signal }
     );
+
+    collectSourcesFromContent(response.content, webSources);
 
     const text = response.content
       .filter((b): b is Anthropic.TextBlock => b.type === "text")
@@ -158,11 +192,13 @@ export async function* streamAIResponse(
   conversationHistory: Message[],
   businessUnit: string = "",
   customSystemPrompt?: string,
-  imageAttachments?: ImageAttachment[]
+  imageAttachments?: ImageAttachment[],
+  webSources?: WebSource[]
 ): AsyncGenerator<string, void, unknown> {
   const buLabel  = await getBusinessUnitLabel(businessUnit);
   const system   = buildSystem(businessUnit, buLabel, policies, customSystemPrompt);
   const messages = buildClaudeMessages(conversationHistory, userMessage, imageAttachments);
+  const tools    = webSearchTools();
 
   let hasYielded = false;
   let lastError: unknown = null;
@@ -187,7 +223,7 @@ export async function* streamAIResponse(
       logger.info("[Claude/Stream] Request", { model: MODEL, attempt });
 
       const stream = claude.messages.stream(
-        { model: MODEL, system, messages, max_tokens: 8192 },
+        { model: MODEL, system, messages, max_tokens: 8192, ...(tools.length ? { tools } : {}) },
         { signal: controller.signal }
       );
 
@@ -199,6 +235,18 @@ export async function* streamAIResponse(
         ) {
           yield event.delta.text;
           hasYielded = true;
+        }
+      }
+
+      // Sweep web_search_tool_result blocks from the assembled message for source pills.
+      if (webSources) {
+        try {
+          const finalMessage = await stream.finalMessage();
+          collectSourcesFromContent(finalMessage.content, webSources);
+        } catch (finalErr) {
+          logger.warn("[Claude/Stream] finalMessage() unavailable after stream", {
+            error: finalErr instanceof Error ? finalErr.message : String(finalErr),
+          });
         }
       }
 

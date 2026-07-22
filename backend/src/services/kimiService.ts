@@ -2,7 +2,7 @@ import OpenAI from "openai";
 import { encodingForModel } from "js-tiktoken";
 import { getBusinessUnitLabel } from "../config/businessUnits";
 import { buildSystemPrompt } from "./openaiService";
-import { PolicyContext, ImageAttachment } from "./openaiService";
+import { PolicyContext, ImageAttachment, WebSource } from "./openaiService";
 import { isSimpleQuery } from "../utils/queryClassifier";
 import logger from "../utils/logger";
 
@@ -153,7 +153,9 @@ export async function generateAIResponse(
   policies: PolicyContext[],
   conversationHistory: Message[],
   businessUnit: string = "",
-  customSystemPrompt?: string
+  customSystemPrompt?: string,
+  // Kimi's endpoint has no hosted web-search tool; accepted for signature parity, unused.
+  _webSources?: WebSource[]
 ): Promise<string> {
   const buLabel = await getBusinessUnitLabel(businessUnit);
   const history = trimHistory(conversationHistory);
@@ -184,7 +186,9 @@ export async function* streamAIResponse(
   conversationHistory: Message[],
   businessUnit: string = "",
   customSystemPrompt?: string,
-  imageAttachments?: ImageAttachment[]
+  imageAttachments?: ImageAttachment[],
+  // Kimi's endpoint has no hosted web-search tool; accepted for signature parity, unused.
+  _webSources?: WebSource[]
 ): AsyncGenerator<string, void, unknown> {
   const buLabel    = await getBusinessUnitLabel(businessUnit);
   const history    = trimHistory(conversationHistory);

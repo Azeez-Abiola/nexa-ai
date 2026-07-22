@@ -1,5 +1,4 @@
 import { Policy } from "../models/Policy";
-import { searchGoogle, buildHybridContext, formatSearchResultsForChat, enrichResultsWithPageContent } from "../services/googleSearchService";
 import { retrieveRelevantChunks, buildRAGContext, RetrievedChunk } from "../services/ragService";
 import logger from "./logger";
 
@@ -7,15 +6,12 @@ export interface ContextBuildResult {
   hybridContextString: string;
   ragChunks: RetrievedChunk[];
   policies: any[];
-  googleResults: any[];
   accessDenied: boolean;
-  source: "rag" | "keyword" | "google_only" | "none";
-  googleFooter: string;
+  source: "rag" | "keyword" | "none";
 }
 
 export interface ContextBuildOptions {
   useRAG?: boolean;
-  useGoogle?: boolean;
   topK?: number;
   /** Employee user id — used for knowledge-group access on RAG chunks */
   userId?: string;
@@ -51,13 +47,18 @@ async function keywordSearch(query: string, businessUnit: string): Promise<any[]
   }
 }
 
-// Only fetch from Google when the query signals a need for current/recent information.
-// Everything else (math, general knowledge, greetings, company questions) is answered
-// by the model's training data or the internal KB — Google just adds 5-8s of latency.
-const NEEDS_WEB_RE = /\b(news|latest|current|today|yesterday|this week|this month|recent|now|live|update|price|stock|weather|score|result|winner|election|announce|release|launch|research|compare|versus|\bvs\b|2024|2025|2026)\b|\b(who is|who are|who was|what happened|where is|when did|tell me about|look up|find out)\b/i;
-
-function needsWebSearch(query: string): boolean {
-  return NEEDS_WEB_RE.test(query);
+/** Format legacy keyword-matched policies into a context block for the prompt. */
+function buildPolicyContext(policies: any[]): string {
+  if (!policies || policies.length === 0) return "";
+  let context = "📋 **COMPANY POLICIES & INTERNAL DOCUMENTS:**\n";
+  context += "=".repeat(41) + "\n";
+  policies.forEach((policy, idx) => {
+    context += `\n[POLICY ${idx + 1}] ${policy.title}\n`;
+    context += `Category: ${policy.category}\n`;
+    context += `Content:\n${policy.content}\n`;
+    context += "-".repeat(41) + "\n";
+  });
+  return context;
 }
 
 export async function buildContextForQuery(
@@ -66,18 +67,12 @@ export async function buildContextForQuery(
   options: ContextBuildOptions = {}
 ): Promise<ContextBuildResult> {
   const { useRAG = true, topK, userId, userDepartment } = options;
-  const useGoogle = options.useGoogle !== false && needsWebSearch(query);
 
   let ragChunks: RetrievedChunk[] = [];
   let policies: any[] = [];
-  let googleResults: any[] = [];
-  let accessDenied = false;
+  const accessDenied = false;
   let source: ContextBuildResult["source"] = "none";
 
-  // KB first. Google is a fallback — it only runs if nothing in the company knowledge base answers
-  // the question. Saves 500–1500ms per message and keeps responses grounded in company sources.
-  // Skipped `isRAGAvailable` precheck — vector search returns empty gracefully when there are no chunks,
-  // and the countDocuments round-trip was adding 50–150ms on the critical path for zero correctness gain.
   if (useRAG) {
     try {
       const ragOutcome = await retrieveRelevantChunks({ query, businessUnit, userId, topK, userDepartment });
@@ -90,10 +85,6 @@ export async function buildContextForQuery(
     }
   }
 
-  // Legacy keyword search on the old Policy collection — only used when RAG had nothing AND the
-  // match is actually strong. MongoDB $text scores are loose: a tangential keyword hit (e.g. the
-  // query mentions "2026" and some old policy title contains "2026") can silently block the
-  // Google fallback, so we require a meaningful score to treat a row as the answer source.
   const KEYWORD_MIN_SCORE = 1.5;
   if (ragChunks.length === 0) {
     try {
@@ -109,56 +100,13 @@ export async function buildContextForQuery(
     }
   }
 
-  // Web search runs for time-sensitive queries (useGoogle) when the internal KB is NOT a strong
-  // match. Previously ANY RAG hit ≥0.65 blocked Google, so a tangential internal chunk would kill
-  // web research for genuinely current-events questions ("latest ... 2026"). Now we only treat the
-  // KB as authoritative-enough-to-skip-web when the top RAG chunk clears a higher bar; otherwise we
-  // still fetch the web and hand the model both, letting it prefer the fresh results for recency.
-  // Hard 6s ceiling: SerpAPI has no built-in timeout and enrichment fetches real pages. If it
-  // doesn't finish in time we fall back to whatever KB context we have (or training data).
-  const GOOGLE_TOTAL_TIMEOUT_MS = 8_000;
-  const STRONG_KB_SCORE = 0.8;
-  const topRagScore = ragChunks[0]?.score ?? 0;
-  const kbEmpty = ragChunks.length === 0 && policies.length === 0;
-  const kbStrong = topRagScore >= STRONG_KB_SCORE || policies.length > 0;
-  if (useGoogle && !kbStrong && !accessDenied) {
-    try {
-      const googlePromise = (async () => {
-        const googleOutcome = await searchGoogle(query, 3);
-        if (googleOutcome?.success && googleOutcome.results?.length) {
-          googleResults = await enrichResultsWithPageContent(googleOutcome.results);
-          // Only label the whole answer as web-sourced when the KB contributed nothing;
-          // if we're augmenting weak RAG chunks, keep source="rag" so the prompt still
-          // frames the internal docs correctly while the web block rides along.
-          if (kbEmpty) source = "google_only";
-        }
-      })();
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("google_timeout")), GOOGLE_TOTAL_TIMEOUT_MS)
-      );
-      await Promise.race([googlePromise, timeoutPromise]);
-    } catch (err) {
-      if ((err as Error).message === "google_timeout") {
-        logger.warn("[ContextBuilder] Google search timed out — skipping", { query: query.slice(0, 80) });
-      } else {
-        logger.error("[ContextBuilder] Google search failed", { error: (err as Error).message });
-      }
-    }
-  }
-
   // Build the context string for the LLM prompt
   let hybridContextString = "";
-
   if (ragChunks.length > 0) {
     hybridContextString = buildRAGContext(ragChunks);
-    if (googleResults.length > 0) {
-      hybridContextString += "\n\n" + buildHybridContext([], googleResults);
-    }
-  } else if (policies.length > 0 || googleResults.length > 0) {
-    hybridContextString = buildHybridContext(policies, googleResults);
+  } else if (policies.length > 0) {
+    hybridContextString = buildPolicyContext(policies);
   }
-
-  const googleFooter = googleResults.length > 0 ? formatSearchResultsForChat(googleResults) : "";
 
   logger.info("[ContextBuilder] Context built", {
     query: query.slice(0, 80),
@@ -166,9 +114,8 @@ export async function buildContextForQuery(
     source,
     ragChunks: ragChunks.length,
     policies: policies.length,
-    googleResults: googleResults.length,
     accessDenied
   });
 
-  return { hybridContextString, ragChunks, policies, googleResults, accessDenied, source, googleFooter };
+  return { hybridContextString, ragChunks, policies, accessDenied, source };
 }
