@@ -28,7 +28,7 @@ import { AcceptInvite } from "./AcceptInvite";
 import { AcceptEmployeeInvite } from "./AcceptEmployeeInvite";
 import SuperAdminMain from "./super-admin/SuperAdminMain";
 import SuperAdminLogin from "./super-admin/pages/SuperAdminLogin";
-import { parseMarkdown } from "./utils/parseMarkdown";
+import { MarkdownRenderer } from "./components/MarkdownRenderer";
 import LoginLoadingScreen from "./components/LoginLoadingScreen";
 import { exportConversationToDocx, exportConversationToPdf, generateExportFilename } from "./utils/chatExport";
 import RateLimitBanner, { type RateLimitInfo } from "./chat/RateLimitBanner";
@@ -3523,9 +3523,7 @@ export const App: React.FC = () => {
                                 if (!textLines.some(l => l.trim())) return null;
                                 return (
                                   <div>
-                                    {textLines.map((line, lIdx) => (
-                                      <p key={lIdx}>{parseMarkdown(line)}</p>
-                                    ))}
+                                    <MarkdownRenderer content={textLines.join("\n")} />
                                   </div>
                                 );
                               })()}

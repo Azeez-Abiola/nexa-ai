@@ -1,7 +1,7 @@
 import { JSX } from "react";
 import { motion } from "framer-motion";
 import { getRelativeTime } from "../utils/lib";
-import { parseMarkdown } from "../utils/parseMarkdown";
+import { MarkdownRenderer } from "../components/MarkdownRenderer";
 
 import classes from "./chatbot.module.css";
 import logo from "/1879-22.png";
@@ -25,11 +25,8 @@ export const UacnMessage = ({ message }: { message: Message }): JSX.Element => {
       </div>
 
       <div className={classes.messageSuperFlex}>
-        <div
-          className={classes.messageListItemWrapper}
-          style={{ whiteSpace: "pre-wrap", wordWrap: "break-word" }}
-        >
-          {parseMarkdown(message.message)}
+        <div className={classes.messageListItemWrapper}>
+          <MarkdownRenderer content={message.message} />
         </div>
 
         <div className={classes.messageListItemDetails}>
