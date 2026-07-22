@@ -1598,15 +1598,16 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
     let speculativeSessionRAG: { chunks: { content: string; score: number; fileName: string; chunkIndex: number; documentId: string }[] } = { chunks: [] };
 
     const contextStart = Date.now();
+    const modelLabel = getModelLabel(model);
     if (ragBypassed) {
       logger.info("[Stream/Context] RAG bypassed (simple query)", {
         userId,
         chatSessionId,
         query: content.substring(0, 40),
       });
-      res.write(`data: ${JSON.stringify({ status: "Generating response..." })}\n\n`);
+      res.write(`data: ${JSON.stringify({ status: `${modelLabel} is thinking...` })}\n\n`);
     } else {
-      res.write(`data: ${JSON.stringify({ status: "Thinking..." })}\n\n`);
+      res.write(`data: ${JSON.stringify({ status: `${modelLabel} is thinking...` })}\n\n`);
       [sessionStatus, hasSessionChunks, globalContext, speculativeSessionRAG] = await Promise.all([
         getSessionDocumentStatus(userId, chatSessionId),
         hasReadySessionChunks(userId, chatSessionId),
@@ -1615,9 +1616,9 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
       ]);
 
       const contextStatusMsg =
-        globalContext.source === "rag" ? "Found relevant documents. Generating response..." :
-        globalContext.source === "keyword" ? "Found matching policies. Generating response..." :
-        "Generating response...";
+        globalContext.source === "rag" ? "Retrieved relevant internal documents..." :
+        globalContext.source === "keyword" ? "Matched company policies..." :
+        `${modelLabel} is generating response...`;
       res.write(`data: ${JSON.stringify({ status: contextStatusMsg })}\n\n`);
     }
     t.contextMs = Date.now() - contextStart;
