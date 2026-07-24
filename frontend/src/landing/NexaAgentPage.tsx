@@ -81,8 +81,8 @@ const ideInstructions: Record<string, { label: string; menuHint: string; steps: 
     ],
   },
   other: {
-    label: "Other (Windsurf, VSCodium, Trae…)",
-    menuHint: "Any VS Code-based editor supports the same Extensions → Install from VSIX flow — menu wording may vary slightly.",
+    label: "Other editors",
+    menuHint: "Windsurf, VSCodium, Trae, and other VS Code-based editors support the same Extensions → Install from VSIX flow — menu wording may vary slightly.",
     cli: "<your-editor-binary> --install-extension nexa-agent-<version>.vsix",
     steps: [
       { title: "Download the .vsix", body: "Grab the latest .vsix file from the GitHub Releases page linked above." },
@@ -183,9 +183,13 @@ const NexaAgentPage = () => {
           </p>
 
           <Tabs defaultValue="vscode" className="w-full">
-            <TabsList className="mx-auto mb-8 grid w-full max-w-md grid-cols-3">
+            <TabsList className="mx-auto mb-8 flex h-auto w-fit max-w-full flex-wrap justify-center gap-1 p-1">
               {Object.entries(ideInstructions).map(([key, ide]) => (
-                <TabsTrigger key={key} value={key} className="font-semibold text-xs sm:text-sm">
+                <TabsTrigger
+                  key={key}
+                  value={key}
+                  className="whitespace-nowrap px-4 py-2 font-semibold text-xs sm:text-sm"
+                >
                   {ide.label}
                 </TabsTrigger>
               ))}
