@@ -12,6 +12,8 @@ import {
   AuthenticatedRequest
 } from "../middleware/auth";
 import { resolveUserDirectoryBusinessUnit } from "../utils/tenantResolution";
+import { buildUtilizationByBu, countUnattributedLlmCalls } from "../services/utilizationService";
+import logger from "../utils/logger";
 import { validatePasswordStrength } from "../utils/passwordPolicy";
 import bcrypt from "bcryptjs";
 
@@ -247,6 +249,68 @@ analyticsRouter.get("/audit-activity", adminAuthMiddleware, async (req: Authenti
   } catch (error) {
     console.error("Audit activity error:", error);
     res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/**
+ * Platform utilization per business unit, for cost apportionment.
+ *
+ * `?from=`/`?to=` accept ISO dates; `?format=csv` returns a downloadable file
+ * rather than JSON. Reports activity (conversations, messages, assistant replies,
+ * active users) — token/cost data is not persisted historically, so use
+ * `shareOfLlmCalls` to apportion the provider invoice.
+ */
+analyticsRouter.get("/utilization-by-bu", superAdminMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const parse = (v: unknown): Date | undefined => {
+      if (typeof v !== "string" || !v) return undefined;
+      const d = new Date(v);
+      return Number.isNaN(d.getTime()) ? undefined : d;
+    };
+
+    const from = parse(req.query.from);
+    const to = parse(req.query.to);
+
+    if (req.query.from && !from) return res.status(400).json({ error: "Invalid 'from' date" });
+    if (req.query.to && !to) return res.status(400).json({ error: "Invalid 'to' date" });
+
+    const [rows, unattributedLlmCalls] = await Promise.all([
+      buildUtilizationByBu(Conversation, { from, to }),
+      countUnattributedLlmCalls(Conversation, { from, to }),
+    ]);
+
+    if (req.query.format === "csv") {
+      const escape = (v: string | number) => {
+        const s = String(v);
+        return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+      };
+      const csv = [
+        "Business Unit,Active Users,Conversations,Total Messages,Assistant Replies (LLM calls),Share of LLM Calls (%)",
+        ...rows.map((r) =>
+          [r.businessUnit, r.activeUsers, r.conversations, r.messages, r.assistantMessages, r.shareOfLlmCalls]
+            .map(escape)
+            .join(",")
+        ),
+      ].join("\n");
+
+      const stamp = new Date().toISOString().slice(0, 10);
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename="nexa-utilization-${stamp}.csv"`);
+      return res.send(csv);
+    }
+
+    return res.json({
+      range: { from: from ?? null, to: to ?? null },
+      totalLlmCalls: rows.reduce((n, r) => n + r.assistantMessages, 0),
+      /** Calls from deleted users, excluded from `rows` — surfaced so the gap is visible. */
+      unattributedLlmCalls,
+      basis: "activity",
+      note: "Token and cost data is not captured historically. Apportion provider spend using shareOfLlmCalls.",
+      rows,
+    });
+  } catch (error) {
+    logger.error("[Analytics] utilization-by-bu failed", { error: (error as Error).message });
+    return res.status(500).json({ error: "Internal server error" });
   }
 });
 

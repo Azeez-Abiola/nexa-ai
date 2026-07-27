@@ -5,6 +5,8 @@ import { buildSystemPrompt } from "./openaiService";
 import { PolicyContext, ImageAttachment, WebSource } from "./openaiService";
 import { isSimpleQuery } from "../utils/queryClassifier";
 import logger from "../utils/logger";
+import { recordUsage } from "./usageService";
+import { isRetryableFailure, retryDelayMs } from "./providerHealth";
 
 if (!process.env.KIMI_API_KEY) {
   logger.warn("[KimiService] KIMI_API_KEY not set — Kimi requests will fail at runtime");
@@ -38,15 +40,10 @@ function sleep(ms: number): Promise<void> {
 }
 
 function isRetryableError(err: unknown): boolean {
-  if (err instanceof OpenAI.APIError) {
-    const status = err.status ?? 0;
-    return status >= 500 || status === 429;
-  }
-  if (err instanceof Error) {
-    const msg = err.message.toLowerCase();
-    return msg.includes("econnreset") || msg.includes("etimedout") || msg.includes("socket hang up");
-  }
-  return false;
+  // Shared classifier: retries only transient failures (rate limits, 5xx,
+  // transport blips) and never an exhausted quota or bad key. Also honours
+  // `retry-after` — see providerHealth.ts.
+  return isRetryableFailure(err);
 }
 
 function isAbortError(err: unknown): boolean {
@@ -136,14 +133,14 @@ function buildSystem(
   const topPolicies = policies.sort((a, b) => (b.score ?? 0) - (a.score ?? 0)).slice(0, 3);
 
   if (topPolicies.length === 0) {
-    return { system: buildSystemPrompt(name, "", false, "kimi"), maxTokens: 8192 };
+    return { system: buildSystemPrompt(name, "", false, MODEL), maxTokens: 8192 };
   }
 
   let policyContext = "\n### Relevant Policies:\n";
   topPolicies.forEach((p, i) => {
     policyContext += `\n**${i + 1}. ${p.title}** *(${p.category})*\n${p.content}\n`;
   });
-  return { system: buildSystemPrompt(name, policyContext, true, "kimi"), maxTokens: 8192 };
+  return { system: buildSystemPrompt(name, policyContext, true, MODEL), maxTokens: 8192 };
 }
 
 // ─── generateAIResponse ───────────────────────────────────────────────────────
@@ -172,6 +169,8 @@ export async function generateAIResponse(
       { model: MODEL, messages, max_tokens: maxTokens, stream: false },
       { signal: controller.signal }
     );
+
+    recordUsage({ businessUnit, provider: "kimi", modelId: MODEL, usage: response.usage, mode: "generate" });
 
     const text = response.choices[0]?.message?.content ?? "";
     return text.trim() || "I couldn't generate a response. Please try again.";
@@ -202,7 +201,7 @@ export async function* streamAIResponse(
 
   for (let attempt = 0; attempt < STREAM_MAX_ATTEMPTS; attempt++) {
     if (attempt > 0) {
-      const delayMs = RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1);
+      const delayMs = retryDelayMs(lastError, attempt, RETRY_BASE_DELAY_MS);
       logger.warn("[Kimi/Stream] Retrying after error", {
         attempt,
         delayMs,
@@ -219,17 +218,29 @@ export async function* streamAIResponse(
       logger.info("[Kimi/Stream] Request", { model: MODEL, attempt });
 
       const stream = await kimi.chat.completions.create(
-        { model: MODEL, messages, max_tokens: maxTokens, stream: true },
+        {
+          model: MODEL,
+          messages,
+          max_tokens: maxTokens,
+          stream: true,
+          // Chat Completions omits usage from stream chunks unless asked; without
+          // this the final chunk carries no token counts to record.
+          stream_options: { include_usage: true },
+        },
         { signal: controller.signal }
       );
 
+      let streamUsage: unknown;
       for await (const chunk of stream) {
+        // The usage-bearing final chunk has an empty choices array.
+        if (chunk.usage) streamUsage = chunk.usage;
         const delta = chunk.choices[0]?.delta?.content;
         if (delta) {
           yield delta;
           hasYielded = true;
         }
       }
+      recordUsage({ businessUnit, provider: "kimi", modelId: MODEL, usage: streamUsage, mode: "stream" });
 
       lastError = null;
       break;

@@ -419,3 +419,55 @@ export async function sendTenantCredentialsEmail(
     throw error;
   }
 }
+
+/**
+ * Ops alert: an LLM provider is unable to serve requests (quota exhausted, auth
+ * failure). Goes to the super-admin notification inbox, not to end users.
+ *
+ * Deliberately plain inline HTML rather than an EJS template — this must not fail
+ * to send because of a missing/broken template while a provider is already down.
+ * Callers are expected to rate-limit; this function does not dedupe.
+ */
+export async function sendProviderOutageAlert(opts: {
+  provider: string;
+  modelId: string;
+  kind: string;
+  message: string;
+  requestId?: string;
+  failedOverTo?: string;
+}): Promise<void> {
+  const { provider, modelId, kind, message, requestId, failedOverTo } = opts;
+  const when = new Date().toISOString();
+  const escape = (s: string) =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+  const row = (k: string, v: string) =>
+    `<tr><td style="padding:6px 12px 6px 0;color:#666;white-space:nowrap">${k}</td>` +
+    `<td style="padding:6px 0"><strong>${escape(v)}</strong></td></tr>`;
+
+  const html = `
+    <div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:600px">
+      <h2 style="margin:0 0 4px">⚠️ Nexa AI — ${escape(provider)} is not serving requests</h2>
+      <p style="color:#666;margin:0 0 16px">${
+        failedOverTo
+          ? `Requests are being served by <strong>${escape(failedOverTo)}</strong> in the meantime.`
+          : `No healthy fallback provider was available — users are seeing errors.`
+      }</p>
+      <table style="border-collapse:collapse;font-size:14px">
+        ${row("Provider", provider)}
+        ${row("Model", modelId)}
+        ${row("Reason", kind)}
+        ${row("Detected", when)}
+        ${requestId ? row("Request ID", requestId) : ""}
+      </table>
+      <p style="margin:16px 0 4px;color:#666;font-size:14px">Provider message:</p>
+      <pre style="background:#f5f5f5;padding:12px;border-radius:6px;font-size:13px;white-space:pre-wrap">${escape(
+        message
+      )}</pre>
+      <p style="color:#999;font-size:12px">
+        Further alerts for ${escape(provider)} are suppressed for one hour.
+      </p>
+    </div>`;
+
+  await sendEmail(NOTIFICATION_INBOX, `[Nexa AI] ${provider} unavailable — ${kind}`, html);
+}

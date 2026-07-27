@@ -3,6 +3,7 @@ import axios from "axios";
 import { format, subDays } from "date-fns";
 import { BarChart3, Users, MessageSquare, Files, Building2, UserPlus } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import UtilizationPanel from "../components/UtilizationPanel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import {
@@ -394,6 +395,8 @@ const Analytics: React.FC = () => {
               )
             )}
       </div>
+
+      {isSuper && <UtilizationPanel />}
     </div>
   );
 };

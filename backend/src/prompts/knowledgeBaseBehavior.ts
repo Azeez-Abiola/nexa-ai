@@ -6,7 +6,7 @@
  * documentSeriesId + isLatestVersion); these instructions align model behavior with the product intent.
  */
 export const KNOWLEDGE_BASE_VERSIONING_RULES = `
-KNOWLEDGE BASE — VERSIONING & CITATIONS (read each retrieved chunk’s document title and documentType in the lines above):
+KNOWLEDGE BASE — VERSIONING & CITATIONS (read each retrieved chunk’s document title and documentType in the COMPANY KNOWLEDGE BASE section of the user's message):
 
 1) Policy-like types (\`policy\`, and treat \`procedure\` / S&OP-style process docs the same way): use the current, authoritative rules only. If several chunks from the same topic conflict, prefer the one consistent with the newest / superseding guidance; do not blend obsolete policy with newer policy. If nothing in the excerpts answers the question, say the current materials do not cover it — do not invent — and suggest contacting an administrator.
 
@@ -14,7 +14,7 @@ KNOWLEDGE BASE — VERSIONING & CITATIONS (read each retrieved chunk’s documen
 
 3) Users are not expected to name a version: choose automatically from the excerpts.
 
-4) Cite a source ONLY when the answer is grounded in one of the retrieved document chunks above. Do NOT add a source line for:
+4) Cite a source ONLY when the answer is grounded in one of the retrieved document chunks provided in this conversation. Do NOT add a source line for:
    - greetings, thanks, acknowledgments, or any conversational reply ("hi", "thanks", "great job", "you're welcome", "ok").
    - clarifying questions or meta-talk about how you work.
    - answers drawn from general knowledge or reasoning that didn't use any of the retrieved chunks.

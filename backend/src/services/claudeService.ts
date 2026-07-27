@@ -3,6 +3,8 @@ import { getBusinessUnitLabel } from "../config/businessUnits";
 import { buildSystemPrompt } from "./openaiService";
 import { PolicyContext, ImageAttachment, WebSource } from "./openaiService";
 import logger from "../utils/logger";
+import { recordUsage } from "./usageService";
+import { isRetryableFailure, retryDelayMs } from "./providerHealth";
 
 if (!process.env.ANTHROPIC_API_KEY) {
   logger.warn("[ClaudeService] ANTHROPIC_API_KEY not set — Claude requests will fail at runtime");
@@ -60,15 +62,10 @@ function sleep(ms: number): Promise<void> {
 }
 
 function isRetryableError(err: unknown): boolean {
-  if (err instanceof Anthropic.APIError) {
-    const status = err.status ?? 0;
-    return status >= 500 || status === 429;
-  }
-  if (err instanceof Error) {
-    const msg = err.message.toLowerCase();
-    return msg.includes("econnreset") || msg.includes("etimedout") || msg.includes("socket hang up");
-  }
-  return false;
+  // Shared classifier: retries only transient failures (rate limits, 5xx,
+  // transport blips) and never an exhausted quota or bad key. Also honours
+  // `retry-after` — see providerHealth.ts.
+  return isRetryableFailure(err);
 }
 
 function isAbortError(err: unknown): boolean {
@@ -80,12 +77,69 @@ function stripJsonFences(raw: string): string {
   return raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
 }
 
+// ─── Prompt Caching ───────────────────────────────────────────────────────────
+//
+// Caching is a prefix match over `tools` → `system` → `messages`; a single byte
+// change anywhere invalidates everything after it. Two breakpoints are placed:
+//
+//   1. End of the system prompt — frozen text only (no retrieved policies).
+//   2. End of the conversation history — grows and stays byte-stable per turn.
+//
+// Everything volatile (the RAG policy context and the current question) goes
+// into the final user turn, after breakpoint 2, so it never invalidates either.
+// Minimum cacheable prefix is 1024 tokens on Opus 4.x; shorter prefixes simply
+// don't cache (no error, no write charge).
+
+// TTL is chosen per breakpoint, because the two have opposite cost profiles.
+// (The API offers only "5m" (default, 1.25x writes) and "1h" (2x writes) — there
+// is no value in between.)
+//
+// System block: ~1.2k tokens, written once, read on every turn for the life of the
+// conversation. Cheap to write, so the 1-hour TTL keeps it warm through long pauses.
+const SYSTEM_CACHE_CONTROL: Anthropic.CacheControlEphemeral = { type: "ephemeral", ttl: "1h" };
+
+// History block: grows every turn, so it is rewritten every turn — this is where the
+// write premium actually lands. 5m keeps that at 1.25x instead of 2x. If a user pauses
+// past the window, the still-warm system entry above absorbs part of the miss.
+const HISTORY_CACHE_CONTROL: Anthropic.CacheControlEphemeral = { type: "ephemeral" };
+
+/** Copy of a message with a cache breakpoint on its last content block. */
+function withCacheBreakpoint(msg: Anthropic.MessageParam): Anthropic.MessageParam {
+  const blocks: Anthropic.ContentBlockParam[] =
+    typeof msg.content === "string"
+      ? msg.content
+        ? [{ type: "text", text: msg.content }]
+        : []
+      : [...msg.content];
+
+  if (blocks.length === 0) return msg;
+
+  blocks[blocks.length - 1] = {
+    ...blocks[blocks.length - 1],
+    cache_control: HISTORY_CACHE_CONTROL,
+  } as Anthropic.ContentBlockParam;
+
+  return { ...msg, content: blocks };
+}
+
+/** Log cache effectiveness — a persistently zero read count means an invalidator. */
+function logCacheUsage(label: string, usage: Anthropic.Usage | undefined): void {
+  if (!usage) return;
+  logger.info(`[Claude/${label}] Cache usage`, {
+    cacheRead:    usage.cache_read_input_tokens ?? 0,
+    cacheWrite:   usage.cache_creation_input_tokens ?? 0,
+    uncached:     usage.input_tokens,
+    outputTokens: usage.output_tokens,
+  });
+}
+
 // ─── Message Builder ──────────────────────────────────────────────────────────
 
 function buildClaudeMessages(
   history: Message[],
   userMessage: string,
-  imageAttachments?: ImageAttachment[]
+  imageAttachments?: ImageAttachment[],
+  policyContext?: string
 ): Anthropic.MessageParam[] {
   const historyMessages: Anthropic.MessageParam[] = history
     .filter((m) => m.role !== "system")
@@ -103,10 +157,21 @@ function buildClaudeMessages(
       return { role: m.role as "user" | "assistant", content: m.content };
     });
 
-  let userContent: string | Anthropic.ContentBlockParam[];
+  // Volatile content lives here, after the history breakpoint: the retrieved
+  // policies change every turn and must never sit inside the cached prefix.
+  const userContent: Anthropic.ContentBlockParam[] = [];
+
+  if (policyContext) {
+    userContent.push({ type: "text", text: policyContext });
+  }
+
+  const questionText = userMessage || (imageAttachments?.length ? "What is in this image?" : "");
+  if (questionText) {
+    userContent.push({ type: "text", text: questionText });
+  }
+
   if (imageAttachments && imageAttachments.length > 0) {
-    userContent = [
-      { type: "text", text: userMessage || "What is in this image?" },
+    userContent.push(
       ...imageAttachments.map((img): Anthropic.ImageBlockParam => ({
         type: "image",
         source: {
@@ -114,35 +179,59 @@ function buildClaudeMessages(
           media_type: img.mimeType as "image/jpeg" | "image/png" | "image/gif" | "image/webp",
           data: img.base64,
         },
-      })),
-    ];
-  } else {
-    userContent = userMessage;
+      }))
+    );
   }
 
-  return [...historyMessages, { role: "user", content: userContent }];
+  // Breakpoint 2: end of history. Skipped for the first turn (nothing to reuse).
+  const cachedHistory =
+    historyMessages.length > 0
+      ? [
+          ...historyMessages.slice(0, -1),
+          withCacheBreakpoint(historyMessages[historyMessages.length - 1]),
+        ]
+      : historyMessages;
+
+  return [...cachedHistory, { role: "user", content: userContent }];
 }
 
-function buildSystem(
-  businessUnit: string,
-  buLabel: string | null,
-  policies: PolicyContext[],
-  customSystemPrompt?: string
-): string {
-  if (customSystemPrompt) return customSystemPrompt;
-
-  const name = buLabel || businessUnit || "your organization";
+/**
+ * Renders the top-3 retrieved policies, or "" when there are none.
+ *
+ * This deliberately does NOT go into the system prompt: retrieval results change
+ * on every turn, and system renders ahead of `messages`, so embedding them there
+ * would invalidate the cached conversation prefix on each request. It is sent as
+ * the first block of the current user turn instead — still "above" the question,
+ * which is what the system prompt's citation rules refer to.
+ */
+function buildPolicyContext(policies: PolicyContext[]): string {
   const topPolicies = policies.sort((a, b) => (b.score ?? 0) - (a.score ?? 0)).slice(0, 3);
+  if (topPolicies.length === 0) return "";
 
-  if (topPolicies.length === 0) {
-    return buildSystemPrompt(name, "", false, "claude");
-  }
-
-  let policyContext = "\n### Relevant Policies:\n";
+  let policyContext = "### Relevant Policies:\n";
   topPolicies.forEach((p, i) => {
     policyContext += `\n**${i + 1}. ${p.title}** *(${p.category})*\n${p.content}\n`;
   });
-  return buildSystemPrompt(name, policyContext, true, "claude");
+  return policyContext;
+}
+
+/**
+ * Frozen system prompt carrying cache breakpoint 1.
+ *
+ * The only inputs are the business-unit label and whether policies were found —
+ * so the rendered text takes one of a small number of stable values rather than
+ * changing per request. Keep it that way: no timestamps, no user IDs, no
+ * retrieved content.
+ */
+function buildSystem(
+  businessUnit: string,
+  buLabel: string | null,
+  hasPolicies: boolean,
+  customSystemPrompt?: string
+): Anthropic.TextBlockParam[] {
+  const name = buLabel || businessUnit || "your organization";
+  const text = customSystemPrompt ?? buildSystemPrompt(name, "", hasPolicies, MODEL);
+  return [{ type: "text", text, cache_control: SYSTEM_CACHE_CONTROL }];
 }
 
 // ─── generateAIResponse ───────────────────────────────────────────────────────
@@ -156,8 +245,10 @@ export async function generateAIResponse(
   webSources?: WebSource[]
 ): Promise<string> {
   const buLabel = await getBusinessUnitLabel(businessUnit);
-  const system  = buildSystem(businessUnit, buLabel, policies, customSystemPrompt);
-  const messages = buildClaudeMessages(conversationHistory, userMessage);
+  // customSystemPrompt callers opt out of policy context entirely (unchanged).
+  const policyContext = customSystemPrompt ? "" : buildPolicyContext(policies);
+  const system   = buildSystem(businessUnit, buLabel, Boolean(policyContext), customSystemPrompt);
+  const messages = buildClaudeMessages(conversationHistory, userMessage, undefined, policyContext);
   const tools    = webSearchTools();
 
   const controller = new AbortController();
@@ -171,6 +262,8 @@ export async function generateAIResponse(
       { signal: controller.signal }
     );
 
+    logCacheUsage("NonStream", response.usage);
+    recordUsage({ businessUnit, provider: "claude", modelId: MODEL, usage: response.usage, mode: "generate" });
     collectSourcesFromContent(response.content, webSources);
 
     const text = response.content
@@ -196,8 +289,9 @@ export async function* streamAIResponse(
   webSources?: WebSource[]
 ): AsyncGenerator<string, void, unknown> {
   const buLabel  = await getBusinessUnitLabel(businessUnit);
-  const system   = buildSystem(businessUnit, buLabel, policies, customSystemPrompt);
-  const messages = buildClaudeMessages(conversationHistory, userMessage, imageAttachments);
+  const policyContext = customSystemPrompt ? "" : buildPolicyContext(policies);
+  const system   = buildSystem(businessUnit, buLabel, Boolean(policyContext), customSystemPrompt);
+  const messages = buildClaudeMessages(conversationHistory, userMessage, imageAttachments, policyContext);
   const tools    = webSearchTools();
 
   let hasYielded = false;
@@ -206,7 +300,7 @@ export async function* streamAIResponse(
 
   for (let attempt = 0; attempt < STREAM_MAX_ATTEMPTS; attempt++) {
     if (attempt > 0) {
-      const delayMs = RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1);
+      const delayMs = retryDelayMs(lastError, attempt, RETRY_BASE_DELAY_MS);
       logger.warn("[Claude/Stream] Retrying after error", {
         attempt,
         delayMs,
@@ -238,16 +332,17 @@ export async function* streamAIResponse(
         }
       }
 
-      // Sweep web_search_tool_result blocks from the assembled message for source pills.
-      if (webSources) {
-        try {
-          const finalMessage = await stream.finalMessage();
-          collectSourcesFromContent(finalMessage.content, webSources);
-        } catch (finalErr) {
-          logger.warn("[Claude/Stream] finalMessage() unavailable after stream", {
-            error: finalErr instanceof Error ? finalErr.message : String(finalErr),
-          });
-        }
+      // Sweep web_search_tool_result blocks from the assembled message for source
+      // pills, and report cache effectiveness.
+      try {
+        const finalMessage = await stream.finalMessage();
+        logCacheUsage("Stream", finalMessage.usage);
+        recordUsage({ businessUnit, provider: "claude", modelId: MODEL, usage: finalMessage.usage, mode: "stream" });
+        collectSourcesFromContent(finalMessage.content, webSources);
+      } catch (finalErr) {
+        logger.warn("[Claude/Stream] finalMessage() unavailable after stream", {
+          error: finalErr instanceof Error ? finalErr.message : String(finalErr),
+        });
       }
 
       lastError = null;

@@ -1,8 +1,11 @@
 import OpenAI from "openai";
 import { encodingForModel } from "js-tiktoken";
 import { getBusinessUnitLabel } from "../config/businessUnits";
+import { labelForModelId } from "../config/modelLabels";
 import { isSimpleQuery } from "../utils/queryClassifier";
 import logger from "../utils/logger";
+import { recordUsage } from "./usageService";
+import { classifyProviderError, isRetryableFailure, retryDelayMs } from "./providerHealth";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -132,17 +135,10 @@ function sleep(ms: number): Promise<void> {
 }
 
 function isRetryableError(err: unknown): boolean {
-  if (err instanceof OpenAI.APIError) {
-    const status = err.status ?? 0;
-    // 5xx server errors (including the case where status is undefined but type is server_error),
-    // and 429 rate-limit responses are safe to retry.
-    return status >= 500 || status === 429 || err.type === "server_error";
-  }
-  if (err instanceof Error) {
-    const msg = err.message.toLowerCase();
-    return msg.includes("econnreset") || msg.includes("etimedout") || msg.includes("socket hang up");
-  }
-  return false;
+  // Shared classifier: retries only transient failures (rate limits, 5xx,
+  // transport blips) and never an exhausted quota or bad key. Also honours
+  // `retry-after` — see providerHealth.ts.
+  return isRetryableFailure(err);
 }
 
 function isAbortError(err: unknown): boolean {
@@ -164,12 +160,13 @@ function extractErrorMeta(err: unknown): Record<string, unknown> {
   return { message: err instanceof Error ? err.message : String(err) };
 }
 
-export function buildSystemPrompt(correctBUName: string, policyContext: string, hasPolicies: boolean, activeModel: "gpt" | "claude" | "kimi" | "deepseek" = "gpt"): string {
-  const modelLabel =
-    activeModel === "claude"    ? "Claude Opus 4.7" :
-    activeModel === "kimi"      ? "Kimi k2.5" :
-    activeModel === "deepseek"  ? "DeepSeek v4" :
-    "GPT-5";
+/**
+ * @param activeModelId The provider's resolved (env-configured) model id — e.g. the
+ *   `MODEL` constant each service exports. Passing the real id rather than a provider
+ *   name keeps the self-reported label from drifting when CLAUDE_MODEL et al. change.
+ */
+export function buildSystemPrompt(correctBUName: string, policyContext: string, hasPolicies: boolean, activeModelId: string = MODEL): string {
+  const modelLabel = labelForModelId(activeModelId);
   const basePrompt = `You are Nexa AI, ${correctBUName}'s Policy Assistant, powered by ${modelLabel}. If asked which model or AI you use, say you are Nexa AI powered by ${modelLabel}.`;
   const formattingGuide = `Format responses with: **bold** for key terms, *italics* for emphasis, ### headers, numbered/bullet lists, --- separators, and code blocks for examples.`;
 
@@ -346,6 +343,7 @@ export async function generateAIResponse(
       }, { signal: controller.signal });
 
       collectSourcesFromResponse(response, webSources);
+      recordUsage({ businessUnit, provider: "gpt", modelId: MODEL, usage: response.usage, mode: "generate" });
       return formatResponse(extractOutputText(response));
     } finally {
       clearTimeout(timeoutId);
@@ -402,7 +400,7 @@ export async function* streamAIResponse(
 
   for (let attempt = 0; attempt < STREAM_MAX_ATTEMPTS; attempt++) {
     if (attempt > 0) {
-      const delayMs = RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1); // 1 s, 2 s
+      const delayMs = retryDelayMs(lastError, attempt, RETRY_BASE_DELAY_MS);
       logger.warn("[OpenAI/Stream] Retrying stream after error", {
         attempt,
         delayMs,
@@ -490,6 +488,13 @@ export async function* streamAIResponse(
         try {
           const finalResp = await stream.finalResponse();
           collectSourcesFromResponse(finalResp as unknown as OpenAI.Responses.Response, webSources);
+          recordUsage({
+            businessUnit,
+            provider: "gpt",
+            modelId: MODEL,
+            usage: (finalResp as unknown as OpenAI.Responses.Response).usage,
+            mode: "stream",
+          });
           if (!hasYielded && !doneFallback.trim()) {
             const text = extractOutputText(finalResp as unknown as OpenAI.Responses.Response);
             if (text && !text.includes("couldn't generate")) {
@@ -562,6 +567,24 @@ export async function* streamAIResponse(
   }
 
   if (!hasYielded && lastError) {
+    // The non-streaming fallback exists for transport-level stream failures. It cannot
+    // help when the account itself can't serve — an exhausted quota or a bad key fails
+    // identically on both transports, so retrying here just burns ~5s before the router
+    // fails over to another provider. Surface it immediately instead.
+    const { kind } = classifyProviderError(lastError);
+    if (kind === "quota" || kind === "auth") {
+      logger.warn("[OpenAI/Stream] Skipping non-streaming fallback — account cannot serve", {
+        kind,
+        totalElapsedMs: Date.now() - totalStart,
+        ...extractErrorMeta(lastError),
+      });
+      throw new Error(
+        `Failed to generate AI response: ${
+          lastError instanceof Error ? lastError.message : String(lastError)
+        }`
+      );
+    }
+
     logger.warn("[OpenAI/Stream] All stream attempts failed — falling back to non-streaming", {
       totalElapsedMs: Date.now() - totalStart,
       ...extractErrorMeta(lastError),

@@ -385,22 +385,91 @@ async function buildKbInventoryNote(
   }
 }
 
+/**
+ * The STABLE half of the prompt — identity, instructions, and KB rules.
+ *
+ * Prompt caching is a prefix match and `system` renders ahead of `messages`, so
+ * anything that varies per request must NOT appear here: no date, no retrieved
+ * context, no upload state, no user-message-derived text. Those live in
+ * buildTurnContext() and ride along with the user turn instead.
+ *
+ * Its only inputs are the business unit and the active model, so it renders one
+ * of a small number of byte-stable values and stays cacheable across turns.
+ * Keep it that way when adding sections.
+ */
 function buildSystemPrompt(
   businessUnit: string,
-  sessionContextString: string,
-  globalContextString: string,
-  pendingFileNames: string[],
-  hasGlobalContext: boolean,
-  contextSource: "rag" | "keyword" | "none" = "none",
-  activeModel: "gpt" | "claude" | "kimi" | "deepseek" = "gpt",
-  failedFileNames: string[] = [],
-  scannedFileNames: string[] = []
+  activeModel: "gpt" | "claude" | "kimi" | "deepseek" = "gpt"
 ): string {
-  const today = new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
   const modelLabel = getModelLabel(activeModel);
   const sections: string[] = [
-    `You are Nexa AI, a helpful AI assistant for ${businessUnit}, a business unit of UACN, powered by ${modelLabel}. Today's date is ${today}. If asked which model or AI you use, say you are Nexa AI powered by ${modelLabel}. Users can switch between models at any time — if the model differs from a previous message, do not apologize or treat it as an error; simply state the current model naturally.`
+    `You are Nexa AI, a helpful AI assistant for ${businessUnit}, a business unit of UACN, powered by ${modelLabel}. If asked which model or AI you use, say you are Nexa AI powered by ${modelLabel}. Users can switch between models at any time — if the model differs from a previous message, do not apologize or treat it as an error; simply state the current model naturally.`
   ];
+
+  sections.push(`INSTRUCTIONS:
+1. When answering questions about the user's uploaded documents, use the "YOUR UPLOADED DOCUMENTS" context as your PRIMARY source.
+2. For HR policies or general company knowledge, use the "COMPANY KNOWLEDGE BASE" section as your PRIMARY source.
+3. **You have a live web_search tool. Search first and answer from what you find — do not ask the user for permission.** Search whenever:
+   - the question involves current events, recent developments, news, sports, prices, or dates;
+   - the user asks a factual question about a specific person, company, product, place, or event that the provided context does not cover and you cannot answer confidently from your own knowledge;
+   - the answer may have changed since your training cutoff.
+   Never reply "I don't have information about X", "that isn't in the knowledge base", or "let me know and I can search" and then stop — if it is searchable, run the search in the same turn and then answer. Only after searching may you report that nothing was found.
+   Do NOT search for greetings, small talk, follow-ups you can answer from the conversation, or questions already answered by the provided company documents.
+   When you use it:
+   - Base your answer on what the search results actually say. Do NOT invent specific details (match times, scores, dates, names, prices) that the results don't state.
+   - Cite the sources you used. If the results are thin on a detail the user wants, say what you found and point them to the source rather than guessing.
+   - Do NOT add disclaimers like "my knowledge is limited to 2023" or "I can't access the internet" — you can search the web. Just search and answer honestly.
+4. For questions outside all provided sources that rule 3 does not cover and that don't need fresh data, answer from your own training knowledge. If information may be stale, add a brief "(based on what I know — details may have changed)" note. Never refuse outright.
+5. You can perform ANY task: summarization, Q&A, extraction, analysis, transformation, explanation, brainstorming, writing help.
+6. If context from uploaded documents is insufficient or missing for a document-specific question, say so honestly — do NOT hallucinate document-specific facts. This only applies to questions ABOUT uploaded documents, not general questions.
+7. Only label the source of your answer when it improves clarity:
+   - 📄 for user-uploaded document answers
+   - 📋 for company knowledge base answers
+   - 🌐 for external web sources you searched
+   - No badge for general knowledge / conversational replies.
+8. Be professional, helpful, and concise.
+
+${KNOWLEDGE_BASE_VERSIONING_RULES}`);
+
+  return sections.join("\n\n");
+}
+
+interface TurnContextOptions {
+  sessionContextString?: string;
+  globalContextString?: string;
+  hasGlobalContext?: boolean;
+  pendingFileNames?: string[];
+  failedFileNames?: string[];
+  scannedFileNames?: string[];
+  /** Knowledge-base inventory note — derived from the user's message, so per-turn. */
+  kbInventoryNote?: string;
+  /** Document-generation acknowledgement, when the turn requested a file. */
+  docRequestNote?: string;
+}
+
+/**
+ * The VOLATILE half of the prompt — everything that changes from turn to turn:
+ * today's date, retrieved session/KB context, upload state, and notes derived
+ * from the user's message.
+ *
+ * This is prepended to the user turn rather than the system prompt so it sits
+ * AFTER the cached prefix and never invalidates it. Returns "" when there is
+ * nothing turn-specific to say.
+ */
+function buildTurnContext(opts: TurnContextOptions = {}): string {
+  const {
+    sessionContextString = "",
+    globalContextString = "",
+    hasGlobalContext = false,
+    pendingFileNames = [],
+    failedFileNames = [],
+    scannedFileNames = [],
+    kbInventoryNote = "",
+    docRequestNote = "",
+  } = opts;
+
+  const today = new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+  const sections: string[] = [`Today's date is ${today}.`];
 
   if (pendingFileNames.length > 0) {
     sections.push(
@@ -428,26 +497,16 @@ function buildSystemPrompt(
     sections.push(`📋 COMPANY KNOWLEDGE BASE (general policies & internal documents):\n\n${globalContextString}`);
   }
 
-  sections.push(`INSTRUCTIONS:
-1. When answering questions about the user's uploaded documents, use the "YOUR UPLOADED DOCUMENTS" context as your PRIMARY source.
-2. For HR policies or general company knowledge, use the "COMPANY KNOWLEDGE BASE" section as your PRIMARY source.
-3. **You have a live web_search tool. USE IT whenever the question involves current events, recent developments, news, sports, prices, dates, or anything that may have changed since your training cutoff.** When you use it:
-   - Base your answer on what the search results actually say. Do NOT invent specific details (match times, scores, dates, names, prices) that the results don't state.
-   - Cite the sources you used. If the results are thin on a detail the user wants, say what you found and point them to the source rather than guessing.
-   - Do NOT add disclaimers like "my knowledge is limited to 2023" or "I can't access the internet" — you can search the web. Just search and answer honestly.
-4. For questions outside all provided sources that don't need fresh data, answer from your own training knowledge. If information may be stale, add a brief "(based on what I know — details may have changed)" note. Never refuse outright.
-5. You can perform ANY task: summarization, Q&A, extraction, analysis, transformation, explanation, brainstorming, writing help.
-6. If context from uploaded documents is insufficient or missing for a document-specific question, say so honestly — do NOT hallucinate document-specific facts. This only applies to questions ABOUT uploaded documents, not general questions.
-7. Only label the source of your answer when it improves clarity:
-   - 📄 for user-uploaded document answers
-   - 📋 for company knowledge base answers
-   - 🌐 for external web sources you searched
-   - No badge for general knowledge / conversational replies.
-8. Be professional, helpful, and concise.
-
-${KNOWLEDGE_BASE_VERSIONING_RULES}`);
+  if (kbInventoryNote) sections.push(kbInventoryNote.trim());
+  if (docRequestNote) sections.push(docRequestNote.trim());
 
   return sections.join("\n\n");
+}
+
+/** Prepends this turn's volatile context to the user's message. */
+function withTurnContext(turnContext: string, userMessage: string): string {
+  if (!turnContext) return userMessage;
+  return `${turnContext}\n\n---\n\nUSER MESSAGE:\n${userMessage}`;
 }
 
 conversationRouter.get("/folders", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
@@ -1162,22 +1221,20 @@ conversationRouter.post("/:id/message", authMiddleware, async (req: Authenticate
 
     const hasGlobalContext = globalContext.source !== "none" && !globalContext.accessDenied;
 
-    let systemPrompt = buildSystemPrompt(
-      businessUnit,
+    const systemPrompt = buildSystemPrompt(businessUnit, model);
+    const turnContext = buildTurnContext({
       sessionContextString,
-      globalContext.hybridContextString,
-      sessionStatus.pendingOrProcessing,
+      globalContextString: globalContext.hybridContextString,
       hasGlobalContext,
-      globalContext.source,
-      model,
-      sessionStatus.failed
-    );
-    systemPrompt += await buildKbInventoryNote(businessUnit, content, req.userId);
+      pendingFileNames: sessionStatus.pendingOrProcessing,
+      failedFileNames: sessionStatus.failed,
+      kbInventoryNote: await buildKbInventoryNote(businessUnit, content, req.userId),
+    });
 
     let aiResponse = "";
     try {
       aiResponse = await getGenerateAIResponse(model)(
-        content,
+        withTurnContext(turnContext, content),
         globalContext.policies.map((p: any) => ({
           title: p.title,
           category: p.category,
@@ -1311,22 +1368,20 @@ conversationRouter.post("/:id/message/:index/edit", authMiddleware, async (req: 
     }
 
     const hasGlobalContext = globalContext.source !== "none" && !globalContext.accessDenied;
-    let systemPrompt = buildSystemPrompt(
-      businessUnit,
+    const systemPrompt = buildSystemPrompt(businessUnit, model);
+    const turnContext = buildTurnContext({
       sessionContextString,
-      globalContext.hybridContextString,
-      sessionStatus.pendingOrProcessing,
+      globalContextString: globalContext.hybridContextString,
       hasGlobalContext,
-      globalContext.source,
-      model,
-      sessionStatus.failed
-    );
-    systemPrompt += await buildKbInventoryNote(businessUnit, content, req.userId);
+      pendingFileNames: sessionStatus.pendingOrProcessing,
+      failedFileNames: sessionStatus.failed,
+      kbInventoryNote: await buildKbInventoryNote(businessUnit, content, req.userId),
+    });
 
     let aiResponse = "";
     try {
       aiResponse = await getGenerateAIResponse(model)(
-        content,
+        withTurnContext(turnContext, content),
         globalContext.policies.map((p: any) => ({
           title: p.title,
           category: p.category,
@@ -1710,21 +1765,19 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
 
     const hasGlobalContext = globalContext.source !== "none" && !globalContext.accessDenied;
     const failedDocNames = [...new Set([...sessionStatus.failed, ...extractionFailedNames])];
-    let systemPrompt = buildSystemPrompt(
-      businessUnit,
+    const systemPrompt = buildSystemPrompt(businessUnit, model);
+    const turnContext = buildTurnContext({
       sessionContextString,
-      globalContext.hybridContextString,
-      sessionStatus.pendingOrProcessing,
+      globalContextString: globalContext.hybridContextString,
       hasGlobalContext,
-      globalContext.source,
-      model,
-      failedDocNames,
-      scannedPdfNames
-    );
-    if (docRequest) {
-      systemPrompt += `\n\n📎 DOCUMENT GENERATION: The user has requested a ${docRequest.label}. Confirm you are generating it and briefly describe (1–2 sentences) what the file will contain. Do NOT mention a download link — the system will attach it automatically below your message.`;
-    }
-    systemPrompt += await buildKbInventoryNote(businessUnit, content, req.userId);
+      pendingFileNames: sessionStatus.pendingOrProcessing,
+      failedFileNames: failedDocNames,
+      scannedFileNames: scannedPdfNames,
+      kbInventoryNote: await buildKbInventoryNote(businessUnit, content, req.userId),
+      docRequestNote: docRequest
+        ? `📎 DOCUMENT GENERATION: The user has requested a ${docRequest.label}. Confirm you are generating it and briefly describe (1–2 sentences) what the file will contain. Do NOT mention a download link — the system will attach it automatically below your message.`
+        : "",
+    });
 
     const policyContext = globalContext.policies.map((p: any) => ({
       title: p.title,
@@ -1733,9 +1786,12 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
       score: p.score || 0
     }));
 
-    const aiUserMessage = inlineDocumentText
-      ? `${content || "Please analyze and summarize the following document(s)."}\n\n${inlineDocumentText}`
-      : content;
+    const aiUserMessage = withTurnContext(
+      turnContext,
+      inlineDocumentText
+        ? `${content || "Please analyze and summarize the following document(s)."}\n\n${inlineDocumentText}`
+        : content
+    );
 
     let fullResponse = "";
     const webSources: { title: string; link: string }[] = [];

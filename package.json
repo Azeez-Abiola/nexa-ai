@@ -7,7 +7,8 @@
     "frontend"
   ],
   "scripts": {
-    "dev": "concurrently \"npm --prefix backend run dev\" \"npm --prefix frontend run dev\"",
+    "predev": "sh scripts/free-dev-ports.sh",
+    "dev": "concurrently -k -n backend,frontend -c blue,green \"npm --prefix backend run dev\" \"npm --prefix frontend run dev\"",
     "build": "npm --prefix backend run build && npm --prefix frontend run build",
     "start": "concurrently \"npm --prefix backend start\" \"npm --prefix frontend start\"",
     "start:backend": "npm --prefix backend start",

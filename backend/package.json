@@ -8,7 +8,8 @@
     "postbuild": "mkdir -p dist/templates && cp -r src/templates/* dist/templates/",
     "start": "node dist/index.js",
     "seed": "ts-node --transpile-only src/scripts/seedSuperAdmin.ts",
-    "fix:microsoft-id-index": "ts-node --transpile-only src/scripts/fixMicrosoftIdIndex.ts"
+    "fix:microsoft-id-index": "ts-node --transpile-only src/scripts/fixMicrosoftIdIndex.ts",
+    "report:utilization": "ts-node --transpile-only src/scripts/utilizationReport.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.95.1",
