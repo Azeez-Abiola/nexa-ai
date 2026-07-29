@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { Search, TrendingUp, ShieldCheck, ClipboardCheck, BookOpen, ArrowRight, BarChart3, Cpu } from "lucide-react";
+import { Search, TrendingUp, ShieldCheck, ClipboardCheck, BookOpen, ArrowRight, BarChart3, Cpu, Layers, Users, ListChecks } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import {
   Dialog,
@@ -19,6 +19,42 @@ type Feature = {
 };
 
 const features: Feature[] = [
+  {
+    icon: Layers,
+    title: "Multi-Modal AI Engine",
+    desc: "Text, documents, images, spreadsheets and voice — one assistant that understands every format your team works in.",
+    highlight: false,
+    detailTitle: "Multi-modal AI engine",
+    detailParagraphs: [
+      "Nexa is not limited to plain text. Drop in a scanned contract, a chart from a board pack, a spreadsheet export, or a photo from the plant floor and ask questions about it in the same conversation.",
+      "Documents, tables, and images are processed into a shared understanding layer, so a single question can draw on a policy PDF, a financial workbook, and a diagram at once.",
+      "Voice input and spoken responses let field and operations teams use Nexa hands-free, while the same permissions and audit rules apply across every format.",
+    ],
+  },
+  {
+    icon: Users,
+    title: "Collaboration & Teamwork",
+    desc: "Group chats, shared conversations and live presence — bring the whole team into the same thread with Nexa.",
+    highlight: false,
+    detailTitle: "Collaboration & teamwork",
+    detailParagraphs: [
+      "Start a group conversation with colleagues and Nexa together. Everyone sees the same answers, the same sources, and the same follow-up questions — no more forwarding screenshots.",
+      "Share a thread with a teammate or an entire business unit, hand off work in progress, and keep the full history in one place instead of scattered across inboxes.",
+      "Typing indicators and real-time updates keep group sessions feeling live, while role-based access still governs which documents each participant can see.",
+    ],
+  },
+  {
+    icon: ListChecks,
+    title: "Integrated Task Management",
+    desc: "Turn answers into action. Create, assign and track tasks without ever leaving the conversation.",
+    highlight: false,
+    detailTitle: "Integrated task management",
+    detailParagraphs: [
+      "When a conversation surfaces something that needs doing, capture it as a task on the spot — with owner, due date, and a link back to the thread that created it.",
+      "Nexa can draft the task list for you: ask it to break down a policy rollout or an audit finding into steps, then assign them to the right people.",
+      "Track status across your team so follow-ups from meetings, reviews, and compliance checks stop falling through the cracks.",
+    ],
+  },
   {
     icon: Search,
     title: "Smart Document Search & Retrieval",
