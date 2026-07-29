@@ -160,41 +160,50 @@ const FeaturesSection = () => {
         </motion.div>
 
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-8 md:gap-10">
-          {features.map((f, i) => (
-            <motion.div
-              key={i}
-              initial={{ opacity: 0, y: 30 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              transition={{ delay: i * 0.1 }}
-              className={`group relative p-6 sm:p-8 md:p-10 rounded-2xl sm:rounded-[2.5rem] md:rounded-[3rem] bg-white border shadow-[0_10px_40px_rgba(0,0,0,0.03)] hover:shadow-[0_30px_70px_rgba(0,0,0,0.12)] transition-all duration-700 hover:border-primary/30 ${
-                f.highlight ? "border-primary/40 ring-2 ring-primary/20" : "border-border/40"
-              }`}
-            >
-              <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-accent/5 opacity-0 group-hover:opacity-100 transition-opacity duration-700 rounded-2xl sm:rounded-[2.5rem] md:rounded-[3rem]" />
+          {features.map((f, i) => {
+            // A final row holding a single card looks stranded, so center it.
+            const isLastCard = i === features.length - 1;
+            const centerOnMd = isLastCard && features.length % 2 === 1;
+            const centerOnLg = isLastCard && features.length % 3 === 1;
 
-              <div className="relative z-10">
-                <div className="w-16 h-16 rounded-2xl bg-[#F8F9FF] shadow-sm flex items-center justify-center mb-8 group-hover:scale-110 group-hover:bg-primary group-hover:text-white group-hover:shadow-lg group-hover:shadow-primary/20 transition-all duration-500">
-                  <f.icon size={28} className="group-hover:text-white transition-colors text-primary" />
+            return (
+              <motion.div
+                key={i}
+                initial={{ opacity: 0, y: 30 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ delay: i * 0.1 }}
+                className={`group relative p-6 sm:p-8 md:p-10 rounded-2xl sm:rounded-[2.5rem] md:rounded-[3rem] bg-white border shadow-[0_10px_40px_rgba(0,0,0,0.03)] hover:shadow-[0_30px_70px_rgba(0,0,0,0.12)] transition-all duration-700 hover:border-primary/30 ${
+                  f.highlight ? "border-primary/40 ring-2 ring-primary/20" : "border-border/40"
+                } ${centerOnMd ? "md:col-span-2 md:max-w-[calc(50%-1.25rem)] md:mx-auto" : ""} ${
+                  centerOnLg ? "lg:col-span-1 lg:col-start-2 lg:max-w-none lg:mx-0" : ""
+                }`}
+              >
+                <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-accent/5 opacity-0 group-hover:opacity-100 transition-opacity duration-700 rounded-2xl sm:rounded-[2.5rem] md:rounded-[3rem]" />
+
+                <div className="relative z-10">
+                  <div className="w-16 h-16 rounded-2xl bg-[#F8F9FF] shadow-sm flex items-center justify-center mb-8 group-hover:scale-110 group-hover:bg-primary group-hover:text-white group-hover:shadow-lg group-hover:shadow-primary/20 transition-all duration-500">
+                    <f.icon size={28} className="group-hover:text-white transition-colors text-primary" />
+                  </div>
+                  <h3 className="font-bold text-lg sm:text-xl md:text-2xl mb-3 sm:mb-4 text-[#1A1A1A] font-sans group-hover:text-primary transition-colors">
+                    {f.title}
+                  </h3>
+                  <p className="text-[16px] text-muted-foreground leading-relaxed font-medium">{f.desc}</p>
+
+                  <button
+                    type="button"
+                    className="mt-8 flex items-center gap-2 text-primary font-bold text-sm cursor-pointer bg-transparent border-0 p-0 font-sans transition-transform duration-300 hover:gap-3"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setOpenIndex(i);
+                    }}
+                  >
+                    Learn more <ArrowRight size={16} />
+                  </button>
                 </div>
-                <h3 className="font-bold text-lg sm:text-xl md:text-2xl mb-3 sm:mb-4 text-[#1A1A1A] font-sans group-hover:text-primary transition-colors">
-                  {f.title}
-                </h3>
-                <p className="text-[16px] text-muted-foreground leading-relaxed font-medium">{f.desc}</p>
-
-                <button
-                  type="button"
-                  className="mt-8 flex items-center gap-2 text-primary font-bold text-sm cursor-pointer bg-transparent border-0 p-0 font-sans transition-transform duration-300 hover:gap-3"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setOpenIndex(i);
-                  }}
-                >
-                  Learn more <ArrowRight size={16} />
-                </button>
-              </div>
-            </motion.div>
-          ))}
+              </motion.div>
+            );
+          })}
         </div>
       </div>
 
