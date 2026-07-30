@@ -134,7 +134,7 @@ const features: Feature[] = [
     highlight: false,
     detailTitle: "Multiple LLM support",
     detailParagraphs: [
-      "Choose from a portfolio of models (e.g., Claude, GPT) to balance speed and capability.",
+      "Choose from a portfolio of models — Claude, GPT, Kimi, and DeepSeek — to balance speed, cost, and capability.",
       "Switch models per query or define fallback logic for robust responses.",
       "Future‑proof your AI stack as new models become available."
     ],
