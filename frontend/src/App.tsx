@@ -6,8 +6,7 @@ import {
   BiUserCircle, BiCog, BiMessageSquareAdd, BiSearch, BiImage, BiCodeBlock,
   BiBoltCircle, BiShareAlt, BiHelpCircle, BiChevronDown,
   BiUpArrowAlt, BiMessageRounded, BiPlus, BiDotsHorizontalRounded,
-  BiPaperclip, BiMicrophone, BiMoon, BiSun, BiCamera, BiCopy, BiCheck, BiLink, BiReply, BiSmile, BiX,
-  BiPlay, BiStopCircle
+  BiPaperclip, BiMicrophone, BiMoon, BiSun, BiCamera, BiCopy, BiCheck, BiLink, BiReply, BiSmile, BiX
 } from "react-icons/bi";
 import { MdPushPin, MdAutoAwesome, MdCreateNewFolder, MdFolder, MdFolderOpen } from "react-icons/md";
 import { FiLogOut, FiDownload, FiTrash2, FiExternalLink, FiFileText } from "react-icons/fi";
@@ -386,9 +385,6 @@ export const App: React.FC = () => {
   const [selectedModel, setSelectedModel] = useState<"gpt" | "claude" | "kimi" | "deepseek">("gpt");
   const [webcamOpen, setWebcamOpen] = useState(false);
   const [copiedMessageIndex, setCopiedMessageIndex] = useState<number | null>(null);
-  const [playingMessageIndex, setPlayingMessageIndex] = useState<number | null>(null);
-  const [loadingAudioIndex, setLoadingAudioIndex] = useState<number | null>(null);
-  const currentAudioRef = useRef<HTMLAudioElement | null>(null);
   const [softToastMessage, setSoftToastMessage] = useState<string | null>(null);
   const [profilePicPromptOpen, setProfilePicPromptOpen] = useState(false);
   const [profilePicUploading, setProfilePicUploading] = useState(false);
@@ -2196,51 +2192,6 @@ export const App: React.FC = () => {
     }
   };
 
-  // Reads an assistant message aloud via ElevenLabs (backend POST /api/v1/chat/tts).
-  // Clicking the same message's play button again stops it; clicking a different
-  // message's stops whatever was playing first, mirroring copyMessageText's per-index state.
-  const playMessageAudio = async (text: string, messageIndex: number) => {
-    if (playingMessageIndex === messageIndex) {
-      currentAudioRef.current?.pause();
-      currentAudioRef.current = null;
-      setPlayingMessageIndex(null);
-      return;
-    }
-    currentAudioRef.current?.pause();
-    currentAudioRef.current = null;
-    setPlayingMessageIndex(null);
-
-    const clean = (text || "")
-      .split("\n")
-      .filter((l) => !l.startsWith("📎"))
-      .join("\n")
-      .trim();
-    if (!clean) return;
-
-    setLoadingAudioIndex(messageIndex);
-    try {
-      const res = await axios.post(
-        "/api/v1/chat/tts",
-        { text: clean },
-        { headers: { Authorization: `Bearer ${token}` }, responseType: "blob" }
-      );
-      const audioUrl = URL.createObjectURL(res.data);
-      const audio = new Audio(audioUrl);
-      currentAudioRef.current = audio;
-      audio.onended = () => {
-        setPlayingMessageIndex((current) => (current === messageIndex ? null : current));
-        currentAudioRef.current = null;
-        URL.revokeObjectURL(audioUrl);
-      };
-      setPlayingMessageIndex(messageIndex);
-      await audio.play();
-    } catch {
-      showSoftToast("Couldn't play audio");
-    } finally {
-      setLoadingAudioIndex((current) => (current === messageIndex ? null : current));
-    }
-  };
-
   // Hard block: hourly/minute quota exhausted and not yet refreshed.
   const isRateLimited = !!rateLimit && rateLimit.remaining <= 0 && rateLimit.resetAt > Date.now();
 
@@ -3696,26 +3647,6 @@ export const App: React.FC = () => {
                               onClick={() => handleOpenShareMessageModal(currentConversation._id, idx)}
                             >
                               <BiShareAlt size={16} />
-                            </button>
-                          ) : null}
-                          {/* Read this response aloud via ElevenLabs. Assistant-only, same
-                              redaction guard as sharing — nothing to read on a redacted message. */}
-                          {m.role === "assistant" && !m.redacted ? (
-                            <button
-                              type="button"
-                              className={`message-copy-btn-v2${playingMessageIndex === idx ? " playing" : ""}`}
-                              title={playingMessageIndex === idx ? "Stop" : "Read aloud"}
-                              aria-label={playingMessageIndex === idx ? "Stop" : "Read aloud"}
-                              disabled={loadingAudioIndex === idx}
-                              onClick={() => void playMessageAudio(m.content, idx)}
-                            >
-                              {loadingAudioIndex === idx ? (
-                                <span className="message-tts-spinner-v2" />
-                              ) : playingMessageIndex === idx ? (
-                                <BiStopCircle size={16} />
-                              ) : (
-                                <BiPlay size={16} />
-                              )}
                             </button>
                           ) : null}
                         </div>
@@ -6097,28 +6028,9 @@ export const App: React.FC = () => {
           background: rgba(255, 255, 255, 0.08);
         }
 
-        .message-copy-btn-v2.playing,
         .message-copy-btn-v2:disabled {
           opacity: 1;
-        }
-
-        .message-copy-btn-v2:disabled {
           cursor: default;
-        }
-
-        .message-tts-spinner-v2 {
-          display: inline-block;
-          width: 14px;
-          height: 14px;
-          border: 2px solid currentColor;
-          border-top-color: transparent;
-          border-radius: 50%;
-          animation: messageTtsSpin 0.7s linear infinite;
-        }
-
-        @keyframes messageTtsSpin {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
         }
 
         .voice-mic-frame-v2 {
