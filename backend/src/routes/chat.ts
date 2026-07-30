@@ -3,6 +3,7 @@ import { authMiddleware, AuthenticatedRequest } from "../middleware/auth";
 import { getBusinessUnitLabel, getAllBusinessUnits } from "../config/businessUnits";
 import { parseModel, getStreamAIResponse, getGenerateAIResponse } from "../services/aiRouter";
 import { buildContextForQuery } from "../utils/contextBuilder";
+import { synthesizeSpeech } from "../services/elevenLabsService";
 
 import { RagDocument } from "../models/RagDocument";
 import { KnowledgeGroup } from "../models/KnowledgeGroup";
@@ -19,6 +20,23 @@ const TYPE_LABELS: Record<string, string> = {
   report: "Financial reports",
   other: "Other"
 };
+
+// Read a message aloud via ElevenLabs. Sits behind the same aiLimiter/aiDailyLimiter
+// applied to the whole /api/v1/chat prefix in index.ts, since it costs real money per call.
+chatRouter.post("/tts", authMiddleware, async (req: AuthenticatedRequest, res) => {
+  try {
+    const text = String(req.body?.text || "").trim();
+    if (!text) return res.status(400).json({ error: "text is required" });
+
+    const audio = await synthesizeSpeech(text);
+    res.setHeader("Content-Type", "audio/mpeg");
+    res.setHeader("Cache-Control", "no-store");
+    res.send(audio);
+  } catch (error) {
+    logger.error("TTS generation failed", { message: error instanceof Error ? error.message : String(error) });
+    res.status(502).json({ error: "Failed to generate speech" });
+  }
+});
 
 // Authenticated — suggestions must respect the same access control as retrieval, otherwise
 // a user removed from a restricted doc's group could still see that doc as a chip on their home screen.
