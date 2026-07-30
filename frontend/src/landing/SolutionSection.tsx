@@ -17,7 +17,7 @@ const pillars = [
   { 
     icon: BarChart3, 
     title: "Instant Insights", 
-    desc: "From financial summaries to compliance checks — get analytical answers in seconds from your data.",
+    desc: "From financial summaries to compliance checks, get analytical answers in seconds from your data.",
     color: "from-purple-500/20 to-pink-500/20"
   },
 ];

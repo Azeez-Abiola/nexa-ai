@@ -26,7 +26,7 @@ const DifferentiationSection = () => (
             Beyond a <span className="gradient-text">Generic Assistant</span>
           </h2>
           <p className="text-lg md:text-xl text-muted-foreground leading-relaxed mb-10 font-medium">
-            Nexa AI is purpose-built for enterprise knowledge — not a generic AI with your data bolted on. We focus on accuracy, security, and organizational relevance.
+            Nexa AI is purpose-built for enterprise knowledge, not a generic AI with your data bolted on. We focus on accuracy, security, and organizational relevance.
           </p>
           
           <button className="px-8 py-4 bg-primary text-white rounded-full font-bold hover:shadow-lg hover:shadow-primary/20 transition-all duration-300 transform hover:-translate-y-1">

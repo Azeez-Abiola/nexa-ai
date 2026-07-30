@@ -2,10 +2,10 @@ import { motion } from "framer-motion";
 import { Upload, ShieldCheck, MessageCircle, Sparkles } from "lucide-react";
 
 const steps = [
-  { icon: Upload, num: "01", title: "Upload & Approve", desc: "Privileged users upload documents — policies, reports, SOPs — and approve them for the knowledge base." },
+  { icon: Upload, num: "01", title: "Upload & Approve", desc: "Privileged users upload documents such as policies, reports, and SOPs, then approve them for the knowledge base." },
   { icon: ShieldCheck, num: "02", title: "Secure Access Control", desc: "Define who can access what. Role-based permissions ensure the right people see the right information." },
   { icon: MessageCircle, num: "03", title: "Ask Anything", desc: "Employees ask questions in natural language through an intuitive chat interface." },
-  { icon: Sparkles, num: "04", title: "Get Intelligent Answers", desc: "Nexa AI delivers precise, contextual answers with source references — in seconds." },
+  { icon: Sparkles, num: "04", title: "Get Intelligent Answers", desc: "Nexa AI delivers precise, contextual answers with source references in seconds." },
 ];
 
 const HowItWorksSection = () => (

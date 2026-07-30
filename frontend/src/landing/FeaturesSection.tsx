@@ -22,7 +22,7 @@ const features: Feature[] = [
   {
     icon: Layers,
     title: "Multi-Modal AI Engine",
-    desc: "Text, documents, images, spreadsheets and voice — one assistant that understands every format your team works in.",
+    desc: "Text, documents, images, spreadsheets, and voice. One assistant that understands every format your team works in.",
     highlight: false,
     detailTitle: "Multi-modal AI engine",
     detailParagraphs: [
@@ -34,11 +34,11 @@ const features: Feature[] = [
   {
     icon: Users,
     title: "Collaboration & Teamwork",
-    desc: "Group chats, shared conversations and live presence — bring the whole team into the same thread with Nexa.",
+    desc: "Group chats, shared conversations and live presence bring the whole team into the same thread with Nexa.",
     highlight: false,
     detailTitle: "Collaboration & teamwork",
     detailParagraphs: [
-      "Start a group conversation with colleagues and Nexa together. Everyone sees the same answers, the same sources, and the same follow-up questions — no more forwarding screenshots.",
+      "Start a group conversation with colleagues and Nexa together. Everyone sees the same answers, the same sources, and the same follow-up questions. No more forwarding screenshots.",
       "Share a thread with a teammate or an entire business unit, hand off work in progress, and keep the full history in one place instead of scattered across inboxes.",
       "Typing indicators and real-time updates keep group sessions feeling live, while role-based access still governs which documents each participant can see.",
     ],
@@ -50,7 +50,7 @@ const features: Feature[] = [
     highlight: false,
     detailTitle: "Integrated task management",
     detailParagraphs: [
-      "When a conversation surfaces something that needs doing, capture it as a task on the spot — with owner, due date, and a link back to the thread that created it.",
+      "When a conversation surfaces something that needs doing, capture it as a task on the spot, with owner, due date, and a link back to the thread that created it.",
       "Nexa can draft the task list for you: ask it to break down a policy rollout or an audit finding into steps, then assign them to the right people.",
       "Track status across your team so follow-ups from meetings, reviews, and compliance checks stop falling through the cracks.",
     ],
@@ -70,11 +70,11 @@ const features: Feature[] = [
   {
     icon: TrendingUp,
     title: "AI-Powered Analysis",
-    desc: "Analyze financial reports, spot trends, compare data across periods — all through natural conversation.",
+    desc: "Analyze financial reports, spot trends, compare data across periods, all through natural conversation.",
     highlight: false,
     detailTitle: "AI-powered analysis",
     detailParagraphs: [
-      "Finance and strategy teams can compare periods, highlight variances, and explore management commentary through guided conversation — always grounded in documents they are allowed to see.",
+      "Finance and strategy teams can compare periods, highlight variances, and explore management commentary through guided conversation, always grounded in documents they are allowed to see.",
       "Use Nexa to prep for reviews: ask for summaries of key risks, revenue drivers, or cost lines that moved, then drill into the underlying filings or internal packs.",
       "Outputs are assistive: critical numbers and decisions should still be validated in your official systems of record.",
     ],
@@ -106,12 +106,12 @@ const features: Feature[] = [
   {
     icon: BookOpen,
     title: "Continuous Learning Knowledge Base",
-    desc: "As new documents are approved, Nexa learns and evolves — always current, always accurate.",
+    desc: "As new documents are approved, Nexa learns and evolves. Always current, always accurate.",
     highlight: false,
     detailTitle: "Continuous learning knowledge base",
     detailParagraphs: [
       "When teams upload new versions or categories of documents, Nexa’s retrieval layer is updated so answers reflect what is approved for use.",
-      "Knowledge groups let you segment content by function — for example finance vs. plant operations — without duplicating infrastructure.",
+      "Knowledge groups let you segment content by function, for example finance vs. plant operations, without duplicating infrastructure.",
       "The result is a single assistant experience that stays relevant as your organization’s information estate grows.",
     ],
   },
@@ -122,7 +122,7 @@ const features: Feature[] = [
     highlight: false,
     detailTitle: "Insights & adoption analytics",
     detailParagraphs: [
-      "Administrators get a clear view of usage trends — top questions, most-cited documents, and active users by department — so adoption is measurable, not assumed.",
+      "Administrators get a clear view of usage trends: top questions, most-cited documents, and active users by department, so adoption is measurable, not assumed.",
       "Surface knowledge gaps quickly: when employees repeatedly ask questions Nexa cannot confidently answer, you know exactly which content to publish or update next.",
       "Tie usage back to ROI by understanding which teams benefit most and where to invest in expanding the knowledge base.",
     ],
@@ -134,7 +134,7 @@ const features: Feature[] = [
     highlight: false,
     detailTitle: "Multiple LLM support",
     detailParagraphs: [
-      "Choose from a portfolio of models — Claude, GPT, Kimi, and DeepSeek — to balance speed, cost, and capability.",
+      "Choose from a portfolio of models including Claude, GPT, Kimi, and DeepSeek to balance speed, cost, and capability.",
       "Switch models per query or define fallback logic for robust responses.",
       "Future‑proof your AI stack as new models become available."
     ],

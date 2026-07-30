@@ -25,7 +25,7 @@ const Footer = () => (
         <div className="space-y-6 md:col-span-2 lg:col-span-2 lg:space-y-8">
           <p className="max-w-md text-base leading-relaxed text-muted-foreground sm:text-lg">
             Nexa is an enterprise AI workspace that turns your approved internal documents, policies, and business
-            reports into instant, cited answers — with role-based access, knowledge groups, and audit trails aligned to
+            reports into instant, cited answers, with role-based access, knowledge groups, and audit trails aligned to
             how your organization works.
           </p>
           <div className="flex flex-wrap items-center gap-3">

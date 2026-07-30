@@ -4,7 +4,7 @@ import { AlertTriangle, Clock, FileSearch, Users } from "lucide-react";
 const problems = [
   { icon: FileSearch, title: "Scattered Information", desc: "Critical documents buried across shared drives, emails, and legacy systems nobody remembers." },
   { icon: Clock, title: "Slow Decisions", desc: "Hours wasted hunting for the right policy or report when decisions need to happen now." },
-  { icon: Users, title: "People Dependency", desc: "Institutional knowledge locked in the heads of a few people — what happens when they leave?" },
+  { icon: Users, title: "People Dependency", desc: "Institutional knowledge locked in the heads of a few people. What happens when they leave?" },
   { icon: AlertTriangle, title: "Compliance Risk", desc: "Outdated procedures surface. Audit trails are incomplete. The risk compounds silently." },
 ];
 

@@ -23,7 +23,7 @@ const UseCasesSection = () => (
           Built for Every <span className="gradient-text italic">Team</span>
         </h2>
         <p className="text-muted-foreground max-w-2xl mx-auto text-base sm:text-lg leading-relaxed px-1">
-          From the boardroom to the plant floor — Nexa speaks every department's language.
+          From the boardroom to the plant floor, Nexa speaks every department's language.
         </p>
       </motion.div>
 
