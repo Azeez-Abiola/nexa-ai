@@ -161,10 +161,11 @@ const FeaturesSection = () => {
 
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-8 md:gap-10">
           {features.map((f, i) => {
-            // A final row holding a single card looks stranded, so center it.
+            // A final row holding a single card looks stranded, so let it
+            // stretch across the full width of that row instead.
             const isLastCard = i === features.length - 1;
-            const centerOnMd = isLastCard && features.length % 2 === 1;
-            const centerOnLg = isLastCard && features.length % 3 === 1;
+            const spanFullMd = isLastCard && features.length % 2 === 1;
+            const spanFullLg = isLastCard && features.length % 3 === 1;
 
             return (
               <motion.div
@@ -175,9 +176,7 @@ const FeaturesSection = () => {
                 transition={{ delay: i * 0.1 }}
                 className={`group relative p-6 sm:p-8 md:p-10 rounded-2xl sm:rounded-[2.5rem] md:rounded-[3rem] bg-white border shadow-[0_10px_40px_rgba(0,0,0,0.03)] hover:shadow-[0_30px_70px_rgba(0,0,0,0.12)] transition-all duration-700 hover:border-primary/30 ${
                   f.highlight ? "border-primary/40 ring-2 ring-primary/20" : "border-border/40"
-                } ${centerOnMd ? "md:col-span-2 md:max-w-[calc(50%-1.25rem)] md:mx-auto" : ""} ${
-                  centerOnLg ? "lg:col-span-1 lg:col-start-2 lg:max-w-none lg:mx-0" : ""
-                }`}
+                } ${spanFullMd ? "md:col-span-2" : ""} ${spanFullLg ? "lg:col-span-3" : ""}`}
               >
                 <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-accent/5 opacity-0 group-hover:opacity-100 transition-opacity duration-700 rounded-2xl sm:rounded-[2.5rem] md:rounded-[3rem]" />
 
