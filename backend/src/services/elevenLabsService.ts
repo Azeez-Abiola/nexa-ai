@@ -43,7 +43,25 @@ export async function synthesizeSpeech(text: string): Promise<Buffer> {
     const errText = await res.text().catch(() => "");
     logger.error("[ElevenLabsService] TTS request failed", { status: res.status, body: errText.slice(0, 500) });
 
-    // 401 bad key, 402 plan/voice not permitted, 429 monthly character quota gone.
+    // The HTTP status alone is ambiguous: ElevenLabs returns 401 both for a bad key
+    // and for an account whose free tier it has suspended. Read detail.status so the
+    // message points at the actual problem instead of sending people to check the key.
+    let detail = "";
+    try {
+      detail = String(JSON.parse(errText)?.detail?.status || "");
+    } catch { /* non-JSON body, fall through to the status mapping */ }
+
+    if (detail === "detected_unusual_activity") {
+      throw new ElevenLabsError(
+        "ElevenLabs has suspended free-tier access for this account. A paid plan is required.",
+        503,
+        401
+      );
+    }
+    if (detail === "quota_exceeded") {
+      throw new ElevenLabsError("Monthly text-to-speech quota exhausted", 429, res.status);
+    }
+
     if (res.status === 401) throw new ElevenLabsError("Text-to-speech credentials are invalid", 503, 401);
     if (res.status === 402) throw new ElevenLabsError("This voice requires a paid ElevenLabs plan", 503, 402);
     if (res.status === 429) throw new ElevenLabsError("Monthly text-to-speech quota exhausted", 429, 429);
