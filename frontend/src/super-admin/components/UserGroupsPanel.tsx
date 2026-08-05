@@ -19,6 +19,16 @@ import {
   SheetTitle,
   SheetFooter
 } from "@/components/ui/sheet";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle
+} from "@/components/ui/alert-dialog";
 import { useToast } from "@/lib/use-toast";
 import { cn } from "@/lib/utils";
 
@@ -66,6 +76,8 @@ const UserGroupsPanel: React.FC<UserGroupsPanelProps> = ({
     [groups, memberGroupId]
   );
   const [userSearch, setUserSearch] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<UserGroupRow | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const { toast } = useToast();
 
   const fetchGroups = useCallback(async () => {
@@ -202,14 +214,16 @@ const UserGroupsPanel: React.FC<UserGroupsPanelProps> = ({
     }
   };
 
-  const handleDeleteGroup = async (id: string) => {
-    if (!confirm("Delete this user group? Policies may still reference it — update document assignments first.")) return;
+  const handleDeleteGroup = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
     try {
-      await axios.delete(`${API}/${id}`, {
+      await axios.delete(`${API}/${deleteTarget._id}`, {
         headers,
         params: useScopedBuQuery ? { businessUnit } : {}
       });
       toast({ title: "Deleted" });
+      setDeleteTarget(null);
       fetchGroups();
     } catch (err: any) {
       toast({
@@ -217,6 +231,8 @@ const UserGroupsPanel: React.FC<UserGroupsPanelProps> = ({
         title: "Error",
         description: err.response?.data?.error || "Could not delete."
       });
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -293,7 +309,7 @@ const UserGroupsPanel: React.FC<UserGroupsPanelProps> = ({
                       size="icon"
                       title="Delete group"
                       className="text-slate-400 hover:text-red-600"
-                      onClick={() => handleDeleteGroup(g._id)}
+                      onClick={() => setDeleteTarget(g)}
                     >
                       <Trash2 size={18} />
                     </Button>
@@ -388,6 +404,32 @@ const UserGroupsPanel: React.FC<UserGroupsPanelProps> = ({
           </div>
         </SheetContent>
       </Sheet>
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && !deleting && setDeleteTarget(null)}>
+        <AlertDialogContent className="rounded-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-xl font-black font-['Sen']">
+              Delete {deleteTarget?.name}?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-slate-500 font-medium leading-relaxed">
+              Policies may still reference this group. Update your document assignments first, otherwise those
+              documents are left pointing at a group that no longer exists.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="rounded-xl font-bold" disabled={deleting}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => { e.preventDefault(); handleDeleteGroup(); }}
+              disabled={deleting}
+              className="rounded-xl font-bold bg-red-600 hover:bg-red-700"
+            >
+              {deleting ? <Loader2 className="animate-spin" size={16} /> : "Delete group"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

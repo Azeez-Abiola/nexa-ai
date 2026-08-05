@@ -79,6 +79,8 @@ export const Admin: React.FC = () => {
     return (savedTheme as "dark" | "light") || "dark";
   });
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{ _id: string; title?: string } | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [showPrivacyPolicy, setShowPrivacyPolicy] = useState(false);
   const [isInitializing, setIsInitializing] = useState(!!localStorage.getItem("adminToken"));
   const [activeTab, setActiveTab] = useState<"knowledge" | "test-nexa">("knowledge");
@@ -265,14 +267,18 @@ export const Admin: React.FC = () => {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!window.confirm("Delete this document?")) return;
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setIsDeleting(true);
     try {
-      await adminAxios.delete(`/api/v1/admin/documents/${id}`);
+      await adminAxios.delete(`/api/v1/admin/documents/${deleteTarget._id}`);
+      setDeleteTarget(null);
       await loadDocuments();
     } catch (err) {
       console.error(err);
       setError("Failed to delete document.");
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -642,7 +648,7 @@ export const Admin: React.FC = () => {
                       <button
                         type="button"
                         className={styles.deleteBtn}
-                        onClick={() => handleDelete(document._id)}
+                        onClick={() => setDeleteTarget(document)}
                       >
                         Delete
                       </button>
@@ -688,6 +694,41 @@ export const Admin: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Reuses the logout confirmation styling so the admin panel keeps one
+          modal language instead of pulling in the shadcn dialog used elsewhere. */}
+      {deleteTarget && (
+        <div className={styles.logoutConfirmBackdrop}>
+          <div className={styles.logoutConfirmCard}>
+            <div className={styles.logoutConfirmIcon}>
+              <FiAlertTriangle size={32} />
+            </div>
+            <h3 className={styles.logoutConfirmTitle}>Delete this document?</h3>
+            <p className={styles.logoutConfirmMessage}>
+              {deleteTarget.title ? `"${deleteTarget.title}" ` : "This document "}
+              will be removed from the knowledge base and Nexa will stop citing it in answers. This cannot be undone.
+            </p>
+            <div className={styles.logoutConfirmActions}>
+              <button
+                type="button"
+                className={styles.logoutConfirmCancel}
+                onClick={() => setDeleteTarget(null)}
+                disabled={isDeleting}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className={styles.logoutConfirmConfirm}
+                onClick={confirmDelete}
+                disabled={isDeleting}
+              >
+                {isDeleting ? "Deleting..." : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Logout Confirmation Modal */}
       {showLogoutConfirm && (

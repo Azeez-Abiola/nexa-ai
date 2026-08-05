@@ -38,6 +38,16 @@ import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/lib/use-toast';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle
+} from '@/components/ui/alert-dialog';
 
 const EmailDomains: React.FC = () => {
   const { toast } = useToast();
@@ -47,6 +57,8 @@ const EmailDomains: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newMapping, setNewMapping] = useState({ domain: "", businessUnit: "" });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
     fetchDomains();
@@ -102,16 +114,25 @@ const EmailDomains: React.FC = () => {
     }
   };
 
-  const handleDeleteMapping = async (id: string) => {
-    if (!confirm('Are you certain you want to revoke this domain protocol?')) return;
+  const handleDeleteMapping = async () => {
+    if (!deleteTarget) return;
+    setIsDeleting(true);
     try {
       const token = localStorage.getItem('cpanelToken') || localStorage.getItem('nexa-token');
-      await axios.delete(`/api/v1/admin/auth/email-domains/${id}`, {
+      await axios.delete(`/api/v1/admin/auth/email-domains/${deleteTarget._id}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
+      setDeleteTarget(null);
       await fetchDomains();
     } catch (error) {
       console.error('Deletion failed', error);
+      toast({
+        variant: "destructive",
+        title: "Could not revoke domain",
+        description: "Please try again."
+      });
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -220,7 +241,7 @@ const EmailDomains: React.FC = () => {
                         variant="ghost"
                         size="icon"
                         className="w-10 h-10 rounded-xl text-slate-300 hover:text-red-600 hover:bg-white transition-all"
-                        onClick={() => handleDeleteMapping(d._id)}
+                        onClick={() => setDeleteTarget(d)}
                       >
                         <Trash2 size={18} />
                       </Button>
@@ -284,6 +305,32 @@ const EmailDomains: React.FC = () => {
           </div>
         </SheetContent>
       </Sheet>
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && !isDeleting && setDeleteTarget(null)}>
+        <AlertDialogContent className="rounded-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-xl font-black font-['Sen']">
+              Revoke {deleteTarget?.domain}?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-slate-500 font-medium leading-relaxed">
+              New sign-ups from this domain will no longer be routed to {deleteTarget?.businessUnit}. Existing
+              accounts keep the business unit they were already assigned.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="rounded-xl font-bold" disabled={isDeleting}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => { e.preventDefault(); handleDeleteMapping(); }}
+              disabled={isDeleting}
+              className="rounded-xl font-bold bg-red-600 hover:bg-red-700"
+            >
+              {isDeleting ? <Loader2 size={16} className="animate-spin" /> : 'Revoke domain'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
