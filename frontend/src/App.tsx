@@ -7,7 +7,7 @@ import {
   BiBoltCircle, BiShareAlt, BiHelpCircle, BiChevronDown,
   BiUpArrowAlt, BiMessageRounded, BiPlus, BiDotsHorizontalRounded,
   BiPaperclip, BiMicrophone, BiMoon, BiSun, BiCamera, BiCopy, BiCheck, BiLink, BiReply, BiSmile, BiX,
-  BiPlay, BiStopCircle
+  BiPlay
 } from "react-icons/bi";
 import { MdPushPin, MdAutoAwesome, MdCreateNewFolder, MdFolder, MdFolderOpen } from "react-icons/md";
 import { FiLogOut, FiDownload, FiTrash2, FiExternalLink, FiFileText } from "react-icons/fi";
@@ -3748,7 +3748,9 @@ export const App: React.FC = () => {
                           {m.role === "assistant" && !m.redacted ? (
                             <button
                               type="button"
-                              className={`message-copy-btn-v2${playingMessageIndex === idx ? " playing" : ""}`}
+                              className={`message-tts-btn-v2${playingMessageIndex === idx ? " playing" : ""}${
+                                loadingAudioIndex === idx ? " loading" : ""
+                              }`}
                               title={
                                 ttsRemaining === 0
                                   ? "Monthly read-aloud limit reached"
@@ -3763,7 +3765,7 @@ export const App: React.FC = () => {
                               {loadingAudioIndex === idx ? (
                                 <span className="message-tts-spinner-v2" />
                               ) : playingMessageIndex === idx ? (
-                                <BiStopCircle size={16} />
+                                <span className="message-tts-stop-v2" />
                               ) : (
                                 <BiPlay size={16} />
                               )}
@@ -6161,10 +6163,91 @@ export const App: React.FC = () => {
           cursor: default;
         }
 
+        /* Read-aloud is a primary affordance rather than a hover-only utility like
+           copy and share, so it stays visible and reads as a standard play control:
+           a filled circle with a solid triangle. */
+        .message-tts-btn-v2 {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 28px;
+          height: 28px;
+          padding: 0;
+          border: 1px solid rgba(15, 23, 42, 0.1);
+          border-radius: 999px;
+          cursor: pointer;
+          line-height: 0;
+          opacity: 1;
+          color: var(--brand-color, #ed0000);
+          background: rgba(15, 23, 42, 0.04);
+          background: color-mix(in srgb, var(--brand-color, #ed0000) 14%, transparent);
+          border-color: color-mix(in srgb, var(--brand-color, #ed0000) 38%, transparent);
+          transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+        }
+
+        /* The triangle's visual mass sits left of its bounding box, so nudge it to
+           look centred inside the circle. */
+        .message-tts-btn-v2 > svg {
+          transform: translateX(1px);
+        }
+
+        .message-tts-btn-v2.playing > svg {
+          transform: none;
+        }
+
+        .message-tts-btn-v2:hover:not(:disabled),
+        .message-tts-btn-v2.playing {
+          background: var(--brand-color, #ed0000);
+          border-color: var(--brand-color, #ed0000);
+          color: #fff;
+        }
+
+        .message-tts-btn-v2:hover:not(:disabled) {
+          transform: scale(1.06);
+        }
+
+        .message-tts-btn-v2:focus-visible {
+          outline: 2px solid var(--brand-color, #ed0000);
+          outline-offset: 2px;
+        }
+
+        /* Only the quota-exhausted case should look inert. A request in flight is
+           disabled too, but must stay legible so the spinner is visible. */
+        .message-tts-btn-v2:disabled {
+          cursor: not-allowed;
+          opacity: 0.45;
+          transform: none;
+        }
+
+        .message-tts-btn-v2.loading {
+          cursor: progress;
+          opacity: 1;
+        }
+
+        .dark-theme .message-tts-btn-v2 {
+          border-color: rgba(255, 255, 255, 0.16);
+          background: rgba(255, 255, 255, 0.08);
+        }
+
+        .dark-theme .message-tts-btn-v2:hover:not(:disabled),
+        .dark-theme .message-tts-btn-v2.playing {
+          background: var(--brand-color, #ed0000);
+          border-color: var(--brand-color, #ed0000);
+          color: #fff;
+        }
+
+        .message-tts-stop-v2 {
+          width: 9px;
+          height: 9px;
+          background: currentColor;
+          border-radius: 2px;
+          display: block;
+        }
+
         .message-tts-spinner-v2 {
           display: inline-block;
-          width: 14px;
-          height: 14px;
+          width: 12px;
+          height: 12px;
           border: 2px solid currentColor;
           border-top-color: transparent;
           border-radius: 50%;
