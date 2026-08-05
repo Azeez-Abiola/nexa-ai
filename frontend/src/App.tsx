@@ -6,7 +6,8 @@ import {
   BiUserCircle, BiCog, BiMessageSquareAdd, BiSearch, BiImage, BiCodeBlock,
   BiBoltCircle, BiShareAlt, BiHelpCircle, BiChevronDown,
   BiUpArrowAlt, BiMessageRounded, BiPlus, BiDotsHorizontalRounded,
-  BiPaperclip, BiMicrophone, BiMoon, BiSun, BiCamera, BiCopy, BiCheck, BiLink, BiReply, BiSmile, BiX
+  BiPaperclip, BiMicrophone, BiMoon, BiSun, BiCamera, BiCopy, BiCheck, BiLink, BiReply, BiSmile, BiX,
+  BiPlay, BiStopCircle
 } from "react-icons/bi";
 import { MdPushPin, MdAutoAwesome, MdCreateNewFolder, MdFolder, MdFolderOpen } from "react-icons/md";
 import { FiLogOut, FiDownload, FiTrash2, FiExternalLink, FiFileText } from "react-icons/fi";
@@ -385,6 +386,11 @@ export const App: React.FC = () => {
   const [selectedModel, setSelectedModel] = useState<"gpt" | "claude" | "kimi" | "deepseek">("gpt");
   const [webcamOpen, setWebcamOpen] = useState(false);
   const [copiedMessageIndex, setCopiedMessageIndex] = useState<number | null>(null);
+  const [playingMessageIndex, setPlayingMessageIndex] = useState<number | null>(null);
+  const [loadingAudioIndex, setLoadingAudioIndex] = useState<number | null>(null);
+  const [ttsRemaining, setTtsRemaining] = useState<number | null>(null);
+  const currentAudioRef = useRef<HTMLAudioElement | null>(null);
+  const currentAudioUrlRef = useRef<string | null>(null);
   const [softToastMessage, setSoftToastMessage] = useState<{ text: string; tone: "info" | "error" } | null>(null);
   const [profilePicPromptOpen, setProfilePicPromptOpen] = useState(false);
   const [profilePicUploading, setProfilePicUploading] = useState(false);
@@ -2116,8 +2122,28 @@ export const App: React.FC = () => {
     return () => {
       if (copyFeedbackTimerRef.current) clearTimeout(copyFeedbackTimerRef.current);
       if (softToastTimerRef.current) clearTimeout(softToastTimerRef.current);
+      currentAudioRef.current?.pause();
+      if (currentAudioUrlRef.current) URL.revokeObjectURL(currentAudioUrlRef.current);
     };
   }, []);
+
+  // The read-aloud allowance is shared across the whole organization, so check what is
+  // left up front and disable the control rather than letting people click into a failure.
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await axios.get("/api/v1/chat/tts/quota", {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (!cancelled) setTtsRemaining(data?.available ? Number(data.remaining ?? 0) : null);
+      } catch {
+        if (!cancelled) setTtsRemaining(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [token]);
 
   // Errors linger longer than confirmations, since the user usually has to act on them.
   const showSoftToast = (message: string, tone: "info" | "error" = "info") => {
@@ -2127,6 +2153,73 @@ export const App: React.FC = () => {
       setSoftToastMessage(null);
       softToastTimerRef.current = null;
     }, tone === "error" ? 4000 : 2200);
+  };
+
+  // Reads an assistant message aloud via ElevenLabs (backend POST /api/v1/chat/tts).
+  // Clicking the same message's button again stops it; clicking a different message's
+  // stops whatever was playing first, mirroring copyMessageText's per-index state.
+  const playMessageAudio = async (text: string, messageIndex: number) => {
+    const stopCurrent = () => {
+      currentAudioRef.current?.pause();
+      currentAudioRef.current = null;
+      if (currentAudioUrlRef.current) {
+        URL.revokeObjectURL(currentAudioUrlRef.current);
+        currentAudioUrlRef.current = null;
+      }
+      setPlayingMessageIndex(null);
+    };
+
+    if (playingMessageIndex === messageIndex) {
+      stopCurrent();
+      return;
+    }
+    stopCurrent();
+
+    // Attachment lines carry no meaning when spoken, so keep them out of the billed text.
+    const clean = (text || "")
+      .split("\n")
+      .filter((l) => !l.startsWith("📎"))
+      .join("\n")
+      .trim();
+    if (!clean) return;
+
+    setLoadingAudioIndex(messageIndex);
+    try {
+      const res = await axios.post(
+        "/api/v1/chat/tts",
+        { text: clean },
+        { headers: { Authorization: `Bearer ${token}` }, responseType: "blob" }
+      );
+      const audioUrl = URL.createObjectURL(res.data);
+      const audio = new Audio(audioUrl);
+      currentAudioRef.current = audio;
+      currentAudioUrlRef.current = audioUrl;
+      audio.onended = () => {
+        setPlayingMessageIndex((current) => (current === messageIndex ? null : current));
+        currentAudioRef.current = null;
+        URL.revokeObjectURL(audioUrl);
+        currentAudioUrlRef.current = null;
+      };
+      setPlayingMessageIndex(messageIndex);
+      await audio.play();
+      // Spend is charged per character of the text we sent, so track it down locally
+      // instead of re-querying the quota endpoint after every playback.
+      setTtsRemaining((current) => (current === null ? current : Math.max(0, current - clean.length)));
+    } catch (error) {
+      // The blob responseType means an error body arrives as a Blob, not JSON.
+      let message = "Couldn't play audio";
+      const data = axios.isAxiosError(error) ? error.response?.data : null;
+      if (data instanceof Blob) {
+        try {
+          const parsed = JSON.parse(await data.text());
+          if (parsed?.error) message = parsed.error;
+        } catch { /* keep the fallback */ }
+      }
+      if (axios.isAxiosError(error) && error.response?.status === 429) setTtsRemaining(0);
+      showSoftToast(message, "error");
+    } finally {
+      setLoadingAudioIndex((current) => (current === messageIndex ? null : current));
+    }
   };
 
   const dismissProfilePicPrompt = (reason: "later" | "done") => {
@@ -3648,6 +3741,32 @@ export const App: React.FC = () => {
                               onClick={() => handleOpenShareMessageModal(currentConversation._id, idx)}
                             >
                               <BiShareAlt size={16} />
+                            </button>
+                          ) : null}
+                          {/* Read this response aloud. Assistant-only, same redaction guard as
+                              sharing, and disabled once the shared monthly allowance is spent. */}
+                          {m.role === "assistant" && !m.redacted ? (
+                            <button
+                              type="button"
+                              className={`message-copy-btn-v2${playingMessageIndex === idx ? " playing" : ""}`}
+                              title={
+                                ttsRemaining === 0
+                                  ? "Monthly read-aloud limit reached"
+                                  : playingMessageIndex === idx
+                                    ? "Stop"
+                                    : "Read aloud"
+                              }
+                              aria-label={playingMessageIndex === idx ? "Stop" : "Read aloud"}
+                              disabled={loadingAudioIndex === idx || ttsRemaining === 0}
+                              onClick={() => void playMessageAudio(m.content, idx)}
+                            >
+                              {loadingAudioIndex === idx ? (
+                                <span className="message-tts-spinner-v2" />
+                              ) : playingMessageIndex === idx ? (
+                                <BiStopCircle size={16} />
+                              ) : (
+                                <BiPlay size={16} />
+                              )}
                             </button>
                           ) : null}
                         </div>
@@ -6033,9 +6152,28 @@ export const App: React.FC = () => {
           background: rgba(255, 255, 255, 0.08);
         }
 
+        .message-copy-btn-v2.playing,
         .message-copy-btn-v2:disabled {
           opacity: 1;
+        }
+
+        .message-copy-btn-v2:disabled {
           cursor: default;
+        }
+
+        .message-tts-spinner-v2 {
+          display: inline-block;
+          width: 14px;
+          height: 14px;
+          border: 2px solid currentColor;
+          border-top-color: transparent;
+          border-radius: 50%;
+          animation: messageTtsSpin 0.7s linear infinite;
+        }
+
+        @keyframes messageTtsSpin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
         }
 
         .voice-mic-frame-v2 {

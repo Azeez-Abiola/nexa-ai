@@ -3,7 +3,7 @@ import { authMiddleware, AuthenticatedRequest } from "../middleware/auth";
 import { getBusinessUnitLabel, getAllBusinessUnits } from "../config/businessUnits";
 import { parseModel, getStreamAIResponse, getGenerateAIResponse } from "../services/aiRouter";
 import { buildContextForQuery } from "../utils/contextBuilder";
-import { synthesizeSpeech } from "../services/elevenLabsService";
+import { synthesizeSpeech, getSpeechQuota, ElevenLabsError } from "../services/elevenLabsService";
 
 import { RagDocument } from "../models/RagDocument";
 import { KnowledgeGroup } from "../models/KnowledgeGroup";
@@ -34,8 +34,26 @@ chatRouter.post("/tts", authMiddleware, async (req: AuthenticatedRequest, res) =
     res.send(audio);
   } catch (error) {
     logger.error("TTS generation failed", { message: error instanceof Error ? error.message : String(error) });
+    // Quota and configuration problems are actionable, so pass the reason through
+    // rather than reporting every failure as a generic upstream error.
+    if (error instanceof ElevenLabsError) {
+      return res.status(error.status).json({ error: error.message });
+    }
     res.status(502).json({ error: "Failed to generate speech" });
   }
+});
+
+// Remaining text-to-speech allowance, so the client can disable the control before a
+// user clicks into a failure. Null when TTS isn't configured or the check itself fails.
+chatRouter.get("/tts/quota", authMiddleware, async (_req: AuthenticatedRequest, res) => {
+  const quota = await getSpeechQuota();
+  if (!quota) return res.json({ available: false });
+  res.json({
+    available: true,
+    used: quota.used,
+    limit: quota.limit,
+    remaining: Math.max(0, quota.limit - quota.used)
+  });
 });
 
 // Authenticated — suggestions must respect the same access control as retrieval, otherwise
