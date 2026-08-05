@@ -385,7 +385,7 @@ export const App: React.FC = () => {
   const [selectedModel, setSelectedModel] = useState<"gpt" | "claude" | "kimi" | "deepseek">("gpt");
   const [webcamOpen, setWebcamOpen] = useState(false);
   const [copiedMessageIndex, setCopiedMessageIndex] = useState<number | null>(null);
-  const [softToastMessage, setSoftToastMessage] = useState<string | null>(null);
+  const [softToastMessage, setSoftToastMessage] = useState<{ text: string; tone: "info" | "error" } | null>(null);
   const [profilePicPromptOpen, setProfilePicPromptOpen] = useState(false);
   const [profilePicUploading, setProfilePicUploading] = useState(false);
   const profilePicInputRef = useRef<HTMLInputElement>(null);
@@ -738,9 +738,9 @@ export const App: React.FC = () => {
     (async () => {
       try {
         const { data } = await axios.post('/api/v1/conversations/access-request/process', { token: token_, action });
-        alert(data.message || (action === 'accept' ? 'Access granted!' : 'Request declined.'));
+        showSoftToast(data.message || (action === 'accept' ? 'Access granted!' : 'Request declined.'));
       } catch (err: any) {
-        alert(err?.response?.data?.error || 'Could not process the request.');
+        showSoftToast(err?.response?.data?.error || 'Could not process the request.', "error");
       }
       navigate('/user-chat', { replace: true });
     })();
@@ -1144,7 +1144,7 @@ export const App: React.FC = () => {
       messageId = fresh?.messages?.[messageIdx]?.messageId;
     }
     if (!messageId) {
-      alert("Could not pin this message. Please try again.");
+      showSoftToast("Could not pin this message. Please try again.", "error");
       return;
     }
     try {
@@ -1166,7 +1166,7 @@ export const App: React.FC = () => {
       setMessageMenu(null);
       showSoftToast("Message pinned");
     } catch {
-      alert("Could not pin this message. Please try again.");
+      showSoftToast("Could not pin this message. Please try again.", "error");
     }
   }
 
@@ -1208,7 +1208,7 @@ export const App: React.FC = () => {
         // already pending — keep status
       } else {
         setAccessRequestStatus(prev => ({ ...prev, [convId]: 'idle' }));
-        alert(msg || "Could not send request. Please try again.");
+        showSoftToast(msg || "Could not send request. Please try again.", "error");
       }
     }
   }
@@ -1407,7 +1407,7 @@ export const App: React.FC = () => {
       message: m.content,
       createdAt: m.timestamp || new Date(),
     }));
-    await exportConversationToDocx(messages, generateExportFilename("docx"));
+    await exportConversationToDocx(messages, generateExportFilename("docx"), showSoftToast);
   };
 
   const handleExportAsPdf = async () => {
@@ -1418,7 +1418,7 @@ export const App: React.FC = () => {
       message: m.content,
       createdAt: m.timestamp || new Date(),
     }));
-    await exportConversationToPdf(messages, generateExportFilename("pdf"));
+    await exportConversationToPdf(messages, generateExportFilename("pdf"), showSoftToast);
   };
 
   const handleNewChat = async () => {
@@ -1490,7 +1490,7 @@ export const App: React.FC = () => {
       setContextMenuConversation(null);
     } catch (error) {
       console.error("Delete conversation error:", error);
-      alert("Failed to delete conversation");
+      showSoftToast("Failed to delete conversation", "error");
     }
   };
 
@@ -1530,7 +1530,7 @@ export const App: React.FC = () => {
       setRenamingTitle("");
     } catch (error) {
       console.error("Rename conversation error:", error);
-      alert("Failed to rename conversation");
+      showSoftToast("Failed to rename conversation", "error");
     }
   };
 
@@ -1633,7 +1633,7 @@ export const App: React.FC = () => {
       setShareModalConvId(null);
       setShareMessageIndex(null);
       setShareRecipientEmail("");
-      alert(
+      showSoftToast(
         wasMessage
           ? `AI response shared with ${data.sharedWithEmail || shareRecipientEmail.trim()}.`
           : `Conversation shared with ${data.sharedWithEmail || shareRecipientEmail.trim()}.`
@@ -1698,7 +1698,7 @@ export const App: React.FC = () => {
         const msg =
           err?.response?.data?.error ||
           "This share link is invalid or you don't have permission to view it.";
-        alert(msg);
+        showSoftToast(msg, "error");
         navigate("/user-chat", { replace: true });
       }
     })();
@@ -1759,7 +1759,7 @@ export const App: React.FC = () => {
       console.error("Edit message error:", error);
       // Rate-limit hits are surfaced by the RateLimitBanner, not an alert.
       if (!(axios.isAxiosError(error) && error.response?.status === 429)) {
-        alert("Failed to edit message");
+        showSoftToast("Failed to edit message", "error");
       }
     } finally {
       setEditModalOpen(false);
@@ -2006,7 +2006,7 @@ export const App: React.FC = () => {
   const startVoiceRecording = () => {
     const SpeechRecognitionAPI = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognitionAPI) {
-      alert("Speech recognition is not supported in this browser. Please use Chrome or Edge.");
+      showSoftToast("Speech recognition is not supported in this browser. Please use Chrome or Edge.", "error");
       return;
     }
 
@@ -2119,13 +2119,14 @@ export const App: React.FC = () => {
     };
   }, []);
 
-  const showSoftToast = (message: string) => {
+  // Errors linger longer than confirmations, since the user usually has to act on them.
+  const showSoftToast = (message: string, tone: "info" | "error" = "info") => {
     if (softToastTimerRef.current) clearTimeout(softToastTimerRef.current);
-    setSoftToastMessage(message);
+    setSoftToastMessage({ text: message, tone });
     softToastTimerRef.current = setTimeout(() => {
       setSoftToastMessage(null);
       softToastTimerRef.current = null;
-    }, 2200);
+    }, tone === "error" ? 4000 : 2200);
   };
 
   const dismissProfilePicPrompt = (reason: "later" | "done") => {
@@ -2245,7 +2246,7 @@ export const App: React.FC = () => {
           }
         }
       } catch {
-        alert("Could not send message. Please try again.");
+        showSoftToast("Could not send message. Please try again.", "error");
       }
       return;
     }
@@ -2338,7 +2339,7 @@ export const App: React.FC = () => {
         console.error("Send message error:", error);
         // Rate-limit hits (banner) and user-initiated stops (AbortError) are not errors.
         if (!(error as { rateLimited?: boolean })?.rateLimited && (error as Error)?.name !== "AbortError") {
-          alert("Error sending message. Please try again.");
+          showSoftToast("Error sending message. Please try again.", "error");
         }
       } finally {
         setLoading(false);
@@ -2374,7 +2375,7 @@ export const App: React.FC = () => {
       console.error("Send message error:", error);
       // Rate-limit hits (banner) and user-initiated stops (AbortError) are not errors.
       if (!(error as { rateLimited?: boolean })?.rateLimited && (error as Error)?.name !== "AbortError") {
-        alert("Error sending message. Please try again.");
+        showSoftToast("Error sending message. Please try again.", "error");
       }
     } finally {
       setLoading(false);
@@ -3883,8 +3884,12 @@ export const App: React.FC = () => {
           )}
 
           {softToastMessage && (
-            <div className="copy-toast-v2" role="status" aria-live="polite">
-              {softToastMessage}
+            <div
+              className={`copy-toast-v2${softToastMessage.tone === "error" ? " copy-toast-v2--error" : ""}`}
+              role={softToastMessage.tone === "error" ? "alert" : "status"}
+              aria-live={softToastMessage.tone === "error" ? "assertive" : "polite"}
+            >
+              {softToastMessage.text}
             </div>
           )}
         </main>
@@ -6542,6 +6547,19 @@ export const App: React.FC = () => {
           background: rgba(255, 255, 255, 0.92);
           color: #111827;
           box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+        }
+
+        /* Errors need to be distinguishable from the neutral confirmations,
+           and wrap since they can carry a server message of unknown length. */
+        .copy-toast-v2--error,
+        .dark-theme .copy-toast-v2--error {
+          background: #b42318;
+          color: #fff;
+          border-radius: 12px;
+          max-width: min(420px, calc(100vw - 32px));
+          text-align: center;
+          line-height: 1.45;
+          box-shadow: 0 8px 24px rgba(180, 35, 24, 0.28);
         }
 
         .dark-theme .group-pinned-bar--under-header {

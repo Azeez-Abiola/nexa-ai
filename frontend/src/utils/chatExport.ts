@@ -16,15 +16,26 @@ const formatDate = (date: Date | string): string => {
   return d.toLocaleString();
 };
 
+
+/**
+ * How these helpers report problems back to the user. The caller passes its own
+ * toast so exports never fall back to a native alert() dialog; if none is given
+ * we log rather than interrupt the page.
+ */
+export type ExportNotify = (message: string, tone?: "info" | "error") => void;
+
+const defaultNotify: ExportNotify = (message) => console.warn("[chatExport]", message);
+
 /**
  * Exports conversation messages to a DOCX file
  */
 export const exportConversationToDocx = async (
   messages: Message[],
-  filename: string = "chat-export.docx"
+  filename: string = "chat-export.docx",
+  notify: ExportNotify = defaultNotify
 ): Promise<void> => {
   if (messages.length === 0) {
-    alert("No messages to export");
+    notify("No messages to export", "error");
     return;
   }
 
@@ -175,7 +186,7 @@ export const exportConversationToDocx = async (
     URL.revokeObjectURL(url);
   } catch (error) {
     console.error("Error exporting to DOCX:", error);
-    alert("Failed to export conversation to DOCX");
+    notify("Failed to export conversation to DOCX", "error");
   }
 };
 
@@ -184,10 +195,11 @@ export const exportConversationToDocx = async (
  */
 export const exportConversationToPdf = async (
   messages: Message[],
-  filename: string = "chat-export.pdf"
+  filename: string = "chat-export.pdf",
+  notify: ExportNotify = defaultNotify
 ): Promise<void> => {
   if (messages.length === 0) {
-    alert("No messages to export");
+    notify("No messages to export", "error");
     return;
   }
 
@@ -274,7 +286,7 @@ export const exportConversationToPdf = async (
     doc.save(filename);
   } catch (error) {
     console.error("Error exporting to PDF:", error);
-    alert("Failed to export conversation to PDF");
+    notify("Failed to export conversation to PDF", "error");
   }
 };
 

@@ -37,8 +37,10 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
+import { useToast } from '@/lib/use-toast';
 
 const EmailDomains: React.FC = () => {
+  const { toast } = useToast();
   const [domains, setDomains] = useState<any[]>([]);
   const [businessUnits, setBusinessUnits] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -90,7 +92,11 @@ const EmailDomains: React.FC = () => {
       setNewMapping({ domain: "", businessUnit: "" });
     } catch (error) {
       console.error('Mapping creation failed', error);
-      alert('Failed to create mapping. Domain might already be assigned.');
+      toast({
+        variant: "destructive",
+        title: "Could not create mapping",
+        description: "The domain might already be assigned to a business unit."
+      });
     } finally {
       setIsSubmitting(false);
     }
