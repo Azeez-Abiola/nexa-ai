@@ -2215,7 +2215,11 @@ export const App: React.FC = () => {
           if (parsed?.error) message = parsed.error;
         } catch { /* keep the fallback */ }
       }
-      if (axios.isAxiosError(error) && error.response?.status === 429) setTtsRemaining(0);
+      // 429 is the quota, 503 covers an unconfigured or suspended account. Both persist
+      // for the rest of the session, so stop offering the control rather than letting
+      // every message repeat the same failure.
+      const status = axios.isAxiosError(error) ? error.response?.status : undefined;
+      if (status === 429 || status === 503) setTtsRemaining(0);
       showSoftToast(message, "error");
     } finally {
       setLoadingAudioIndex((current) => (current === messageIndex ? null : current));
