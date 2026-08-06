@@ -246,6 +246,86 @@ function buildUserChatHelpFaqs(orgDisplay: string) {
   ];
 }
 
+// --- Read-aloud word highlighting -------------------------------------------
+// ElevenLabs returns a timing per character of the text we sent. To line those up
+// with what is on screen we send the message's *rendered* text (not its markdown
+// source, which would otherwise be read out with its asterisks) and then wrap each
+// word on screen in a span, so offsets map one to one.
+
+type TtsAlignment = {
+  characters: string[];
+  character_start_times_seconds: number[];
+  character_end_times_seconds: number[];
+};
+
+type WrappedWords = {
+  spans: HTMLSpanElement[];
+  /** Character offset in the extracted text where each word starts and ends. */
+  starts: number[];
+  ends: number[];
+  text: string;
+};
+
+/** Replaces the text nodes under `root` with per-word spans, preserving whitespace. */
+function wrapWordsForTts(root: HTMLElement): WrappedWords {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const textNodes: Text[] = [];
+  let node: Node | null;
+  while ((node = walker.nextNode())) textNodes.push(node as Text);
+
+  const spans: HTMLSpanElement[] = [];
+  const starts: number[] = [];
+  const ends: number[] = [];
+  let offset = 0;
+  let text = "";
+
+  for (const tn of textNodes) {
+    const value = tn.nodeValue || "";
+    if (!value) continue;
+    const frag = document.createDocumentFragment();
+    // Keep the separators so the reconstructed text matches the DOM exactly.
+    for (const chunk of value.split(/(\s+)/)) {
+      if (!chunk) continue;
+      if (/^\s+$/.test(chunk)) {
+        frag.appendChild(document.createTextNode(chunk));
+      } else {
+        const span = document.createElement("span");
+        span.className = "tts-word";
+        span.textContent = chunk;
+        frag.appendChild(span);
+        spans.push(span);
+        starts.push(offset);
+        ends.push(offset + chunk.length);
+      }
+      offset += chunk.length;
+      text += chunk;
+    }
+    tn.parentNode?.replaceChild(frag, tn);
+  }
+
+  return { spans, starts, ends, text };
+}
+
+/** Puts the DOM back the way React rendered it. */
+function unwrapWordsForTts(root: HTMLElement) {
+  root.querySelectorAll("span.tts-word").forEach((span) => {
+    span.replaceWith(document.createTextNode(span.textContent || ""));
+  });
+  root.normalize();
+}
+
+/** Converts per-character timings into a start/end second for each wrapped word. */
+function buildWordTimings(alignment: TtsAlignment, starts: number[], ends: number[]) {
+  const st = alignment.character_start_times_seconds;
+  const en = alignment.character_end_times_seconds;
+  const last = st.length - 1;
+  return starts.map((s, i) => {
+    const a = Math.min(s, last);
+    const b = Math.min(Math.max(ends[i] - 1, 0), last);
+    return { start: st[a] ?? 0, end: en[b] ?? st[a] ?? 0 };
+  });
+}
+
 export const App: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
@@ -391,6 +471,8 @@ export const App: React.FC = () => {
   const [ttsRemaining, setTtsRemaining] = useState<number | null>(null);
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
   const currentAudioUrlRef = useRef<string | null>(null);
+  const rafRef = useRef<number | null>(null);
+  const highlightRootRef = useRef<HTMLElement | null>(null);
   const [softToastMessage, setSoftToastMessage] = useState<{ text: string; tone: "info" | "error" } | null>(null);
   const [profilePicPromptOpen, setProfilePicPromptOpen] = useState(false);
   const [profilePicUploading, setProfilePicUploading] = useState(false);
@@ -2123,6 +2205,8 @@ export const App: React.FC = () => {
       if (copyFeedbackTimerRef.current) clearTimeout(copyFeedbackTimerRef.current);
       if (softToastTimerRef.current) clearTimeout(softToastTimerRef.current);
       currentAudioRef.current?.pause();
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      if (highlightRootRef.current) unwrapWordsForTts(highlightRootRef.current);
       if (currentAudioUrlRef.current) URL.revokeObjectURL(currentAudioUrlRef.current);
     };
   }, []);
@@ -2155,11 +2239,23 @@ export const App: React.FC = () => {
     }, tone === "error" ? 4000 : 2200);
   };
 
-  // Reads an assistant message aloud via ElevenLabs (backend POST /api/v1/chat/tts).
+  // Removes the word spans we injected and puts the message back the way React
+  // rendered it, so nothing we did survives past playback.
+  const clearHighlight = () => {
+    if (highlightRootRef.current) {
+      unwrapWordsForTts(highlightRootRef.current);
+      highlightRootRef.current = null;
+    }
+  };
+
+  // Reads an assistant message aloud and highlights each word as it is spoken.
   // Clicking the same message's button again stops it; clicking a different message's
   // stops whatever was playing first, mirroring copyMessageText's per-index state.
-  const playMessageAudio = async (text: string, messageIndex: number) => {
+  const playMessageAudio = async (messageIndex: number) => {
     const stopCurrent = () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+      clearHighlight();
       currentAudioRef.current?.pause();
       currentAudioRef.current = null;
       if (currentAudioUrlRef.current) {
@@ -2175,46 +2271,90 @@ export const App: React.FC = () => {
     }
     stopCurrent();
 
-    // Attachment lines carry no meaning when spoken, so keep them out of the billed text.
-    const clean = (text || "")
-      .split("\n")
-      .filter((l) => !l.startsWith("📎"))
-      .join("\n")
-      .trim();
-    if (!clean) return;
+    // Read what is on screen rather than the markdown source, so the voice does not
+    // pronounce formatting and the timings line up with the words we highlight.
+    const body = document.querySelector<HTMLElement>(`[data-tts-body="${messageIndex}"]`);
+    if (!body) return;
+
+    // Wrap first and speak exactly the text the wrapper produced. Sending anything
+    // else (innerText, or a whitespace-normalised copy) shifts every character offset
+    // and the highlight drifts out of sync with the audio.
+    const wrapped = wrapWordsForTts(body);
+    highlightRootRef.current = body;
+    // The server trims before synthesising, so timings are relative to the trimmed
+    // string; shift our offsets by the same amount.
+    const leadingWs = wrapped.text.length - wrapped.text.trimStart().length;
+    const spoken = wrapped.text.trim();
+    if (!spoken) {
+      clearHighlight();
+      return;
+    }
 
     setLoadingAudioIndex(messageIndex);
     try {
-      const res = await axios.post(
+      const { data } = await axios.post<{ audio: string; alignment: TtsAlignment | null }>(
         "/api/v1/chat/tts",
-        { text: clean },
-        { headers: { Authorization: `Bearer ${token}` }, responseType: "blob" }
+        { text: spoken },
+        { headers: { Authorization: `Bearer ${token}` } }
       );
-      const audioUrl = URL.createObjectURL(res.data);
+
+      const bytes = Uint8Array.from(atob(data.audio), (c) => c.charCodeAt(0));
+      const audioUrl = URL.createObjectURL(new Blob([bytes], { type: "audio/mpeg" }));
       const audio = new Audio(audioUrl);
       currentAudioRef.current = audio;
       currentAudioUrlRef.current = audioUrl;
+
+      // Highlighting is a bonus: if alignment is missing the audio still plays.
+      if (data.alignment) {
+        const timings = buildWordTimings(
+          data.alignment,
+          wrapped.starts.map((n) => n - leadingWs),
+          wrapped.ends.map((n) => n - leadingWs)
+        );
+        let cursor = 0;
+        let lastActive = -1;
+
+        const tick = () => {
+          const t = audio.currentTime;
+          // Timings only move forward, so advance a pointer instead of re-scanning.
+          while (cursor < timings.length - 1 && t >= timings[cursor].end) cursor++;
+          const active = t >= timings[cursor].start - 0.02 ? cursor : -1;
+          if (active !== lastActive) {
+            if (lastActive >= 0) wrapped.spans[lastActive]?.classList.remove("tts-word--active");
+            if (active >= 0) {
+              const el = wrapped.spans[active];
+              el?.classList.add("tts-word--active");
+              el?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+            }
+            lastActive = active;
+          }
+          rafRef.current = requestAnimationFrame(tick);
+        };
+        rafRef.current = requestAnimationFrame(tick);
+      } else {
+        clearHighlight();
+      }
+
       audio.onended = () => {
+        if (rafRef.current) cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+        clearHighlight();
         setPlayingMessageIndex((current) => (current === messageIndex ? null : current));
         currentAudioRef.current = null;
         URL.revokeObjectURL(audioUrl);
         currentAudioUrlRef.current = null;
       };
+
       setPlayingMessageIndex(messageIndex);
       await audio.play();
       // Spend is charged per character of the text we sent, so track it down locally
       // instead of re-querying the quota endpoint after every playback.
-      setTtsRemaining((current) => (current === null ? current : Math.max(0, current - clean.length)));
+      setTtsRemaining((current) => (current === null ? current : Math.max(0, current - spoken.length)));
     } catch (error) {
-      // The blob responseType means an error body arrives as a Blob, not JSON.
+      clearHighlight();
       let message = "Couldn't play audio";
       const data = axios.isAxiosError(error) ? error.response?.data : null;
-      if (data instanceof Blob) {
-        try {
-          const parsed = JSON.parse(await data.text());
-          if (parsed?.error) message = parsed.error;
-        } catch { /* keep the fallback */ }
-      }
+      if (data && typeof data === "object" && "error" in data) message = String((data as any).error);
       // 429 is the quota, 503 covers an unconfigured or suspended account. Both persist
       // for the rest of the session, so stop offering the control rather than letting
       // every message repeat the same failure.
@@ -3629,7 +3769,7 @@ export const App: React.FC = () => {
                                 const textLines = (m.content || "").split("\n").filter(l => !l.startsWith("📎"));
                                 if (!textLines.some(l => l.trim())) return null;
                                 return (
-                                  <div>
+                                  <div data-tts-body={idx}>
                                     <MarkdownRenderer content={textLines.join("\n")} />
                                   </div>
                                 );
@@ -3764,7 +3904,7 @@ export const App: React.FC = () => {
                               }
                               aria-label={playingMessageIndex === idx ? "Stop" : "Read aloud"}
                               disabled={loadingAudioIndex === idx || ttsRemaining === 0}
-                              onClick={() => void playMessageAudio(m.content, idx)}
+                              onClick={() => void playMessageAudio(idx)}
                             >
                               {loadingAudioIndex === idx ? (
                                 <span className="message-tts-spinner-v2" />
@@ -6170,6 +6310,26 @@ export const App: React.FC = () => {
         /* Read-aloud is a primary affordance rather than a hover-only utility like
            copy and share, so it stays visible and reads as a standard play control:
            a filled circle with a solid triangle. */
+        /* Karaoke highlight: the word currently being spoken. Brand red with white
+           text, per the agreed treatment. Padding is symmetrical and the span stays
+           inline so wrapping and line height are unaffected as it moves. */
+        .tts-word--active {
+          background: var(--brand-color, #ed0000);
+          color: #fff;
+          border-radius: 4px;
+          box-decoration-break: clone;
+          -webkit-box-decoration-break: clone;
+          padding: 1px 2px;
+          margin: 0 -2px;
+        }
+
+        /* Links and bold text inside the spoken word must not keep their own colour,
+           or the white-on-red would be unreadable. */
+        .tts-word--active,
+        .tts-word--active * {
+          color: #fff !important;
+        }
+
         .message-tts-btn-v2 {
           display: inline-flex;
           align-items: center;

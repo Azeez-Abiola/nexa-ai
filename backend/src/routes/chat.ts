@@ -28,10 +28,9 @@ chatRouter.post("/tts", authMiddleware, async (req: AuthenticatedRequest, res) =
     const text = String(req.body?.text || "").trim();
     if (!text) return res.status(400).json({ error: "text is required" });
 
-    const audio = await synthesizeSpeech(text);
-    res.setHeader("Content-Type", "audio/mpeg");
+    const { audioBase64, alignment } = await synthesizeSpeech(text);
     res.setHeader("Cache-Control", "no-store");
-    res.send(audio);
+    res.json({ audio: audioBase64, alignment });
   } catch (error) {
     logger.error("TTS generation failed", { message: error instanceof Error ? error.message : String(error) });
     // Quota and configuration problems are actionable, so pass the reason through

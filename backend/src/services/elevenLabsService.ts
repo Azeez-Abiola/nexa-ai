@@ -17,7 +17,19 @@ export class ElevenLabsError extends Error {
   }
 }
 
-export async function synthesizeSpeech(text: string): Promise<Buffer> {
+/** Per-character playback timings, used to highlight words in step with the audio. */
+export type SpeechAlignment = {
+  characters: string[];
+  character_start_times_seconds: number[];
+  character_end_times_seconds: number[];
+};
+
+export type SpeechResult = {
+  audioBase64: string;
+  alignment: SpeechAlignment | null;
+};
+
+export async function synthesizeSpeech(text: string): Promise<SpeechResult> {
   const trimmed = text.trim().slice(0, MAX_CHARS);
   if (!trimmed) throw new ElevenLabsError("No text to synthesize", 400);
 
@@ -29,12 +41,15 @@ export async function synthesizeSpeech(text: string): Promise<Buffer> {
 
   const modelId = process.env.ELEVENLABS_MODEL_ID || "eleven_multilingual_v2";
 
-  const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+  // The /with-timestamps variant returns the audio base64-encoded alongside
+  // per-character timings. Costs the same, and the timings are what let the client
+  // highlight each word exactly as it is spoken instead of estimating from length.
+  const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/with-timestamps`, {
     method: "POST",
     headers: {
       "xi-api-key": process.env.ELEVENLABS_API_KEY || "",
       "content-type": "application/json",
-      accept: "audio/mpeg",
+      accept: "application/json",
     },
     body: JSON.stringify({ text: trimmed, model_id: modelId }),
   });
@@ -68,7 +83,19 @@ export async function synthesizeSpeech(text: string): Promise<Buffer> {
     throw new ElevenLabsError("Failed to generate speech", 502, res.status);
   }
 
-  return Buffer.from(await res.arrayBuffer());
+  const data = (await res.json()) as { audio_base64?: string; alignment?: SpeechAlignment };
+  if (!data.audio_base64) throw new ElevenLabsError("Failed to generate speech", 502, res.status);
+
+  // Alignment is best-effort: if it is missing or malformed the audio still plays,
+  // the client just falls back to plain playback without highlighting.
+  const a = data.alignment;
+  const usable =
+    a &&
+    Array.isArray(a.characters) &&
+    Array.isArray(a.character_start_times_seconds) &&
+    a.characters.length === a.character_start_times_seconds.length;
+
+  return { audioBase64: data.audio_base64, alignment: usable ? a! : null };
 }
 
 /** Remaining characters on the plan, so the UI can warn before the quota runs out. */
