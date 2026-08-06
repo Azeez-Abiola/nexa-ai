@@ -7,7 +7,7 @@ import {
   BiBoltCircle, BiShareAlt, BiHelpCircle, BiChevronDown,
   BiUpArrowAlt, BiMessageRounded, BiPlus, BiDotsHorizontalRounded,
   BiPaperclip, BiMicrophone, BiMoon, BiSun, BiCamera, BiCopy, BiCheck, BiLink, BiReply, BiSmile, BiX,
-  BiPlay
+  BiPlay, BiPause
 } from "react-icons/bi";
 import { MdPushPin, MdAutoAwesome, MdCreateNewFolder, MdFolder, MdFolderOpen } from "react-icons/md";
 import { FiLogOut, FiDownload, FiTrash2, FiExternalLink, FiFileText } from "react-icons/fi";
@@ -471,8 +471,17 @@ export const App: React.FC = () => {
   const [ttsRemaining, setTtsRemaining] = useState<number | null>(null);
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
   const currentAudioUrlRef = useRef<string | null>(null);
+  const [audioPaused, setAudioPaused] = useState(false);
   const rafRef = useRef<number | null>(null);
   const highlightRootRef = useRef<HTMLElement | null>(null);
+  // Kept in a ref so pausing can stop the loop and resuming can pick it back up
+  // mid-sentence, rather than re-synthesising (which would bill the text again).
+  const highlightLoopRef = useRef<{
+    spans: HTMLSpanElement[];
+    timings: { start: number; end: number }[];
+    cursor: number;
+    lastActive: number;
+  } | null>(null);
   const [softToastMessage, setSoftToastMessage] = useState<{ text: string; tone: "info" | "error" } | null>(null);
   const [profilePicPromptOpen, setProfilePicPromptOpen] = useState(false);
   const [profilePicUploading, setProfilePicUploading] = useState(false);
@@ -2239,6 +2248,33 @@ export const App: React.FC = () => {
     }, tone === "error" ? 4000 : 2200);
   };
 
+  // Drives the moving highlight from the audio clock. Safe to stop and restart:
+  // all progress lives in highlightLoopRef, not in the closure.
+  const startHighlightLoop = () => {
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    const tick = () => {
+      const audio = currentAudioRef.current;
+      const state = highlightLoopRef.current;
+      if (!audio || !state) return;
+      const { spans, timings } = state;
+      const t = audio.currentTime;
+      // Timings only move forward, so advance a pointer instead of re-scanning.
+      while (state.cursor < timings.length - 1 && t >= timings[state.cursor].end) state.cursor++;
+      const active = t >= timings[state.cursor].start - 0.02 ? state.cursor : -1;
+      if (active !== state.lastActive) {
+        if (state.lastActive >= 0) spans[state.lastActive]?.classList.remove("tts-word--active");
+        if (active >= 0) {
+          const el = spans[active];
+          el?.classList.add("tts-word--active");
+          el?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        }
+        state.lastActive = active;
+      }
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+  };
+
   // Removes the word spans we injected and puts the message back the way React
   // rendered it, so nothing we did survives past playback.
   const clearHighlight = () => {
@@ -2262,11 +2298,25 @@ export const App: React.FC = () => {
         URL.revokeObjectURL(currentAudioUrlRef.current);
         currentAudioUrlRef.current = null;
       }
+      highlightLoopRef.current = null;
       setPlayingMessageIndex(null);
+      setAudioPaused(false);
     };
 
-    if (playingMessageIndex === messageIndex) {
-      stopCurrent();
+    // Same message: toggle pause/resume. Resuming reuses the audio we already paid
+    // for, so it costs nothing and keeps the highlight exactly where it stopped.
+    const existing = currentAudioRef.current;
+    if (playingMessageIndex === messageIndex && existing) {
+      if (existing.paused) {
+        setAudioPaused(false);
+        startHighlightLoop();
+        void existing.play();
+      } else {
+        existing.pause();
+        if (rafRef.current) cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+        setAudioPaused(true);
+      }
       return;
     }
     stopCurrent();
@@ -2311,26 +2361,8 @@ export const App: React.FC = () => {
           wrapped.starts.map((n) => n - leadingWs),
           wrapped.ends.map((n) => n - leadingWs)
         );
-        let cursor = 0;
-        let lastActive = -1;
-
-        const tick = () => {
-          const t = audio.currentTime;
-          // Timings only move forward, so advance a pointer instead of re-scanning.
-          while (cursor < timings.length - 1 && t >= timings[cursor].end) cursor++;
-          const active = t >= timings[cursor].start - 0.02 ? cursor : -1;
-          if (active !== lastActive) {
-            if (lastActive >= 0) wrapped.spans[lastActive]?.classList.remove("tts-word--active");
-            if (active >= 0) {
-              const el = wrapped.spans[active];
-              el?.classList.add("tts-word--active");
-              el?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-            }
-            lastActive = active;
-          }
-          rafRef.current = requestAnimationFrame(tick);
-        };
-        rafRef.current = requestAnimationFrame(tick);
+        highlightLoopRef.current = { spans: wrapped.spans, timings, cursor: 0, lastActive: -1 };
+        startHighlightLoop();
       } else {
         clearHighlight();
       }
@@ -2339,6 +2371,8 @@ export const App: React.FC = () => {
         if (rafRef.current) cancelAnimationFrame(rafRef.current);
         rafRef.current = null;
         clearHighlight();
+        highlightLoopRef.current = null;
+        setAudioPaused(false);
         setPlayingMessageIndex((current) => (current === messageIndex ? null : current));
         currentAudioRef.current = null;
         URL.revokeObjectURL(audioUrl);
@@ -2346,6 +2380,7 @@ export const App: React.FC = () => {
       };
 
       setPlayingMessageIndex(messageIndex);
+      setAudioPaused(false);
       await audio.play();
       // Spend is charged per character of the text we sent, so track it down locally
       // instead of re-querying the quota endpoint after every playback.
@@ -3893,23 +3928,27 @@ export const App: React.FC = () => {
                             <button
                               type="button"
                               className={`message-tts-btn-v2${playingMessageIndex === idx ? " playing" : ""}${
-                                loadingAudioIndex === idx ? " loading" : ""
-                              }`}
+                                playingMessageIndex === idx && audioPaused ? " paused" : ""
+                              }${loadingAudioIndex === idx ? " loading" : ""}`}
                               title={
                                 ttsRemaining === 0
                                   ? "Monthly read-aloud limit reached"
-                                  : playingMessageIndex === idx
-                                    ? "Stop"
-                                    : "Read aloud"
+                                  : playingMessageIndex !== idx
+                                    ? "Read aloud"
+                                    : audioPaused
+                                      ? "Resume"
+                                      : "Pause"
                               }
-                              aria-label={playingMessageIndex === idx ? "Stop" : "Read aloud"}
+                              aria-label={
+                                playingMessageIndex !== idx ? "Read aloud" : audioPaused ? "Resume" : "Pause"
+                              }
                               disabled={loadingAudioIndex === idx || ttsRemaining === 0}
                               onClick={() => void playMessageAudio(idx)}
                             >
                               {loadingAudioIndex === idx ? (
                                 <span className="message-tts-spinner-v2" />
-                              ) : playingMessageIndex === idx ? (
-                                <span className="message-tts-stop-v2" />
+                              ) : playingMessageIndex === idx && !audioPaused ? (
+                                <BiPause size={16} />
                               ) : (
                                 <BiPlay size={16} />
                               )}
@@ -6355,7 +6394,7 @@ export const App: React.FC = () => {
           transform: translateX(1px);
         }
 
-        .message-tts-btn-v2.playing > svg {
+        .message-tts-btn-v2.playing:not(.paused) > svg {
           transform: none;
         }
 
@@ -6398,14 +6437,6 @@ export const App: React.FC = () => {
           background: var(--brand-color, #ed0000);
           border-color: var(--brand-color, #ed0000);
           color: #fff;
-        }
-
-        .message-tts-stop-v2 {
-          width: 9px;
-          height: 9px;
-          background: currentColor;
-          border-radius: 2px;
-          display: block;
         }
 
         .message-tts-spinner-v2 {
