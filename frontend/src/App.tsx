@@ -74,6 +74,8 @@ interface Message {
   timestamp: Date;
   /** Set on shared-with-me view when the recipient lacks access to the cited sources. */
   redacted?: boolean;
+  /** Marks where a voice call ended. Rendered as a divider in the transcript, not a bubble. */
+  callLog?: { durationSeconds: number };
 }
 
 interface Conversation {
@@ -181,6 +183,15 @@ function formatCollabTypingLabel(typers: { name: string }[]): string {
   if (names.length === 1) return `${names[0]} is typing…`;
   if (names.length === 2) return `${names[0]} and ${names[1]} are typing…`;
   return `${names[0]} and ${names.length - 1} others are typing…`;
+}
+
+/** Call length for the transcript divider, in the units a person would say it in. */
+function formatCallDuration(totalSeconds: number): string {
+  const seconds = Math.max(0, Math.round(totalSeconds));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ${String(seconds % 60).padStart(2, "0")}s`;
+  return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, "0")}m`;
 }
 
 function messageSnippet(content: string, max = 120): string {
@@ -493,6 +504,8 @@ export const App: React.FC = () => {
   // Voice call mode — a continuous spoken conversation, separate from the dictation mic above.
   const [voiceCallOpen, setVoiceCallOpen] = useState(false);
   const [voiceCallError, setVoiceCallError] = useState<string | null>(null);
+  /** Wall-clock start of the current call, used to stamp its length into the transcript. */
+  const voiceCallStartedAtRef = useRef<number | null>(null);
   const [selectedAvatar, setSelectedAvatar] = useState<string>(() => localStorage.getItem("nexa-avatar") || "");
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
   const recognitionRef = useRef<any>(null);
@@ -2207,6 +2220,35 @@ export const App: React.FC = () => {
     onError: handleVoiceCallError,
   });
 
+  /**
+   * Hang up and leave a marker in the transcript. The conversation id is read at hang-up
+   * rather than at dial time because a call started from an empty chat creates the
+   * conversation on its first turn, so there is nothing to attach a log to until then.
+   */
+  const handleEndVoiceCall = useCallback(async () => {
+    setVoiceCallOpen(false);
+    const startedAt = voiceCallStartedAtRef.current;
+    voiceCallStartedAtRef.current = null;
+
+    const conversationId = currentConversation?._id;
+    // A call that never got as far as a single turn has no conversation and nothing worth
+    // recording, so drop it rather than leaving a "0s call" in an unrelated chat.
+    if (!token || !conversationId || !startedAt) return;
+
+    const durationSeconds = Math.round((Date.now() - startedAt) / 1000);
+    try {
+      const { data } = await axios.post<{ conversation: Conversation }>(
+        `/api/v1/conversations/${conversationId}/call-log`,
+        { durationSeconds },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setCurrentConversation((prev) => (prev && prev._id === conversationId ? { ...prev, ...data.conversation } : prev));
+    } catch {
+      // The call itself already happened and its turns are saved; failing to write the
+      // marker is cosmetic, so it is not worth interrupting the user over.
+    }
+  }, [currentConversation?._id, token]);
+
   const handleFileAttach = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     const resetInputs = () => {
@@ -3388,7 +3430,11 @@ export const App: React.FC = () => {
                   type="button"
                   className="header-action-btn-v2"
                   aria-label="Start a voice call with Nexa"
-                  onClick={() => { setVoiceCallError(null); setVoiceCallOpen(true); }}
+                  onClick={() => {
+                    setVoiceCallError(null);
+                    voiceCallStartedAtRef.current = Date.now();
+                    setVoiceCallOpen(true);
+                  }}
                 >
                   <BiPhoneCall size={18} />
                   <span className="header-action-label-v2">Voice</span>
@@ -3759,6 +3805,21 @@ export const App: React.FC = () => {
                       ? (isOwn ? (user?.profilePicture || undefined) : avatarById.get(String(m.senderId)))
                       : undefined;
                     const msgId = m.messageId || `idx-${idx}`;
+
+                    // A call boundary is a timeline marker, not something anyone said,
+                    // so it renders as a centred divider instead of a chat bubble.
+                    if (m.callLog) {
+                      return (
+                        <div key={msgId} className="call-log-divider">
+                          <span className="call-log-pill">
+                            <BiPhoneCall size={14} />
+                            Voice call ended
+                            <span className="call-log-duration">{formatCallDuration(m.callLog.durationSeconds)}</span>
+                          </span>
+                        </div>
+                      );
+                    }
+
                     return (
                     <div key={msgId} className={`message-row-v2 ${m.role}${m.redacted ? ' redacted' : ''}`}>
                       {m.role === 'assistant' && (
@@ -4296,7 +4357,7 @@ export const App: React.FC = () => {
             error={voiceCallError}
             getLevel={voiceCall.getLevel}
             onToggleMute={voiceCall.toggleMute}
-            onEnd={() => setVoiceCallOpen(false)}
+            onEnd={() => void handleEndVoiceCall()}
           />
         )}
 
@@ -6332,6 +6393,41 @@ export const App: React.FC = () => {
           max-width: 100%;
           width: 100%;
           animation: messageIn 0.3s ease-out forwards;
+        }
+
+        /* Voice call marker — deliberately not a bubble, since nobody said it. */
+        .call-log-divider {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 12px;
+          width: 100%;
+        }
+
+        .call-log-divider::before,
+        .call-log-divider::after {
+          content: "";
+          flex: 1;
+          height: 1px;
+          background: var(--border-color, rgba(0, 0, 0, 0.08));
+        }
+
+        .call-log-pill {
+          display: inline-flex;
+          align-items: center;
+          gap: 7px;
+          padding: 5px 13px;
+          border-radius: 999px;
+          border: 1px solid var(--border-color, rgba(0, 0, 0, 0.08));
+          background: var(--card-bg, rgba(0, 0, 0, 0.02));
+          color: var(--text-muted, #6b7280);
+          font-size: 12px;
+          white-space: nowrap;
+        }
+
+        .call-log-duration {
+          font-variant-numeric: tabular-nums;
+          opacity: 0.75;
         }
 
         .message-row-v2.user {

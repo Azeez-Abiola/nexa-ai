@@ -912,6 +912,62 @@ conversationRouter.post("/:id/note", authMiddleware, async (req: AuthenticatedRe
   }
 });
 
+/**
+ * POST /api/v1/conversations/:id/call-log
+ *
+ * Records that a voice call happened and how long it lasted, so the transcript shows
+ * where the conversation moved to speech and back. Written as a message rather than
+ * conversation metadata because a single chat can contain several calls, and each one
+ * belongs at its own point in the timeline.
+ */
+conversationRouter.post("/:id/call-log", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const raw = Number(req.body?.durationSeconds);
+    if (!Number.isFinite(raw) || raw < 0) {
+      return res.status(400).json({ error: "durationSeconds must be a non-negative number" });
+    }
+    // Cap at 24h so a client whose clock jumped cannot write an absurd duration.
+    const durationSeconds = Math.min(Math.round(raw), 86_400);
+
+    const userConvs = await Conversation.findOne({ userId: req.userId });
+    if (!userConvs) return res.status(404).json({ error: "Conversation not found" });
+
+    const group = userConvs.conversationGroups.find((g) => g._id.toString() === id);
+    if (!group) return res.status(404).json({ error: "Conversation not found" });
+
+    // content is required and encrypted by the schema, so store readable text here as a
+    // fallback for any client that has not been taught to render the divider.
+    const callMsg: ChatMessage = {
+      role: "assistant",
+      content: "Voice call ended",
+      timestamp: new Date(),
+      messageId: randomUUID(),
+      callLog: { durationSeconds },
+    };
+    group.messages.push(callMsg as any);
+    group.updatedAt = new Date();
+    await userConvs.save();
+    syncToCollaborators(id, [callMsg]);
+
+    res.json({
+      conversation: {
+        _id: group._id,
+        title: group.title,
+        messages: serializeMessages(group.messages as any[]),
+        pinnedMessage: (group as any).pinnedMessage ?? undefined,
+        createdAt: group.createdAt,
+        updatedAt: group.updatedAt,
+      }
+    });
+  } catch (error) {
+    logger.error("Failed to record call log", {
+      message: error instanceof Error ? error.message : String(error),
+    });
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 /** POST /api/v1/conversations/:id/messages/:messageId/reactions */
 conversationRouter.post(
   "/:id/messages/:messageId/reactions",
