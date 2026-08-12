@@ -7,8 +7,10 @@ import {
   BiBoltCircle, BiShareAlt, BiHelpCircle, BiChevronDown,
   BiUpArrowAlt, BiMessageRounded, BiPlus, BiDotsHorizontalRounded,
   BiPaperclip, BiMicrophone, BiMoon, BiSun, BiCamera, BiCopy, BiCheck, BiLink, BiReply, BiSmile, BiX,
-  BiPlay, BiPause
+  BiPlay, BiPause, BiPhoneCall
 } from "react-icons/bi";
+import VoiceCallOverlay from "./voice/VoiceCallOverlay";
+import { useVoiceCall } from "./voice/useVoiceCall";
 import { MdPushPin, MdAutoAwesome, MdCreateNewFolder, MdFolder, MdFolderOpen } from "react-icons/md";
 import { FiLogOut, FiDownload, FiTrash2, FiExternalLink, FiFileText } from "react-icons/fi";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -488,6 +490,9 @@ export const App: React.FC = () => {
   const profilePicInputRef = useRef<HTMLInputElement>(null);
   const [imageLightboxUrl, setImageLightboxUrl] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
+  // Voice call mode — a continuous spoken conversation, separate from the dictation mic above.
+  const [voiceCallOpen, setVoiceCallOpen] = useState(false);
+  const [voiceCallError, setVoiceCallError] = useState<string | null>(null);
   const [selectedAvatar, setSelectedAvatar] = useState<string>(() => localStorage.getItem("nexa-avatar") || "");
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
   const recognitionRef = useRef<any>(null);
@@ -1889,7 +1894,14 @@ export const App: React.FC = () => {
   };
 
   // Helper function to stream AI response
-  const streamResponse = async (conversationId: string, userContent: string, files?: File[], model: "gpt" | "claude" | "kimi" | "deepseek" = "gpt"): Promise<Conversation | null> => {
+  const streamResponse = async (
+    conversationId: string,
+    userContent: string,
+    files?: File[],
+    model: "gpt" | "claude" | "kimi" | "deepseek" = "gpt",
+    // Voice turns get a spoken-style system prompt server-side: no markdown, short answers.
+    options: { voice?: boolean } = {}
+  ): Promise<Conversation | null> => {
     const apiBase = import.meta.env.VITE_API_URL || '';
     const hasFiles = files && files.length > 0;
 
@@ -1902,11 +1914,12 @@ export const App: React.FC = () => {
       const formData = new FormData();
       formData.append("message", userContent);
       formData.append("model", model);
+      if (options.voice) formData.append("voice", "true");
       files.forEach((f) => formData.append("files", f));
       body = formData;
     } else {
       headers["Content-Type"] = "application/json";
-      body = JSON.stringify({ content: userContent, model });
+      body = JSON.stringify({ content: userContent, model, ...(options.voice ? { voice: true } : {}) });
     }
 
     // Fresh AbortController for this generation so the user can stop it.
@@ -2136,6 +2149,63 @@ export const App: React.FC = () => {
     recognition.start();
     recognitionRef.current = recognition;
   };
+
+  /**
+   * One turn of a voice call: the spoken transcript goes through the same conversation
+   * pipeline as a typed message, so a call is saved, titled, and searchable exactly like
+   * a chat, and it is still there to scroll through after you hang up.
+   */
+  const handleVoiceTurn = useCallback(async (spokenText: string): Promise<string> => {
+    if (!token) return "";
+
+    let conversationId = currentConversation?._id;
+    if (!conversationId) {
+      const { data } = await axios.post<{ conversation: Conversation }>(
+        "/api/v1/conversations", {}, { headers: { Authorization: `Bearer ${token}` } }
+      );
+      conversationId = data.conversation._id;
+      setCurrentConversation(data.conversation);
+      setConversations((prev) => [data.conversation, ...prev]);
+    }
+
+    const finalConversation = await streamResponse(
+      conversationId,
+      spokenText,
+      undefined,
+      selectedModel,
+      { voice: true }
+    );
+    if (finalConversation) setCurrentConversation(finalConversation);
+
+    // streamResponse reports the saved conversation, not the reply text, so read the
+    // answer back off the end of it rather than duplicating the stream parsing here.
+    const messages = finalConversation?.messages || [];
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === "assistant") return messages[i].content || "";
+    }
+    return "";
+    // streamResponse is redefined every render but always closes over current state,
+    // so it is deliberately not a dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, currentConversation?._id, selectedModel]);
+
+  const handleVoiceCallError = useCallback((message: string, fatal: boolean) => {
+    setVoiceCallError(message);
+    // A fatal error means the call cannot continue (no mic, no TTS), so close the
+    // overlay and say why in the normal toast rather than leaving a dead call screen up.
+    if (fatal) {
+      setVoiceCallOpen(false);
+      showSoftToast(message, "error");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const voiceCall = useVoiceCall({
+    active: voiceCallOpen,
+    token,
+    onTurn: handleVoiceTurn,
+    onError: handleVoiceCallError,
+  });
 
   const handleFileAttach = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
@@ -3311,6 +3381,19 @@ export const App: React.FC = () => {
               ) : null}
             </div>
             <div className="header-actions-v2">
+              {/* Switch from typing to talking. Hidden on a shared-with-me conversation for
+                  the same reason the input is: it is read-only, so there is no turn to take. */}
+              {!currentConversation?.isShared ? (
+                <button
+                  type="button"
+                  className="header-action-btn-v2"
+                  aria-label="Start a voice call with Nexa"
+                  onClick={() => { setVoiceCallError(null); setVoiceCallOpen(true); }}
+                >
+                  <BiPhoneCall size={18} />
+                  <span className="header-action-label-v2">Voice</span>
+                </button>
+              ) : null}
               {/* Share this conversation — header-level entry point. Only shown when there's
                   a real conversation loaded and it's the user's own (not a shared-with-me view). */}
               {currentConversation?._id && !currentConversation?.isShared && (currentConversation.messages?.length ?? 0) > 0 ? (
@@ -4203,6 +4286,19 @@ export const App: React.FC = () => {
           onClose={() => setWebcamOpen(false)}
           onCapture={(file) => setAttachedFiles((prev) => [...prev, file])}
         />
+
+        {voiceCallOpen && (
+          <VoiceCallOverlay
+            status={voiceCall.status}
+            muted={voiceCall.muted}
+            transcript={voiceCall.transcript}
+            reply={voiceCall.reply}
+            error={voiceCallError}
+            getLevel={voiceCall.getLevel}
+            onToggleMute={voiceCall.toggleMute}
+            onEnd={() => setVoiceCallOpen(false)}
+          />
+        )}
 
         {imageLightboxUrl && (
           <div

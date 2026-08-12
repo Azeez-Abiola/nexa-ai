@@ -1,0 +1,155 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: clamp(1.5rem, 5vh, 3rem) 1.25rem;
+  background: radial-gradient(circle at 50% 38%, #2a1414 0%, #150c0c 45%, #0b0909 100%);
+  color: #f5f5f5;
+  animation: overlayIn 220ms ease-out;
+}
+
+@keyframes overlayIn {
+  from { opacity: 0; transform: scale(0.98); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  text-align: center;
+}
+
+.title {
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.status {
+  font-size: 0.85rem;
+  color: rgba(245, 245, 245, 0.62);
+  min-height: 1.2em;
+}
+
+.stage {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2rem;
+  width: 100%;
+  min-height: 0;
+}
+
+.visualizer {
+  width: min(560px, 88vw);
+  height: min(200px, 26vh);
+  display: block;
+}
+
+/* Captions are secondary to the visualiser, so they get a fixed slot and never reflow it. */
+.captions {
+  width: min(620px, 90vw);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  text-align: center;
+  min-height: 5.5rem;
+}
+
+.you,
+.nexa {
+  margin: 0;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.you {
+  font-size: 0.9rem;
+  color: rgba(245, 245, 245, 0.55);
+}
+
+.nexa {
+  font-size: clamp(1rem, 2.4vw, 1.2rem);
+  color: #f5f5f5;
+  /* Long replies scroll rather than pushing the visualiser off screen. */
+  max-height: 8rem;
+  overflow-y: auto;
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+}
+
+.controlBtn {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  background: none;
+  border: none;
+  padding: 0;
+  color: rgba(245, 245, 245, 0.75);
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.controlIcon {
+  display: grid;
+  place-items: center;
+  width: 3.5rem;
+  height: 3.5rem;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  transition: background 150ms ease, transform 150ms ease;
+}
+
+.controlBtn:hover .controlIcon {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.controlBtn:active .controlIcon {
+  transform: scale(0.94);
+}
+
+.controlBtn:focus-visible .controlIcon {
+  outline: 2px solid #fff;
+  outline-offset: 3px;
+}
+
+.mutedIcon {
+  background: rgba(255, 255, 255, 0.9);
+  color: #1a1a1a;
+  border-color: transparent;
+}
+
+.endIcon {
+  background: var(--brand-color, #ed0000);
+  border-color: transparent;
+  color: #fff;
+}
+
+.endBtn:hover .endIcon {
+  background: #c50000;
+}
+
+.error {
+  color: #ff9d9d;
+  font-size: 0.85rem;
+  text-align: center;
+  margin: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .overlay { animation: none; }
+}

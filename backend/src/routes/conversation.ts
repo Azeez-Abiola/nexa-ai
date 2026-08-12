@@ -397,9 +397,25 @@ async function buildKbInventoryNote(
  * of a small number of byte-stable values and stays cacheable across turns.
  * Keep it that way when adding sections.
  */
+/**
+ * Spoken replies are a different register, not a different assistant. Markdown that reads
+ * well on screen turns into "asterisk asterisk Revenue asterisk asterisk, colon" out loud,
+ * and a screen-length answer is unbearable when you cannot skim it. Appended to the system
+ * prompt rather than the turn context because every turn in a call needs it, so it belongs
+ * in the cached prefix instead of invalidating it on each turn.
+ */
+const VOICE_MODE_RULES = `VOICE MODE — you are being spoken aloud, not read:
+1. Never use markdown. No asterisks, headings, bullet points, numbered lists, tables, code blocks, or emoji/badges. They are read out literally and sound like noise.
+2. Answer in short, natural spoken sentences. Two or three sentences is the target, and rarely more than five.
+3. When the full answer is long, say the headline first and offer the detail, e.g. "There are four main steps, want me to walk through them?" Do not recite the whole thing unprompted.
+4. Write numbers, dates, and currency the way a person says them: "about two point four million naira", not "₦2,400,000".
+5. Do not mention file names, links, or citations unless asked. Say where it came from in words, like "that's from the leave policy".
+6. This is a live conversation, so it is fine to be brief, ask a clarifying question, and skip pleasantries and sign-offs.`;
+
 function buildSystemPrompt(
   businessUnit: string,
-  activeModel: "gpt" | "claude" | "kimi" | "deepseek" = "gpt"
+  activeModel: "gpt" | "claude" | "kimi" | "deepseek" = "gpt",
+  options: { voice?: boolean } = {}
 ): string {
   const modelLabel = getModelLabel(activeModel);
   const sections: string[] = [
@@ -430,6 +446,9 @@ function buildSystemPrompt(
 8. Be professional, helpful, and concise.
 
 ${KNOWLEDGE_BASE_VERSIONING_RULES}`);
+
+  // Last so it overrides the formatting guidance above, which assumes a screen.
+  if (options.voice) sections.push(VOICE_MODE_RULES);
 
   return sections.join("\n\n");
 }
@@ -1765,7 +1784,9 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
 
     const hasGlobalContext = globalContext.source !== "none" && !globalContext.accessDenied;
     const failedDocNames = [...new Set([...sessionStatus.failed, ...extractionFailedNames])];
-    const systemPrompt = buildSystemPrompt(businessUnit, model);
+    // Multipart turns arrive as strings, JSON turns as a real boolean — accept both.
+    const voiceMode = req.body.voice === true || req.body.voice === "true";
+    const systemPrompt = buildSystemPrompt(businessUnit, model, { voice: voiceMode });
     const turnContext = buildTurnContext({
       sessionContextString,
       globalContextString: globalContext.hybridContextString,

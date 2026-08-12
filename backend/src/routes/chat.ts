@@ -1,9 +1,11 @@
 import express from "express";
+import multer from "multer";
 import { authMiddleware, AuthenticatedRequest } from "../middleware/auth";
 import { getBusinessUnitLabel, getAllBusinessUnits } from "../config/businessUnits";
 import { parseModel, getStreamAIResponse, getGenerateAIResponse } from "../services/aiRouter";
 import { buildContextForQuery } from "../utils/contextBuilder";
 import { synthesizeSpeech, getSpeechQuota, ElevenLabsError } from "../services/elevenLabsService";
+import { transcribeAudio, TranscriptionError, MAX_AUDIO_BYTES } from "../services/transcriptionService";
 
 import { RagDocument } from "../models/RagDocument";
 import { KnowledgeGroup } from "../models/KnowledgeGroup";
@@ -20,6 +22,47 @@ const TYPE_LABELS: Record<string, string> = {
   report: "Financial reports",
   other: "Other"
 };
+
+// Audio never touches disk: a turn of speech is small, used once, and then discarded.
+const audioUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_AUDIO_BYTES, files: 1 },
+});
+
+/**
+ * Speech-to-text for voice mode. The browser cannot hand us text and raw audio at the
+ * same time, and call mode needs the audio stream for silence detection and the level
+ * meter, so transcription happens here rather than in the browser.
+ */
+chatRouter.post("/transcribe", authMiddleware, (req: AuthenticatedRequest, res) => {
+  audioUpload.single("audio")(req as any, res as any, async (uploadErr: any) => {
+    if (uploadErr) {
+      const tooBig = uploadErr instanceof multer.MulterError && uploadErr.code === "LIMIT_FILE_SIZE";
+      return res.status(tooBig ? 413 : 400).json({
+        error: tooBig ? "Recording is too long. Keep it under 25MB." : uploadErr.message || "Invalid audio upload",
+      });
+    }
+
+    try {
+      const file = req.file as Express.Multer.File | undefined;
+      if (!file?.buffer?.length) return res.status(400).json({ error: "audio file is required" });
+
+      // The transcription API picks its decoder from the extension, so preserve the
+      // container the browser actually recorded instead of assuming one.
+      const { text } = await transcribeAudio(file.buffer, file.originalname || "speech.webm");
+      res.setHeader("Cache-Control", "no-store");
+      res.json({ text });
+    } catch (error) {
+      logger.error("Transcription request failed", {
+        message: error instanceof Error ? error.message : String(error),
+      });
+      if (error instanceof TranscriptionError) {
+        return res.status(error.status).json({ error: error.message });
+      }
+      res.status(502).json({ error: "Failed to transcribe audio" });
+    }
+  });
+});
 
 // Read a message aloud via ElevenLabs. Sits behind the same aiLimiter/aiDailyLimiter
 // applied to the whole /api/v1/chat prefix in index.ts, since it costs real money per call.
