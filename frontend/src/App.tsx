@@ -9,6 +9,7 @@ import {
   BiPaperclip, BiMicrophone, BiMoon, BiSun, BiCamera, BiCopy, BiCheck, BiLink, BiReply, BiSmile, BiX,
   BiPlay, BiPause, BiPhoneCall
 } from "react-icons/bi";
+import DownloadPage from "./download/DownloadPage";
 import VoiceCallOverlay from "./voice/VoiceCallOverlay";
 import { useVoiceCall } from "./voice/useVoiceCall";
 import { MdPushPin, MdAutoAwesome, MdCreateNewFolder, MdFolder, MdFolderOpen } from "react-icons/md";
@@ -1073,6 +1074,7 @@ export const App: React.FC = () => {
       "/login",
       "/super-admin/login",
       "/contact",
+      "/download",
       "/privacy",
       "/terms",
       "/accept-invite",
@@ -2843,6 +2845,12 @@ export const App: React.FC = () => {
   }
 
   // Skeleton loading inside the chat view handles this; no full-screen block needed.
+
+  // /download — public. Someone fetching the desktop or mobile app has no reason to sign
+  // in first, and requiring it would block the very people who have not got the app yet.
+  if (location.pathname === "/download") {
+    return <DownloadPage />;
+  }
 
   // /login — always shows login form; redirects to /user-chat if already authenticated
   if (location.pathname === "/login") {

@@ -51,7 +51,7 @@ export type TranscriptionResult = {
  */
 export async function transcribeAudio(buffer: Buffer, filename: string): Promise<TranscriptionResult> {
   if (!process.env.OPENAI_API_KEY) {
-    throw new TranscriptionError("Speech-to-text is not configured", 503);
+    throw new TranscriptionError("Voice mode is temporarily unavailable. Please try again later.", 503);
   }
   if (!buffer?.length) {
     throw new TranscriptionError("No audio to transcribe", 400);
@@ -88,21 +88,20 @@ export async function transcribeAudio(buffer: Buffer, filename: string): Promise
       message: error instanceof Error ? error.message : String(error),
     });
 
-    if (status === 401) throw new TranscriptionError("Speech-to-text credentials are invalid", 503, 401);
+    if (status === 401) throw new TranscriptionError("Voice mode is temporarily unavailable. Please try again later.", 503, 401);
 
     // 429 is ambiguous at OpenAI: it covers both real throttling, which clears on its own
     // in seconds, and an exhausted balance, which never clears without someone topping up
     // the account. Reporting the second as the first sends people off to wait for a
     // recovery that cannot happen, so split them on the error type.
+    // Deliberately vague to the user. Which provider we use and the state of its billing
+    // is our problem, not theirs, and there is no action they could take anyway. The real
+    // cause is in the log line above for whoever is on call.
     if (type === "insufficient_quota" || code === "credit_balance_exhausted") {
-      throw new TranscriptionError(
-        "The OpenAI account has no credits left, so speech cannot be transcribed. Add credits to continue.",
-        402,
-        429
-      );
+      throw new TranscriptionError("Voice mode is temporarily unavailable. Please try again later.", 402, 429);
     }
-    if (status === 429) throw new TranscriptionError("Speech-to-text rate limit reached. Try again shortly.", 429, 429);
+    if (status === 429) throw new TranscriptionError("Too many requests right now. Give it a moment and try again.", 429, 429);
     if (status === 413) throw new TranscriptionError("Recording is too long. Keep it under 25MB.", 413, 413);
-    throw new TranscriptionError("Failed to transcribe audio", 502, status);
+    throw new TranscriptionError("Couldn't make out what you said. Please try again.", 502, status);
   }
 }
