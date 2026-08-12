@@ -72,6 +72,46 @@
   line-height: 1.6;
 }
 
+.heroButton {
+  margin-top: 1.75rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.85rem 1.6rem;
+  border-radius: 11px;
+  border: none;
+  background: var(--brand-color, #ed0000);
+  color: #fff;
+  font-size: 1rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.heroButton:hover {
+  background: #c50000;
+}
+
+.installed {
+  margin-top: 1.75rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: #1a8f4c;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.steps {
+  margin: 0.15rem 0 0;
+  padding-left: 1.15rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  font-size: 0.86rem;
+  line-height: 1.5;
+  color: #6b6360;
+}
+
 .grid {
   width: min(1040px, 100%);
   display: grid;
@@ -204,6 +244,7 @@
   .card:hover { border-color: #413b39; box-shadow: 0 8px 26px rgba(0, 0, 0, 0.35); }
   .cardIcon { color: #f3f1f0; }
   .buttonDisabled { background: #211e1d; border-color: #35302e; color: #8a807c; }
+  .steps { color: #a29a97; }
   .footnote { border-color: #2e2a28; }
   .brandMark { background: #211e1d; }
 }

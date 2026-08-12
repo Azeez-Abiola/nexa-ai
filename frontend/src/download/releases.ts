@@ -15,6 +15,12 @@ export type Release = {
   size?: string;
   /** Extra guidance shown only on this platform's card, e.g. how to allow an APK install. */
   note?: string;
+  /**
+   * How to install the web app on this platform. Shown whenever there is no native build,
+   * which today is everywhere: Nexa installs as a PWA, and the steps genuinely differ per
+   * browser, so there is no single instruction that would be correct for everyone.
+   */
+  install: string[];
 };
 
 /**
@@ -30,27 +36,45 @@ export const RELEASES: Record<PlatformId, Release> = {
     name: "macOS",
     requirement: "macOS 12 Monterey or later",
     url: null,
-    note: "Universal build for both Apple Silicon and Intel Macs.",
+    install: [
+      "Open nexa in Chrome or Edge.",
+      "Click the install icon in the address bar, or the browser menu, then Install Nexa.",
+      "In Safari 17 or later, use File then Add to Dock.",
+    ],
   },
   windows: {
     id: "windows",
     name: "Windows",
     requirement: "Windows 10 or later, 64-bit",
     url: null,
+    install: [
+      "Open nexa in Chrome or Edge.",
+      "Click the install icon in the address bar, or the browser menu, then Install Nexa.",
+      "It appears in the Start menu and can be pinned to the taskbar.",
+    ],
   },
   android: {
     id: "android",
     name: "Android",
     requirement: "Android 8.0 or later",
     url: null,
-    note: "Installing outside the Play Store means allowing installs from your browser when Android asks.",
+    install: [
+      "Open nexa in Chrome.",
+      "Tap the menu, then Add to Home screen or Install app.",
+      "Nexa then opens full screen, like any other app.",
+    ],
   },
   ios: {
     id: "ios",
     name: "iPhone & iPad",
     requirement: "iOS 15 or later",
     url: null,
-    note: "Apple only allows app installs through the App Store, so this one opens the store listing.",
+    note: "Safari is required. Chrome on iPhone cannot install web apps, which is Apple's restriction rather than ours.",
+    install: [
+      "Open nexa in Safari.",
+      "Tap the Share button, then Add to Home Screen.",
+      "Tap Add, and Nexa appears alongside your other apps.",
+    ],
   },
 };
 
