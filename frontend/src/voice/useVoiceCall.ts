@@ -261,6 +261,9 @@ export function useVoiceCall({ active, token, onTurn, onError }: UseVoiceCallOpt
     async (audio: Blob) => {
       const info = recorderInfoRef.current;
       setCallStatus("thinking");
+      // Checked in `finally`, which runs even after the catch returns, so a fatal failure
+      // must not reopen the mic on its way out.
+      let fatalFailure = false;
       try {
         const form = new FormData();
         form.append("audio", audio, `speech.${info?.extension || "webm"}`);
@@ -271,7 +274,12 @@ export function useVoiceCall({ active, token, onTurn, onError }: UseVoiceCallOpt
         });
         if (!res.ok) {
           const detail = await res.json().catch(() => null);
-          throw new Error(detail?.error || `HTTP ${res.status}`);
+          const failure = new Error(detail?.error || `HTTP ${res.status}`) as Error & { fatal?: boolean };
+          // 401/402/503 mean the account is out of credits, misconfigured, or unauthorised.
+          // None of those clear by trying again, so let this end the call instead of
+          // charging into the same failure on every turn until the user gives up.
+          failure.fatal = res.status === 401 || res.status === 402 || res.status === 503;
+          throw failure;
         }
         const { text } = (await res.json()) as { text: string };
         if (!activeRef.current) return;
@@ -297,13 +305,14 @@ export function useVoiceCall({ active, token, onTurn, onError }: UseVoiceCallOpt
         await speak(spoken);
       } catch (err) {
         if (!activeRef.current) return;
-        onErrorRef.current?.(err instanceof Error ? err.message : "Something went wrong on that turn.", false);
+        fatalFailure = Boolean((err as { fatal?: boolean })?.fatal);
+        onErrorRef.current?.(err instanceof Error ? err.message : "Something went wrong on that turn.", fatalFailure);
       } finally {
         // Whatever happened, the call continues — hand the mic back. Unless a barge-in
         // already did: interrupting reopens the mic itself, and restarting it here would
         // throw away the opening words the user has by now already spoken.
         const alreadyListening = statusRef.current === "listening" || statusRef.current === "capturing";
-        if (activeRef.current && !alreadyListening) startListening();
+        if (activeRef.current && !alreadyListening && !fatalFailure) startListening();
       }
     },
     [setCallStatus, speak, startListening]

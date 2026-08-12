@@ -80,13 +80,27 @@ export async function transcribeAudio(buffer: Buffer, filename: string): Promise
     const text = typeof result === "string" ? result : String((result as { text?: string })?.text ?? "");
     return { text: text.trim() };
   } catch (error) {
-    const status = (error as { status?: number })?.status;
+    const { status, code, type } = (error as { status?: number; code?: string; type?: string }) || {};
     logger.error("[TranscriptionService] Transcription failed", {
       status,
+      code,
+      type,
       message: error instanceof Error ? error.message : String(error),
     });
 
     if (status === 401) throw new TranscriptionError("Speech-to-text credentials are invalid", 503, 401);
+
+    // 429 is ambiguous at OpenAI: it covers both real throttling, which clears on its own
+    // in seconds, and an exhausted balance, which never clears without someone topping up
+    // the account. Reporting the second as the first sends people off to wait for a
+    // recovery that cannot happen, so split them on the error type.
+    if (type === "insufficient_quota" || code === "credit_balance_exhausted") {
+      throw new TranscriptionError(
+        "The OpenAI account has no credits left, so speech cannot be transcribed. Add credits to continue.",
+        402,
+        429
+      );
+    }
     if (status === 429) throw new TranscriptionError("Speech-to-text rate limit reached. Try again shortly.", 429, 429);
     if (status === 413) throw new TranscriptionError("Recording is too long. Keep it under 25MB.", 413, 413);
     throw new TranscriptionError("Failed to transcribe audio", 502, status);
