@@ -3046,10 +3046,14 @@ export const App: React.FC = () => {
               onClick={handleNewChat}
               onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleNewChat(); } }}
             >
-              <div className="logo-icon-wrapper">
-                <img src="/1879-22.png" alt="Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
-              </div>
-              <span className="logo-text">Nexa</span>
+              {/* The wordmark is part of the logo, so no text beside it. Two files rather
+                  than a CSS filter: the mark must stay brand red on both themes, and any
+                  filter that lightens the black type would drag the red with it. */}
+              <img
+                src={theme === "dark" ? "/icons/nexa-logo-light.png" : "/icons/nexa-logo.png"}
+                alt="Nexa"
+                className="sidebar-logo-img"
+              />
             </div>
           </div>
 
@@ -4713,19 +4717,14 @@ export const App: React.FC = () => {
           gap: 10px;
         }
 
-        .logo-icon-wrapper {
-          width: 32px;
-          height: 32px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          overflow: hidden;
-        }
-
-        .logo-text {
-          font-weight: 600;
-          font-size: 16px;
-          color: var(--brand-color, #ed0000);
+        /* Height-constrained, width auto: the lockup is a wide wordmark, so fixing its
+           width instead would squash it at narrow sidebar sizes. */
+        .sidebar-logo-img {
+          height: 30px;
+          width: auto;
+          max-width: 100%;
+          object-fit: contain;
+          display: block;
         }
 
         .sidebar-toggle-btn {
@@ -5921,10 +5920,6 @@ export const App: React.FC = () => {
 
         .dark-theme .sidebar-conversation-v2.active {
           background: #333;
-          color: #f9fafb;
-        }
-
-        .dark-theme .logo-text {
           color: #f9fafb;
         }
 

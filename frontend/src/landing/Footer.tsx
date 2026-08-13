@@ -14,10 +14,7 @@ const Footer = () => (
     <div className="container relative z-10 mx-auto w-full max-w-6xl min-w-0 px-4 sm:px-6">
       <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
         <Link to="/" className="flex min-w-0 flex-1 items-center gap-3">
-          <div className="flex shrink-0 items-center justify-center">
-            <img src="/1879-22.png" alt="1879 Tech Hub" className="h-9 w-9 object-contain sm:h-10 sm:w-10" />
-          </div>
-          <span className="min-w-0 truncate font-bold tracking-tight text-[#1A1A1A] text-xl sm:text-2xl">nexa.ai</span>
+          <img src="/icons/nexa-logo.png" alt="Nexa" className="h-8 w-auto shrink-0 object-contain sm:h-10" />
         </Link>
       </div>
 
@@ -103,7 +100,8 @@ const Footer = () => (
       <div className="border-t border-border/40 px-1 pb-6 pt-6 text-center sm:pb-8 sm:pt-8">
         <p className="mx-auto flex max-w-full flex-col items-center justify-center gap-1 break-words text-xs font-medium text-muted-foreground sm:flex-row sm:flex-wrap sm:gap-x-2 sm:gap-y-1">
           <span className="inline-flex max-w-full items-center justify-center gap-1.5 px-1">
-            <img src="/1879-22.png" alt="" className="h-4 w-4 shrink-0 object-contain opacity-90" width={16} height={16} />
+            {/* The mark alone here, not the full lockup: at 16px the wordmark is unreadable. */}
+            <img src="/icons/nexa-icon.png" alt="" className="h-4 w-4 shrink-0 object-contain opacity-90" width={16} height={16} />
             <span className="min-w-0">&copy; {new Date().getFullYear()} nexa.ai. All rights reserved.</span>
           </span>
           <span className="text-muted-foreground/50 hidden sm:inline" aria-hidden>

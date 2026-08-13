@@ -37,10 +37,8 @@ const Navbar = () => {
               setMobileOpen(false);
             }}
           >
-            <div className="flex items-center justify-center">
-              <img src="/1879-22.png" alt="Nexa AI Logo" className="w-8 h-8 sm:w-10 sm:h-10 object-contain" />
-            </div>
-            <span className="font-bold text-lg sm:text-xl text-[#1A1A1A] tracking-tight">Nexa.ai</span>
+            {/* Full lockup: the wordmark is part of the logo now, so no text beside it. */}
+            <img src="/icons/nexa-logo.png" alt="Nexa" className="h-7 w-auto sm:h-9 object-contain" />
           </Link>
 
           <div className="hidden md:flex items-center gap-10">

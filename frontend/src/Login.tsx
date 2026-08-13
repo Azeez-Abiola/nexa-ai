@@ -280,10 +280,7 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
         
         <div className="relative z-10 max-w-2xl mx-auto lg:mx-0 w-full">
           <Link to="/" className="flex items-center gap-4 mb-16 w-fit">
-            <div className="flex items-center justify-center">
-              <img src="/1879-22.png" alt="1879 Tech Hub" className="w-12 h-12 object-contain" />
-            </div>
-            <span className="font-bold text-3xl text-[#1A1A1A] tracking-tight">Nexa.ai</span>
+            <img src="/icons/nexa-logo.png" alt="Nexa" className="h-11 w-auto object-contain" />
           </Link>
 
           <div className="space-y-10">

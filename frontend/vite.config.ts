@@ -15,7 +15,7 @@ export default defineConfig({
       // Ship updates the moment they deploy. An assistant people sign into daily should
       // never be running last week's build because nobody thought to reinstall it.
       registerType: "autoUpdate",
-      includeAssets: ["icons/apple-touch-icon.png", "1879-22.png"],
+      includeAssets: ["icons/apple-touch-icon.png", "icons/favicon-64.png"],
       manifest: {
         name: "Nexa AI",
         short_name: "Nexa",
