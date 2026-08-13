@@ -5399,6 +5399,44 @@ export const App: React.FC = () => {
           }
         }
 
+        /*
+         * Installed-app safe areas.
+         *
+         * The viewport is declared viewport-fit=cover, so once Nexa runs standalone it
+         * extends into the physical edges of the screen — under the notch, the status bar
+         * and the home indicator. Anything pinned to an edge has to be inset by hand or
+         * the hardware sits on top of it, which is what buried the whole chat header.
+         *
+         * Scoped to standalone because in a browser tab the browser's own chrome already
+         * occupies that space, and env() resolves to 0 on hardware without insets, so
+         * this costs nothing on a desktop install.
+         */
+        @media (display-mode: standalone) {
+          .chat-header-v2 {
+            height: calc(56px + env(safe-area-inset-top, 0px));
+            padding-top: env(safe-area-inset-top, 0px);
+          }
+
+          .sidebar-header-main {
+            padding-top: calc(8px + env(safe-area-inset-top, 0px));
+          }
+
+          /* Keep the composer and the sidebar's bottom controls clear of the home indicator. */
+          .main-input-container-v2 {
+            margin-bottom: env(safe-area-inset-bottom, 0px);
+          }
+
+          .sidebar-footer-actions {
+            padding-bottom: env(safe-area-inset-bottom, 0px);
+          }
+        }
+
+        @media (display-mode: standalone) and (min-width: 640px) {
+          .chat-header-v2 {
+            height: calc(64px + env(safe-area-inset-top, 0px));
+          }
+        }
+
         .header-left-v2 {
           display: flex;
           align-items: center;

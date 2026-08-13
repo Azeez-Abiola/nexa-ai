@@ -10,7 +10,11 @@
     <meta name="theme-color" content="#ed0000" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <!-- Not black-translucent. That value deliberately lays the page out UNDERNEATH the
+         status bar and notch, which hid the whole chat header on installed iPhones.
+         "default" keeps the app below the status bar; the safe-area rules in App.tsx
+         handle the home indicator and any landscape notch on top of that. -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Nexa" />
     <style>
       html, body {
