@@ -10,6 +10,7 @@ import {
   BiPlay, BiPause, BiPhoneCall
 } from "react-icons/bi";
 import DownloadPage from "./download/DownloadPage";
+import SsoCallback, { SsoError } from "./auth/SsoCallback";
 import VoiceCallOverlay from "./voice/VoiceCallOverlay";
 import { useVoiceCall } from "./voice/useVoiceCall";
 import { useWakeWord } from "./voice/useWakeWord";
@@ -2866,6 +2867,19 @@ export const App: React.FC = () => {
   }
 
   // Skeleton loading inside the chat view handles this; no full-screen block needed.
+
+  // Microsoft SSO landing points. These must be matched before any auth gate: the user is
+  // by definition not signed in yet when they arrive, and bouncing them to /login here
+  // would throw away the token the callback is carrying.
+  if (location.pathname === "/auth/employee/sso/callback") {
+    return <SsoCallback role="employee" onLoginSuccess={handleLogin} />;
+  }
+  if (location.pathname === "/auth/admin/sso/callback") {
+    return <SsoCallback role="admin" onLoginSuccess={handleLogin} />;
+  }
+  if (location.pathname === "/auth/sso/error") {
+    return <SsoError />;
+  }
 
   // /download — public. Someone fetching the desktop or mobile app has no reason to sign
   // in first, and requiring it would block the very people who have not got the app yet.

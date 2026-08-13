@@ -664,6 +664,33 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
             </form>
           )}
 
+          {/* Microsoft SSO. Offered on sign-in only: the access-request form is for people
+              who do not have an account yet, and SSO cannot create one. A plain link rather
+              than fetch, because the flow is a full-page redirect to Microsoft. */}
+          {isLogin && (
+            <div className="mt-8">
+              <div className="flex items-center gap-4">
+                <span className="h-px flex-1 bg-border" />
+                <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">or</span>
+                <span className="h-px flex-1 bg-border" />
+              </div>
+
+              <a
+                href={`${(import.meta.env.VITE_API_URL || "").replace(/\/$/, "")}/api/v1/auth/sso/microsoft`}
+                className="mt-6 flex w-full items-center justify-center gap-3 rounded-2xl border border-border bg-white py-4 font-semibold text-[#1A1A1A] transition-colors hover:bg-muted/60"
+              >
+                {/* Microsoft's four-square mark, inline so it needs no network request. */}
+                <svg width="20" height="20" viewBox="0 0 21 21" aria-hidden="true">
+                  <rect x="1" y="1" width="9" height="9" fill="#F25022" />
+                  <rect x="11" y="1" width="9" height="9" fill="#7FBA00" />
+                  <rect x="1" y="11" width="9" height="9" fill="#00A4EF" />
+                  <rect x="11" y="11" width="9" height="9" fill="#FFB900" />
+                </svg>
+                Continue with Microsoft
+              </a>
+            </div>
+          )}
+
           <div className="mt-12 text-center">
             <p className="text-muted-foreground font-medium text-base">
               {isLogin ? "New to Nexa? " : "Already have an account? "}

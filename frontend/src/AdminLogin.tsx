@@ -169,6 +169,25 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess }) => {
                 </button>
               </form>
 
+              {/* Same SSO entry point as the employee login: the backend resolves the
+                  Microsoft account against both collections and redirects to the admin
+                  callback when it turns out to be an admin. Hidden on the password-reset
+                  view, where it would be a non-sequitur. */}
+              {!isForgotPassword && (
+                <a
+                  href={`${(import.meta.env.VITE_API_URL || "").replace(/\/$/, "")}/api/v1/auth/sso/microsoft`}
+                  className={styles.ssoButton}
+                >
+                  <svg width="18" height="18" viewBox="0 0 21 21" aria-hidden="true">
+                    <rect x="1" y="1" width="9" height="9" fill="#F25022" />
+                    <rect x="11" y="1" width="9" height="9" fill="#7FBA00" />
+                    <rect x="1" y="11" width="9" height="9" fill="#00A4EF" />
+                    <rect x="11" y="11" width="9" height="9" fill="#FFB900" />
+                  </svg>
+                  Continue with Microsoft
+                </a>
+              )}
+
               <div className={styles.toggleWrapper}>
                 {isForgotPassword ? (
                   <span className={styles.toggleText}>

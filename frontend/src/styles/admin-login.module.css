@@ -338,6 +338,33 @@ select.input option:checked {
   font-family: 'Sen', 'Inter', system-ui, sans-serif;
 }
 
+/* Secondary to the password button on purpose: outlined rather than filled, so the
+   primary path stays visually primary. */
+.ssoButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  width: 100%;
+  margin-top: 1rem;
+  padding: 0.8rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #1a1a1a;
+  background: #ffffff;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 0.2s ease, border-color 0.2s ease;
+  font-family: 'Sen', 'Inter', system-ui, sans-serif;
+}
+
+.ssoButton:hover {
+  background: #f7f7f7;
+  border-color: #cfcfcf;
+}
+
 .button:hover:not(:disabled) {
   transform: translateY(-2px);
   box-shadow: 0 6px 20px rgba(237, 0, 0, 0.4);
