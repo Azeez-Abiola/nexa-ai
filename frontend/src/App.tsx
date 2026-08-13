@@ -12,7 +12,8 @@ import {
 import DownloadPage from "./download/DownloadPage";
 import VoiceCallOverlay from "./voice/VoiceCallOverlay";
 import { useVoiceCall } from "./voice/useVoiceCall";
-import { MdPushPin, MdAutoAwesome, MdCreateNewFolder, MdFolder, MdFolderOpen } from "react-icons/md";
+import { useWakeWord } from "./voice/useWakeWord";
+import { MdPushPin, MdAutoAwesome, MdCreateNewFolder, MdFolder, MdFolderOpen, MdHearing, MdHearingDisabled } from "react-icons/md";
 import { FiLogOut, FiDownload, FiTrash2, FiExternalLink, FiFileText } from "react-icons/fi";
 import { useLocation, useNavigate } from "react-router-dom";
 import { ChatGptStyleMenuIcon } from "./components/ChatGptStyleMenuIcon";
@@ -2222,6 +2223,26 @@ export const App: React.FC = () => {
     onError: handleVoiceCallError,
   });
 
+  const startVoiceCall = useCallback(() => {
+    setVoiceCallError(null);
+    voiceCallStartedAtRef.current = Date.now();
+    setVoiceCallOpen(true);
+  }, []);
+
+  const wakeWord = useWakeWord({
+    // The call needs the microphone, and the wake engine cannot hold it at the same time.
+    // Pausing rather than disabling means the preference survives the call.
+    paused: voiceCallOpen,
+    onDetected: startVoiceCall,
+  });
+
+  // Wake word failures are one-shot and self-disabling, so report them once through the
+  // normal toast rather than parking an error in the header.
+  useEffect(() => {
+    if (wakeWord.error) showSoftToast(wakeWord.error, "error");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wakeWord.error]);
+
   /**
    * Hang up and leave a marker in the transcript. The conversation id is read at hang-up
    * rather than at dial time because a call started from an empty chat creates the
@@ -3438,14 +3459,36 @@ export const App: React.FC = () => {
                   type="button"
                   className="header-action-btn-v2"
                   aria-label="Start a voice call with Nexa"
-                  onClick={() => {
-                    setVoiceCallError(null);
-                    voiceCallStartedAtRef.current = Date.now();
-                    setVoiceCallOpen(true);
-                  }}
+                  onClick={startVoiceCall}
                 >
                   <BiPhoneCall size={18} />
                   <span className="header-action-label-v2">Voice</span>
+                </button>
+              ) : null}
+              {/* Hands-free entry. Hidden entirely when no wake word licence is configured,
+                  rather than shown as a control that cannot work. */}
+              {wakeWord.available && !currentConversation?.isShared ? (
+                <button
+                  type="button"
+                  className={`header-action-btn-v2${wakeWord.listening ? " wake-word-active" : ""}`}
+                  aria-pressed={wakeWord.enabled}
+                  aria-label={
+                    wakeWord.listening
+                      ? "Listening for “Hey Nexa”. Turn off"
+                      : "Listen for “Hey Nexa” to start a call hands-free"
+                  }
+                  title={
+                    wakeWord.listening
+                      ? "Listening for “Hey Nexa”"
+                      : "Say “Hey Nexa” to start a call"
+                  }
+                  disabled={wakeWord.loading}
+                  onClick={wakeWord.toggle}
+                >
+                  {wakeWord.listening ? <MdHearing size={18} /> : <MdHearingDisabled size={18} />}
+                  <span className="header-action-label-v2">
+                    {wakeWord.loading ? "Starting…" : "Hey Nexa"}
+                  </span>
                 </button>
               ) : null}
               {/* Share this conversation — header-level entry point. Only shown when there's
@@ -5397,6 +5440,31 @@ export const App: React.FC = () => {
             height: 64px;
             padding: 0 24px;
           }
+        }
+
+        /* Listening for the wake phrase. A live microphone must be visible in the UI,
+           never a silent background state the user cannot tell is running. */
+        .header-action-btn-v2.wake-word-active {
+          color: var(--brand-color, #ed0000);
+        }
+
+        .header-action-btn-v2.wake-word-active::after {
+          content: "";
+          width: 6px;
+          height: 6px;
+          border-radius: 50%;
+          background: var(--brand-color, #ed0000);
+          margin-left: 2px;
+          animation: wakeWordPulse 2s ease-in-out infinite;
+        }
+
+        @keyframes wakeWordPulse {
+          0%, 100% { opacity: 0.35; }
+          50% { opacity: 1; }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .header-action-btn-v2.wake-word-active::after { animation: none; opacity: 1; }
         }
 
         /*

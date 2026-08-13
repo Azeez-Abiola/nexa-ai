@@ -39,7 +39,9 @@ export default defineConfig({
         globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
         // The preloader video is 4MB and plays once at startup; precaching it would make
         // every install download it up front for no benefit.
-        globIgnores: ["**/*.mp4"],
+        // The wake word engine is megabytes and opt-in, so it is fetched on demand rather
+        // than pushed to every install. The preloader video is 4MB and plays once.
+        globIgnores: ["**/*.mp4", "**/vendor-wakeword-*.js", "**/*.pv", "**/*.ppn"],
         maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
         // Offline navigation serves the SPA shell, but the API must never be answered
         // from a cache: stale chat history and stale auth are worse than an honest error.
@@ -95,7 +97,12 @@ export default defineConfig({
           'vendor-react': ['react', 'react-dom'],
           'vendor-ui': ['react-icons', 'framer-motion'],
           'vendor-export': ['html2canvas', 'jspdf', 'docx'],
-          'vendor-axios': ['axios']
+          'vendor-axios': ['axios'],
+          // The wake word engine inlines its WASM as base64, so left alone it lands in
+          // the entry chunk and doubles the first-load cost for everyone, including the
+          // majority who never switch the feature on. Pinning it to its own chunk keeps
+          // it behind the dynamic import it is actually loaded by.
+          'vendor-wakeword': ['@picovoice/porcupine-web', '@picovoice/web-voice-processor']
         }
       }
     },
