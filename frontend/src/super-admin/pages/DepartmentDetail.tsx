@@ -321,7 +321,7 @@ const DepartmentDetail: React.FC = () => {
         />
       </div>
 
-      <Card className="border-none shadow-xl shadow-slate-200/50 rounded-2xl bg-white">
+      <Card className="border border-slate-200/70 shadow-sm rounded-2xl bg-white">
         <CardContent className="p-0">
           <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between gap-3">
             <div>
@@ -385,7 +385,7 @@ const DepartmentDetail: React.FC = () => {
         </CardContent>
       </Card>
 
-      <Card className="border-none shadow-xl shadow-slate-200/50 rounded-2xl bg-white">
+      <Card className="border border-slate-200/70 shadow-sm rounded-2xl bg-white">
         <CardContent className="p-0">
           <div className="px-6 py-4 border-b border-slate-100">
             <p className="font-black font-['Sen'] text-slate-900">Knowledge base</p>
@@ -639,7 +639,7 @@ const StatTile: React.FC<{ label: string; value: number | string; icon: React.Re
   value,
   icon
 }) => (
-  <Card className="border-none shadow-xl shadow-slate-200/50 rounded-2xl bg-white">
+  <Card className="border border-slate-200/70 shadow-sm rounded-2xl bg-white">
     <CardContent className="p-5 flex items-center gap-4">
       <div className="w-11 h-11 rounded-xl bg-slate-50 flex items-center justify-center text-slate-500">
         {icon}

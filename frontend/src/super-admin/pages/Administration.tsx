@@ -155,7 +155,7 @@ const Administration: React.FC = () => {
       </div>
 
       {/* Active Admins Table */}
-      <Card className="border-none shadow-2xl shadow-slate-200/50 rounded-2xl overflow-hidden mt-6 bg-white">
+      <Card className="border border-slate-200/70 shadow-sm rounded-2xl overflow-hidden mt-6 bg-white">
         <CardHeader className="bg-white border-b border-slate-100 py-4">
           <CardTitle className="text-base font-bold flex items-center gap-2 text-slate-700">
             <ShieldCheck size={18} className="text-[#ed0000]" />
@@ -251,7 +251,7 @@ const Administration: React.FC = () => {
 };
 
 const AdminStatCard = ({ label, value, icon }: any) => (
-  <Card className="shadow-lg shadow-slate-100/50 border border-slate-100 rounded-[2rem] p-1 bg-rose-50/50 group transition-all duration-500">
+  <Card className="shadow-lg shadow-slate-100/50 border border-slate-100 rounded-[2rem] p-1 bg-white group transition-all duration-500">
     <CardContent className="p-8 flex items-center justify-between">
       <div className="space-y-1">
         <p className="text-[11px] font-bold text-slate-400 mb-1 leading-none">{label}</p>

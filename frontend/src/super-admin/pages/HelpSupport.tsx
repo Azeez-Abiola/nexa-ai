@@ -98,7 +98,7 @@ const HelpSupport: React.FC = () => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <Card className="border-none shadow-2xl shadow-slate-200/50 rounded-2xl bg-white p-8 group hover:-translate-y-1 transition-transform">
+        <Card className="border border-slate-200/70 shadow-sm rounded-2xl bg-white p-8 group hover:-translate-y-1 transition-transform">
           <div className="w-12 h-12 rounded-2xl bg-[var(--brand-color)]/10 flex items-center justify-center text-[var(--brand-color)] mb-6">
             <MessageCircle size={24} />
           </div>
@@ -107,7 +107,7 @@ const HelpSupport: React.FC = () => {
           <Button className="w-full h-11 rounded-xl bg-slate-900 text-white font-bold hover:bg-slate-800 transition-all">Start Chat</Button>
         </Card>
 
-        <Card className="border-none shadow-2xl shadow-slate-200/50 rounded-2xl bg-[var(--brand-color)] p-8 text-white relative overflow-hidden group">
+        <Card className="border border-slate-200/70 shadow-sm rounded-2xl bg-[var(--brand-color)] p-8 text-white relative overflow-hidden group">
           <div className="relative z-10">
             <div className="w-12 h-12 rounded-2xl bg-white/20 flex items-center justify-center text-white mb-6">
               <Sparkles size={24} />

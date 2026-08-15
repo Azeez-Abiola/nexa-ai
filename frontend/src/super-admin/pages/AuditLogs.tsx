@@ -250,7 +250,7 @@ const AuditLogs: React.FC = () => {
       {/* Chart + Filters row */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         {/* Activity Chart */}
-        <Card className="lg:col-span-8 border-none shadow-2xl shadow-slate-200/50 rounded-2xl overflow-hidden bg-white">
+        <Card className="lg:col-span-8 border border-slate-200/70 shadow-sm rounded-2xl overflow-hidden bg-white">
           <CardHeader className="p-8">
             <CardTitle className="text-sm font-black text-slate-400 uppercase tracking-widest flex items-center justify-between w-full">
               System Operations — Last 7 Days
@@ -287,7 +287,7 @@ const AuditLogs: React.FC = () => {
         </Card>
 
         {/* Filters panel */}
-        <Card className="lg:col-span-4 border-none shadow-2xl shadow-slate-200/50 rounded-2xl overflow-hidden bg-white">
+        <Card className="lg:col-span-4 border border-slate-200/70 shadow-sm rounded-2xl overflow-hidden bg-white">
           <CardContent className="p-8 space-y-5">
             {/* Search */}
             <div>

@@ -273,7 +273,7 @@ const UserDetail: React.FC = () => {
         </Button>
       </header>
 
-      <Card className="border-none shadow-xl shadow-slate-200/50 rounded-2xl bg-white">
+      <Card className="border border-slate-200/70 shadow-sm rounded-2xl bg-white">
         <CardContent className="p-6 space-y-6">
           <div>
             <p className="font-black font-['Sen'] text-slate-900">Department</p>
@@ -330,7 +330,7 @@ const UserDetail: React.FC = () => {
         </CardContent>
       </Card>
 
-      <Card className="border-none shadow-xl shadow-slate-200/50 rounded-2xl bg-white">
+      <Card className="border border-slate-200/70 shadow-sm rounded-2xl bg-white">
         <CardContent className="p-6 space-y-4">
           <div>
             <p className="font-black font-['Sen'] text-slate-900">User groups</p>
@@ -370,7 +370,7 @@ const UserDetail: React.FC = () => {
         </CardContent>
       </Card>
 
-      <Card className="border-none shadow-xl shadow-slate-200/50 rounded-2xl bg-white">
+      <Card className="border border-slate-200/70 shadow-sm rounded-2xl bg-white">
         <CardContent className="p-6 space-y-4">
           <div className="flex items-start justify-between">
             <div>
@@ -420,7 +420,7 @@ const UserDetail: React.FC = () => {
         </CardContent>
       </Card>
 
-      <Card className="border-none shadow-xl shadow-slate-200/50 rounded-2xl bg-white">
+      <Card className="border border-slate-200/70 shadow-sm rounded-2xl bg-white">
         <CardContent className="p-6 grid grid-cols-1 md:grid-cols-3 gap-6">
           <Field label="Email" value={user.email} icon={<Mail size={14} />} />
           <Field

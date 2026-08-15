@@ -279,14 +279,14 @@ const Departments: React.FC = () => {
       {loading ? (
         <div className="space-y-3">
           {[1, 2, 3].map((i) => (
-            <Card key={i} className="border-none shadow-xl shadow-slate-200/50 rounded-2xl bg-white p-5">
+            <Card key={i} className="border border-slate-200/70 shadow-sm rounded-2xl bg-white p-5">
               <Skeleton className="h-5 w-1/3 rounded mb-2" />
               <Skeleton className="h-4 w-1/4 rounded" />
             </Card>
           ))}
         </div>
       ) : departments.length === 0 ? (
-        <Card className="border-none shadow-xl shadow-slate-200/50 rounded-2xl bg-white p-16 text-center">
+        <Card className="border border-slate-200/70 shadow-sm rounded-2xl bg-white p-16 text-center">
           <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto mb-6 text-slate-400">
             <Layers size={28} />
           </div>
@@ -317,7 +317,7 @@ const Departments: React.FC = () => {
                   navigate(`/admin/departments/${dept._id}`);
                 }
               }}
-              className="group border-none shadow-xl shadow-slate-200/50 rounded-2xl bg-white cursor-pointer transition-all hover:-translate-y-0.5 hover:shadow-2xl"
+              className="group border border-slate-200/70 shadow-sm rounded-2xl bg-white cursor-pointer transition-all hover:-translate-y-0.5 hover:shadow-2xl"
             >
               <CardContent className="p-5 flex items-center justify-between gap-4">
                 <div className="flex items-center gap-4 min-w-0">

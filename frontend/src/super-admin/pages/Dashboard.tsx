@@ -67,7 +67,7 @@ const Loader2 = ({ className, size }: { className?: string; size?: number }) => 
 const StatCard = ({ title, value, icon, isLoading, footer }: any) => {
   const num = typeof value === "number" ? value : Number(value) || 0;
   return (
-    <Card className="border-none shadow-xl shadow-slate-200/50 rounded-2xl bg-white flex flex-col items-center justify-center p-6 sm:p-8 gap-4 text-center group hover:-translate-y-1 transition-transform cursor-pointer border border-slate-50 min-w-0">
+    <Card className="border border-slate-200/70 shadow-sm rounded-2xl bg-white flex flex-col items-center justify-center p-6 sm:p-8 gap-4 text-center group hover:-translate-y-1 transition-transform cursor-pointer border border-slate-50 min-w-0">
       <CardContent className="p-0 w-full text-left">
         <div className="flex justify-between items-start">
           <div className="w-10 h-10 rounded-xl bg-white border border-slate-100 flex items-center justify-center text-slate-400 group-hover:bg-[var(--brand-color)] group-hover:text-white transition-all duration-500 shadow-sm">
@@ -226,7 +226,7 @@ const Dashboard: React.FC = () => {
         "lg:grid-cols-5"
       )}>
         {isLoading ? [1, 2, 3, 4, 5].map((i: any) => (
-          <Card key={i} className="border-none shadow-xl shadow-slate-200/50 rounded-2xl bg-white p-8 border border-slate-50">
+          <Card key={i} className="border border-slate-200/70 shadow-sm rounded-2xl bg-white p-8 border border-slate-50">
             <CardContent className="p-0 w-full">
               <div className="flex justify-between items-start">
                 <Skeleton className="w-10 h-10 rounded-xl" />
@@ -319,7 +319,7 @@ const Dashboard: React.FC = () => {
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         <div className="lg:col-span-7 space-y-8">
-          <Card className="border-none shadow-2xl shadow-slate-200/50 rounded-2xl overflow-hidden bg-white">
+          <Card className="border border-slate-200/70 shadow-sm rounded-2xl overflow-hidden bg-white">
             <CardHeader className="p-6 sm:p-8 flex flex-col md:flex-row md:items-center justify-between gap-4 md:gap-6 min-w-0">
               <div className="min-w-0 space-y-1">
                 <CardTitle className="text-lg font-bold text-slate-900 tracking-tight font-['Sen']">User engagement</CardTitle>
@@ -404,7 +404,7 @@ const Dashboard: React.FC = () => {
         </div>
 
         <div className="lg:col-span-12 xl:col-span-5">
-          <Card className="border-none shadow-2xl shadow-slate-200/50 rounded-2xl overflow-hidden h-full bg-white">
+          <Card className="border border-slate-200/70 shadow-sm rounded-2xl overflow-hidden h-full bg-white">
             <CardHeader className="p-8">
               <h3 className="text-lg font-bold text-slate-900 tracking-tight font-['Sen']">
                 {isSuperAdminContext ? 'Architecture utilization' : 'Top User Engagement'}

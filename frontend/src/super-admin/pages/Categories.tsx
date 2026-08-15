@@ -156,7 +156,7 @@ const Categories: React.FC = () => {
       {loading ? (
         <div className="space-y-3">
           {[1, 2, 3, 4].map((i) => (
-            <Card key={i} className="border-none shadow-xl shadow-slate-200/50 rounded-2xl bg-white p-5">
+            <Card key={i} className="border border-slate-200/70 shadow-sm rounded-2xl bg-white p-5">
               <Skeleton className="h-5 w-1/3 rounded mb-2" />
               <Skeleton className="h-4 w-1/4 rounded" />
             </Card>
@@ -182,7 +182,7 @@ const Categories: React.FC = () => {
             description="Categories you've created for this business unit."
           >
             {custom.length === 0 ? (
-              <Card className="border-none shadow-xl shadow-slate-200/50 rounded-2xl bg-white p-10 text-center">
+              <Card className="border border-slate-200/70 shadow-sm rounded-2xl bg-white p-10 text-center">
                 <div className="w-14 h-14 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto mb-4 text-slate-400">
                   <FolderTree size={22} />
                 </div>
@@ -315,7 +315,7 @@ const Section: React.FC<{ title: string; description: string; children: React.Re
 );
 
 const Row: React.FC<{ cat: Category; onDelete?: () => void }> = ({ cat, onDelete }) => (
-  <Card className="border-none shadow-xl shadow-slate-200/50 rounded-2xl bg-white">
+  <Card className="border border-slate-200/70 shadow-sm rounded-2xl bg-white">
     <CardContent className="p-5 flex items-center justify-between gap-4">
       <div className="flex items-center gap-4 min-w-0">
         <div className="w-11 h-11 rounded-xl bg-[var(--brand-color)]/10 flex items-center justify-center text-[var(--brand-color)] shrink-0">

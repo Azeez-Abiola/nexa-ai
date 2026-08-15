@@ -198,7 +198,7 @@ const AccessRequests: React.FC = () => {
       {loading ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {[1, 2, 3].map((i) => (
-            <Card key={i} className="border-none shadow-xl shadow-slate-200/50 rounded-2xl bg-white p-6">
+            <Card key={i} className="border border-slate-200/70 shadow-sm rounded-2xl bg-white p-6">
               <Skeleton className="h-5 w-3/4 rounded mb-4" />
               <Skeleton className="h-4 w-2/3 rounded mb-2" />
               <Skeleton className="h-4 w-1/2 rounded mb-6" />
@@ -207,7 +207,7 @@ const AccessRequests: React.FC = () => {
           ))}
         </div>
       ) : requests.length === 0 ? (
-        <Card className="border-none shadow-xl shadow-slate-200/50 rounded-2xl bg-white p-16 text-center">
+        <Card className="border border-slate-200/70 shadow-sm rounded-2xl bg-white p-16 text-center">
           <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto mb-6 text-slate-400">
             <Inbox size={28} />
           </div>
@@ -219,7 +219,7 @@ const AccessRequests: React.FC = () => {
           {requests.map((req) => (
             <Card
               key={req._id}
-              className="border-none shadow-xl shadow-slate-200/50 rounded-2xl bg-white"
+              className="border border-slate-200/70 shadow-sm rounded-2xl bg-white"
             >
               <CardContent className="p-6 space-y-5">
                 <div className="flex items-start justify-between gap-3">

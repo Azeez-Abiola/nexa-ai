@@ -24,6 +24,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
+import { exportCsv, exportCsvSections } from '../lib/exportCsv';
 
 export type DirectoryProps = {
   /** When true, directory is shown inside Tenants (e.g. second tab). */
@@ -92,6 +93,55 @@ const Directory: React.FC<DirectoryProps> = ({ embedded = false, onRequestAddTen
   };
 
   const filteredBUs = bus.filter(b => b.toLowerCase().includes(searchTerm.toLowerCase()));
+
+  /**
+   * The open tenant's profile: its figures, its admins and its users.
+   *
+   * Exports every user, not the ten the card shows. The list on screen is truncated for
+   * layout, and a spreadsheet that silently stopped at ten would be worse than useless
+   * to anyone reconciling headcount.
+   */
+  const handleExportBu = () => {
+    if (!selectedBU || !buDetails) return;
+    exportCsvSections(`tenant-${selectedBU.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`, [
+      {
+        title: `${selectedBU} — summary`,
+        headers: ['Metric', 'Value'],
+        rows: [
+          ['Business unit', selectedBU],
+          ['Individual users', buDetails.stats?.users ?? 0],
+          ['Chat sessions', buDetails.stats?.conversations ?? 0],
+          ['Uploaded documents', buDetails.stats?.policies ?? 0],
+          ['Admins', buDetails.admins?.length ?? 0],
+        ],
+      },
+      {
+        title: 'Admins',
+        headers: ['Name', 'Email', 'Status'],
+        rows: (buDetails.admins || []).map((a: any) => [
+          a.fullName || '',
+          a.email || '',
+          a.isActive === false ? 'Inactive' : 'Active',
+        ]),
+      },
+      {
+        title: 'Users',
+        headers: ['Name', 'Email', 'Department', 'Status', 'Last login'],
+        rows: (buDetails.users || []).map((u: any) => [
+          u.fullName || '',
+          u.email || '',
+          u.department || '',
+          u.isActive === false ? 'Inactive' : 'Active',
+          u.lastLogin ? new Date(u.lastLogin).toISOString().split('T')[0] : '',
+        ]),
+      },
+    ]);
+  };
+
+  /** The list view exports the business units on screen, matching any search in force. */
+  const handleExportList = () => {
+    exportCsv('business-units', ['Business unit'], filteredBUs.map((b) => [b]));
+  };
 
   if (selectedBU) {
     if (isDetailLoading) {
@@ -169,16 +219,28 @@ const Directory: React.FC<DirectoryProps> = ({ embedded = false, onRequestAddTen
               <p className="text-slate-400 font-medium">Core business unit profile and performance monitoring</p>
             </div>
           </div>
-          <Button
-            onClick={() => {
-              setInviteAdminBu(selectedBU || undefined);
-              setInviteAdminOpen(true);
-            }}
-            className="bg-[#ed0000] hover:bg-[#c40000] text-white rounded-xl h-11 px-6 shadow-lg shadow-red-900/10 flex items-center gap-2 group font-bold w-fit"
-          >
-            <UserPlus size={18} />
-            Invite admin
-          </Button>
+          <div className="flex items-center gap-3">
+            {/* This tenant's own figures, admins and users — not the tenant registry,
+                which is a different table on the other tab. */}
+            <button
+              onClick={handleExportBu}
+              title={`Export ${selectedBU} profile, admins and users as CSV`}
+              className="h-11 px-5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-600 flex items-center gap-2 hover:bg-slate-50 hover:border-slate-300 transition-all active:scale-95"
+            >
+              <Download size={14} />
+              Export CSV
+            </button>
+            <Button
+              onClick={() => {
+                setInviteAdminBu(selectedBU || undefined);
+                setInviteAdminOpen(true);
+              }}
+              className="bg-[#ed0000] hover:bg-[#c40000] text-white rounded-xl h-11 px-6 shadow-lg shadow-red-900/10 flex items-center gap-2 group font-bold w-fit"
+            >
+              <UserPlus size={18} />
+              Invite admin
+            </Button>
+          </div>
         </div>
 
         <InviteAdminSheet
@@ -262,18 +324,10 @@ const Directory: React.FC<DirectoryProps> = ({ embedded = false, onRequestAddTen
         </div>
         <div className="flex items-center gap-3">
           <button
-            onClick={() => {
-              const rows = [['Business Unit', 'Status'], ...bus.map(b => [b, 'Active'])];
-              const csv = rows.map(r => r.join(',')).join('\n');
-              const blob = new Blob([csv], { type: 'text/csv' });
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement('a');
-              a.href = url;
-              a.download = `nexa-directory-${new Date().toISOString().split('T')[0]}.csv`;
-              a.click();
-              URL.revokeObjectURL(url);
-            }}
-            className="h-11 px-5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-600 flex items-center gap-2 hover:bg-slate-50 hover:border-slate-300 transition-all active:scale-95"
+            onClick={handleExportList}
+            disabled={filteredBUs.length === 0}
+            title={filteredBUs.length === 0 ? 'Nothing to export' : `Export ${filteredBUs.length} business unit(s) as CSV`}
+            className="h-11 px-5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-600 flex items-center gap-2 hover:bg-slate-50 hover:border-slate-300 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100"
           >
             <Download size={14} />
             Export CSV

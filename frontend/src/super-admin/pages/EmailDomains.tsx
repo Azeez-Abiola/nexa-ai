@@ -174,7 +174,7 @@ const EmailDomains: React.FC = () => {
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
         {/* Helper Card */}
         <div className="lg:col-span-1">
-          <Card className="border-none shadow-2xl shadow-slate-200/50 rounded-[2.5rem] p-8 bg-slate-900 text-white overflow-hidden relative h-full">
+          <Card className="border border-slate-200/70 shadow-sm rounded-[2.5rem] p-8 bg-slate-900 text-white overflow-hidden relative h-full">
             <div className="relative z-10 space-y-6">
               <div className="w-12 h-12 rounded-2xl bg-white/10 backdrop-blur-xl flex items-center justify-center">
                 <ShieldCheck size={24} className="text-rose-400" />
@@ -201,7 +201,7 @@ const EmailDomains: React.FC = () => {
 
         {/* Data Table */}
         <div className="lg:col-span-3">
-          <Card className="border-none shadow-2xl shadow-slate-200/50 rounded-2xl overflow-hidden bg-rose-50/50">
+          <Card className="border border-slate-200/70 shadow-sm rounded-2xl overflow-hidden bg-white">
             <Table>
               <TableHeader className="bg-white/50 border-b border-slate-100">
                 <TableRow className="hover:bg-transparent">

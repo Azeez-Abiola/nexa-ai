@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { format, subDays } from "date-fns";
-import { BarChart3, Users, MessageSquare, Files, Building2, UserPlus } from "lucide-react";
+import { BarChart3, Users, MessageSquare, Files, Building2, UserPlus, Download } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import UtilizationPanel from "../components/UtilizationPanel";
+import { exportCsvSections } from "../lib/exportCsv";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import {
@@ -118,6 +119,52 @@ const Analytics: React.FC = () => {
     return rows.filter((r) => r.value > 0);
   }, [stats]);
 
+  /**
+   * Everything on the page as one CSV, section by section. Sections with no rows are
+   * dropped by the helper, so a business-unit admin (who sees neither the per-BU table
+   * nor top users) gets a file of exactly what was on their screen.
+   */
+  const handleExport = () => {
+    exportCsvSections("analytics", [
+      {
+        title: "Summary",
+        headers: ["Metric", "Value"],
+        rows: stats
+          ? [
+              ["Users", stats.totalUsers],
+              ["Members using AI", stats.usersWhoChatted],
+              ["Admins", stats.totalAdmins],
+              ["Conversations", stats.totalConversations],
+              ["Knowledge policies", stats.totalPolicies],
+              ["Documents", stats.totalDocs],
+              ["Tenants", stats.totalTenants],
+              ["Exported at", format(new Date(), "yyyy-MM-dd HH:mm:ss")],
+            ]
+          : [],
+      },
+      {
+        title: "Daily chat activity",
+        headers: ["Date", "Conversations"],
+        rows: chatSeries.map((p) => [p._id, p.count]),
+      },
+      {
+        title: "Audit activity",
+        headers: ["Date", "Day", "Events"],
+        rows: auditSeries.map((p) => [p.date, p.day, p.count]),
+      },
+      {
+        title: "Business units",
+        headers: ["Business unit", "Users", "Admins", "Policies", "Conversations"],
+        rows: buStats.map((s) => [s.name, s.users, s.admins, s.policies, s.conversations]),
+      },
+      {
+        title: "Top users",
+        headers: ["Name", "Email", "Conversations"],
+        rows: topUsers.map((u) => [u.name, u.email, u.conversations]),
+      },
+    ]);
+  };
+
   const buBarData = useMemo(
     () =>
       (buStats || []).map((s) => ({
@@ -200,19 +247,32 @@ const Analytics: React.FC = () => {
 
   return (
     <div className="min-w-0 max-w-full space-y-10 pb-12 animate-in fade-in duration-500">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight text-slate-900 font-['Sen'] flex items-center gap-3">
-          <BarChart3 className="text-[var(--brand-color)]" size={32} />
-          Analytics
-        </h1>
-        <p className="text-slate-500 font-medium mt-1 text-sm max-w-2xl">
-          Live metrics and trends. Figures refresh automatically every few seconds while you stay on this page.
-          {lastUpdated && (
-            <span className="block mt-1 text-[11px] text-slate-400 font-semibold uppercase tracking-wide">
-              Last updated {format(lastUpdated, "MMM d, yyyy HH:mm:ss")}
-            </span>
-          )}
-        </p>
+      <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight text-slate-900 font-['Sen'] flex items-center gap-3">
+            <BarChart3 className="text-[var(--brand-color)]" size={32} />
+            Analytics
+          </h1>
+          <p className="text-slate-500 font-medium mt-1 text-sm max-w-2xl">
+            Live metrics and trends. Figures refresh automatically every few seconds while you stay on this page.
+            {lastUpdated && (
+              <span className="block mt-1 text-[11px] text-slate-400 font-semibold uppercase tracking-wide">
+                Last updated {format(lastUpdated, "MMM d, yyyy HH:mm:ss")}
+              </span>
+            )}
+          </p>
+        </div>
+        {/* One file rather than one per table: the page has five separate datasets and
+            five downloads per click would be worse than a single file you can scroll. */}
+        <button
+          onClick={handleExport}
+          disabled={loading || !stats}
+          title={loading ? "Waiting for data" : "Export every table on this page as one CSV"}
+          className="shrink-0 h-11 px-5 bg-white border border-slate-200 rounded-[1.25rem] text-xs font-bold text-slate-600 flex items-center gap-2 hover:bg-slate-50 hover:border-slate-300 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100"
+        >
+          <Download size={14} />
+          Export CSV
+        </button>
       </div>
 
       <div className="grid gap-4 xl:grid-cols-12 xl:items-stretch">

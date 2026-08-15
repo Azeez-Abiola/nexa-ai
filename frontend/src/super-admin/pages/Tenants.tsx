@@ -59,6 +59,7 @@ import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import Directory from './Directory';
+import { exportCsv } from '../lib/exportCsv';
 
 /**
  * Logos are served by the backend (e.g. "/logos/foo.png"). The super-admin app
@@ -149,6 +150,26 @@ const Tenants: React.FC = () => {
     t.slug.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  /**
+   * Exports the rows currently on screen rather than everything fetched, so a search
+   * term narrows the file the same way it narrows the table. What you see is what you get.
+   */
+  const handleExport = () => {
+    exportCsv(
+      'tenants',
+      ['Name', 'Label', 'Slug', 'Status', 'Users', 'Contact email', 'Created'],
+      filteredTenants.map((t) => [
+        t.name,
+        t.label,
+        t.slug,
+        t.isActive ? 'Active' : 'Pending',
+        t.userCount || 0,
+        t.contactEmail || '',
+        t.createdAt ? new Date(t.createdAt).toISOString().split('T')[0] : '',
+      ])
+    );
+  };
+
   return (
     <div className="min-w-0 max-w-full space-y-12 animate-in fade-in slide-in-from-bottom-4 duration-700">
       <div className="flex flex-col lg:flex-row justify-between items-start lg:items-end gap-6">
@@ -160,21 +181,16 @@ const Tenants: React.FC = () => {
               : 'Manage access for all business units.'}
           </p>
         </div>
+        {/* Registry tab only. The other tab renders Directory, which has its own data
+            and its own export — exporting the registry from there would hand you a file
+            that has nothing to do with what is on screen. */}
         {mainTab === 'registry' && (
           <div className="flex items-center gap-3">
             <button
-              onClick={() => {
-                const rows = [['Name', 'Label', 'Slug', 'Status', 'Users'], ...tenants.map(t => [t.name, t.label, t.slug, t.isActive ? 'Active' : 'Pending', t.userCount || 0])];
-                const csv = rows.map(r => r.join(',')).join('\n');
-                const blob = new Blob([csv], { type: 'text/csv' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `nexa-tenants-${new Date().toISOString().split('T')[0]}.csv`;
-                a.click();
-                URL.revokeObjectURL(url);
-              }}
-              className="h-11 px-5 bg-white border border-slate-200 rounded-[1.25rem] text-xs font-bold text-slate-600 flex items-center gap-2 hover:bg-slate-50 hover:border-slate-300 transition-all active:scale-95"
+              onClick={handleExport}
+              disabled={isLoading || filteredTenants.length === 0}
+              title={filteredTenants.length === 0 ? 'Nothing to export' : `Export ${filteredTenants.length} tenant(s) as CSV`}
+              className="h-11 px-5 bg-white border border-slate-200 rounded-[1.25rem] text-xs font-bold text-slate-600 flex items-center gap-2 hover:bg-slate-50 hover:border-slate-300 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100"
             >
               <Download size={14} />
               Export CSV
@@ -204,7 +220,7 @@ const Tenants: React.FC = () => {
       {/* Top Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {isLoading ? [1, 2, 3, 4].map(i => (
-          <Card key={i} className="border-none shadow-xl shadow-slate-200/50 rounded-2xl bg-rose-50/50 p-8">
+          <Card key={i} className="border border-slate-200/70 shadow-sm rounded-2xl bg-white p-8">
             <CardContent className="p-0 w-full">
               <div className="flex justify-between items-start">
                 <Skeleton className="w-10 h-10 rounded-xl" />
@@ -236,7 +252,7 @@ const Tenants: React.FC = () => {
         </div>
 
         {/* Main Table */}
-        <Card className="border-none shadow-2xl shadow-slate-200/50 rounded-2xl overflow-hidden bg-rose-50/50">
+        <Card className="border border-slate-200/70 shadow-sm rounded-2xl overflow-hidden bg-white">
           <div className="w-full min-w-0 overflow-x-auto">
           <Table>
             <TableHeader className="bg-slate-50/50 border-b border-slate-100">
@@ -394,7 +410,7 @@ const Tenants: React.FC = () => {
 
 const MiniStatCard = ({ label, value, icon, trend }: any) => {
   return (
-    <Card className="border-none shadow-xl shadow-slate-200/50 rounded-2xl bg-rose-50/50 flex flex-col items-center justify-center p-8 gap-4 text-center group hover:-translate-y-1 transition-transform cursor-pointer h-full">
+    <Card className="border border-slate-200/70 shadow-sm rounded-2xl bg-white flex flex-col items-center justify-center p-8 gap-4 text-center group hover:-translate-y-1 transition-transform cursor-pointer h-full">
       <CardContent className="p-0 w-full text-left">
         <div className="flex justify-between items-start">
           <div className="w-10 h-10 rounded-xl bg-white border border-rose-100 flex items-center justify-center text-slate-400 group-hover:bg-[#ed0000] group-hover:text-white transition-all duration-500 shadow-sm">

@@ -228,7 +228,7 @@ const BusinessProfile: React.FC = () => {
           <Skeleton className="h-14 w-48 rounded-2xl" />
           <Skeleton className="h-14 w-48 rounded-2xl" />
         </div>
-        <Card className="p-10 rounded-[2rem] border-none shadow-xl">
+        <Card className="p-10 rounded-[2rem] border border-slate-200/70 shadow-sm">
           <div className="flex gap-12">
             <Skeleton className="w-40 h-40 rounded-[2.5rem]" />
             <div className="flex-1 space-y-8">
@@ -272,7 +272,7 @@ const BusinessProfile: React.FC = () => {
         <TabsContent value="branding" className="animate-in fade-in slide-in-from-top-2 duration-300 outline-none">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
             <div className="lg:col-span-8">
-              <Card className="border-none shadow-xl shadow-slate-200/50 rounded-[2rem] bg-white overflow-hidden">
+              <Card className="border border-slate-200/70 shadow-sm rounded-[2rem] bg-white overflow-hidden">
                 <CardHeader className="p-10 border-b border-slate-50">
                   <CardTitle className="text-2xl font-black font-['Sen']">Theme & visuals</CardTitle>
                   <CardDescription className="text-slate-400 font-medium text-sm">Define how your platform appears to your business unit users.</CardDescription>
@@ -388,7 +388,7 @@ const BusinessProfile: React.FC = () => {
             </div>
 
             <div className="lg:col-span-4 h-full">
-              <Card className="border-none shadow-xl shadow-slate-200/50 rounded-[2rem] bg-slate-900 text-white p-10 h-full flex flex-col relative overflow-hidden group">
+              <Card className="border border-slate-200/70 shadow-sm rounded-[2rem] bg-slate-900 text-white p-10 h-full flex flex-col relative overflow-hidden group">
                 <div className="relative z-10 space-y-6">
                   <div className="w-12 h-12 rounded-2xl bg-white/10 flex items-center justify-center text-white">
                     <CheckCircle2 size={24} />
@@ -412,7 +412,7 @@ const BusinessProfile: React.FC = () => {
         </TabsContent>
 
         <TabsContent value="security" className="animate-in fade-in slide-in-from-bottom-2 duration-300 outline-none">
-          <Card className="border-none shadow-xl shadow-slate-200/50 rounded-[2rem] bg-white overflow-hidden max-w-3xl">
+          <Card className="border border-slate-200/70 shadow-sm rounded-[2rem] bg-white overflow-hidden max-w-3xl">
             <CardHeader className="p-10 border-b border-red-50 bg-red-50/20">
               <div className="flex items-center gap-4">
                 <div className="w-12 h-12 bg-red-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-red-200">
