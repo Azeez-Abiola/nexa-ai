@@ -23,6 +23,8 @@ const ERROR_MESSAGES: Record<string, string> = {
     "That Microsoft account isn't registered with Nexa. Ask your administrator for access, then try again.",
   account_inactive: "This account has been deactivated. Please contact your administrator.",
   invalid_state: "Sign-in couldn't be completed. Please try again.",
+  sso_not_configured:
+    "Microsoft sign-in isn't set up yet. Please use your email and password, or contact your administrator.",
 };
 
 /**

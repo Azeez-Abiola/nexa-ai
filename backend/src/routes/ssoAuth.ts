@@ -12,9 +12,26 @@ export const ssoAuthRouter = express.Router();
 
 const JWT_SECRET = process.env.NEXA_AI_JWT_SECRET!;
 const FRONTEND_URL = (process.env.FRONTEND_URL || "http://localhost:3000").replace(/\/$/, "");
-const AZURE_CLIENT_ID = process.env.AZURE_CLIENT_ID!;
-const AZURE_CLIENT_SECRET = process.env.AZURE_CLIENT_SECRET!;
-const AZURE_SSO_CALLBACK_URL = process.env.AZURE_SSO_CALLBACK_URL!;
+const AZURE_CLIENT_ID = process.env.AZURE_CLIENT_ID;
+const AZURE_CLIENT_SECRET = process.env.AZURE_CLIENT_SECRET;
+const AZURE_SSO_CALLBACK_URL = process.env.AZURE_SSO_CALLBACK_URL;
+
+/**
+ * Whether SSO can actually run. Without this the missing values were interpolated into
+ * the authorize URL as the literal string "undefined", so the user was redirected to
+ * Microsoft only to be told `redirect_uri` was not a valid URI. That points the person
+ * debugging at Microsoft, when the problem is entirely our own missing configuration.
+ */
+const SSO_CONFIGURED = Boolean(AZURE_CLIENT_ID && AZURE_CLIENT_SECRET && AZURE_SSO_CALLBACK_URL);
+
+if (!SSO_CONFIGURED) {
+  const missing = [
+    !AZURE_CLIENT_ID && "AZURE_CLIENT_ID",
+    !AZURE_CLIENT_SECRET && "AZURE_CLIENT_SECRET",
+    !AZURE_SSO_CALLBACK_URL && "AZURE_SSO_CALLBACK_URL",
+  ].filter(Boolean);
+  console.warn(`[ssoAuth] Microsoft SSO is disabled — missing env: ${missing.join(", ")}`);
+}
 
 const MICROSOFT_AUTHORIZE_URL = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize";
 const MICROSOFT_TOKEN_URL = "https://login.microsoftonline.com/common/oauth2/v2.0/token";
@@ -29,6 +46,9 @@ function ssoErrorRedirect(res: Response, reason: string) {
 // short-lived signed JWT (not a session-stored value) since this app is 100% stateless/bearer-JWT;
 // base64url-encoding it keeps the state param free of characters Microsoft/browsers might mangle.
 ssoAuthRouter.get("/microsoft", (_req: Request, res: Response) => {
+  // Fail here rather than sending the user to Microsoft with placeholder values.
+  if (!SSO_CONFIGURED) return ssoErrorRedirect(res, "sso_not_configured");
+
   const nonce = crypto.randomUUID();
   const stateJwt = jwt.sign({ nonce }, JWT_SECRET, { expiresIn: "10m" });
   const state = Buffer.from(stateJwt).toString("base64url");
@@ -48,6 +68,8 @@ ssoAuthRouter.get("/microsoft", (_req: Request, res: Response) => {
 // GET /api/v1/auth/sso/microsoft/callback — exchanges the code, resolves the account, and
 // redirects (never JSON) to a role-aware frontend URL carrying the app's tokens as query params.
 ssoAuthRouter.get("/microsoft/callback", async (req: Request, res: Response) => {
+  if (!SSO_CONFIGURED) return ssoErrorRedirect(res, "sso_not_configured");
+
   try {
     const { code, state } = req.query;
 
