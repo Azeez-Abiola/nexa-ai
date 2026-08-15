@@ -253,6 +253,125 @@ analyticsRouter.get("/audit-activity", adminAuthMiddleware, async (req: Authenti
 });
 
 /**
+ * Where answers actually came from: your documents, the open web, or neither.
+ *
+ * Needs no new instrumentation. Every assistant message already stores the sources it
+ * cited, and web citations are tagged `documentType: "web"` while knowledge base ones
+ * keep their real type, so each answer can be classified after the fact:
+ *
+ *   knowledgeBase — cited your documents only
+ *   web           — cited the open web only
+ *   both          — drew on your documents and the web together
+ *   model         — cited nothing, so it came from the model's general knowledge
+ *
+ * The last bucket is the one worth watching. A high share means people are asking things
+ * your knowledge base has nothing to say about, and the answers, while probably fine, are
+ * not grounded in anything the organisation has approved.
+ */
+analyticsRouter.get("/answer-sources", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { businessUnit, isSuperAdmin } = req;
+    const { Conversation } = await import("../models/Conversation");
+
+    const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 180);
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+    const rows = await Conversation.aggregate([
+      { $match: isSuperAdmin ? {} : { businessUnit } },
+      { $unwind: "$conversationGroups" },
+      // Drop whole conversations that have not been touched in the window before
+      // unwinding their messages, so the pipeline never expands stale history.
+      { $match: { "conversationGroups.updatedAt": { $gte: since } } },
+      { $unwind: "$conversationGroups.messages" },
+      {
+        $match: {
+          "conversationGroups.messages.role": "assistant",
+          "conversationGroups.messages.timestamp": { $gte: since }
+        }
+      },
+      {
+        $project: {
+          day: { $dateToString: { format: "%Y-%m-%d", date: "$conversationGroups.messages.timestamp" } },
+          types: {
+            $ifNull: [
+              {
+                $map: {
+                  input: { $ifNull: ["$conversationGroups.messages.sources", []] },
+                  as: "s",
+                  in: "$$s.documentType"
+                }
+              },
+              []
+            ]
+          }
+        }
+      },
+      {
+        $project: {
+          day: 1,
+          hasWeb: { $in: ["web", "$types"] },
+          hasKb: {
+            $gt: [
+              { $size: { $filter: { input: "$types", as: "t", cond: { $ne: ["$$t", "web"] } } } },
+              0
+            ]
+          }
+        }
+      },
+      {
+        $project: {
+          day: 1,
+          bucket: {
+            $switch: {
+              branches: [
+                { case: { $and: ["$hasKb", "$hasWeb"] }, then: "both" },
+                { case: "$hasKb", then: "knowledgeBase" },
+                { case: "$hasWeb", then: "web" }
+              ],
+              default: "model"
+            }
+          }
+        }
+      },
+      { $group: { _id: { day: "$day", bucket: "$bucket" }, count: { $sum: 1 } } },
+      { $sort: { "_id.day": 1 } }
+    ]);
+
+    const totals = { knowledgeBase: 0, web: 0, both: 0, model: 0 };
+    const byDay = new Map<string, { date: string; knowledgeBase: number; web: number; both: number; model: number }>();
+
+    for (const row of rows as { _id: { day: string; bucket: keyof typeof totals }; count: number }[]) {
+      const { day, bucket } = row._id;
+      totals[bucket] += row.count;
+      if (!byDay.has(day)) byDay.set(day, { date: day, knowledgeBase: 0, web: 0, both: 0, model: 0 });
+      byDay.get(day)![bucket] += row.count;
+    }
+
+    const totalAnswers = totals.knowledgeBase + totals.web + totals.both + totals.model;
+    const pct = (n: number) => (totalAnswers > 0 ? Number(((n / totalAnswers) * 100).toFixed(1)) : null);
+
+    res.json({
+      days,
+      totalAnswers,
+      totals,
+      // "Grounded" counts anything citing your own documents, whether or not it also
+      // used the web. It is the number that answers "is the knowledge base earning its keep".
+      groundedRate: pct(totals.knowledgeBase + totals.both),
+      percentages: {
+        knowledgeBase: pct(totals.knowledgeBase),
+        web: pct(totals.web),
+        both: pct(totals.both),
+        model: pct(totals.model)
+      },
+      daily: Array.from(byDay.values())
+    });
+  } catch (error) {
+    console.error("Answer sources error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/**
  * Knowledge gaps — where Nexa is failing its users, rather than how busy it is.
  *
  * Three failures that were already being written to the audit log and never read:

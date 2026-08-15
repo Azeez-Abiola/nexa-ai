@@ -5,6 +5,7 @@ import { BarChart3, Users, MessageSquare, Files, Building2, UserPlus, Download }
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import UtilizationPanel from "../components/UtilizationPanel";
 import KnowledgeGapsPanel from "../components/KnowledgeGapsPanel";
+import AnswerSourcesPanel from "../components/AnswerSourcesPanel";
 import { exportCsvSections } from "../lib/exportCsv";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
@@ -460,6 +461,8 @@ const Analytics: React.FC = () => {
       {/* Shown to every admin, not just super admins: a business unit's own gaps are
           exactly the list its own admin should be acting on, and the endpoint already
           scopes the data to their unit. */}
+      <AnswerSourcesPanel />
+
       <KnowledgeGapsPanel />
 
       {isSuper && <UtilizationPanel />}
