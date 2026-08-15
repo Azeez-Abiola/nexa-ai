@@ -90,7 +90,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess }) => {
           </div>
           <div className={styles.formWrapper}>
             <div className={styles.logoWrapper}>
-              <img src="/1879-22.png" alt="1879 Tech Hub" className={styles.logoTop} />
+              <img src="/icons/nexa-logo.png" alt="Nexa" className={styles.logoTop} />
             </div>
             <div className={styles.card}>
               <p className={styles.subheading}>

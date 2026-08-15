@@ -17,7 +17,9 @@ const TEMPLATES_DIR = path.join(__dirname, "..", "templates", "emails");
 
 async function renderTemplate(name: string, data: Record<string, unknown>): Promise<string> {
   const commonData = {
-    nexaLogoUrl: `${FRONTEND_URL}/1879-22.png`,
+    // The square mark, not the full lockup: templates render this at 36-45px wide,
+    // where a wordmark would be illegible.
+    nexaLogoUrl: `${FRONTEND_URL}/icons/nexa-icon.png`,
     ...data
   };
   return ejs.renderFile(path.join(TEMPLATES_DIR, `${name}.ejs`), commonData, { async: false });

@@ -201,11 +201,11 @@ const SuperAdminMain: React.FC<SuperAdminMainProps> = ({ theme, toggleTheme }) =
                 alt="Tenant Logo"
                 className="w-full h-full object-contain"
                 onError={(e) => {
-                  (e.target as HTMLImageElement).src = "/1879-22.png";
+                  (e.target as HTMLImageElement).src = "/icons/nexa-icon.png";
                 }}
               />
             ) : (
-              <img src="/1879-22.png" alt="1879 Logo" className="w-full h-full object-contain" />
+              <img src="/icons/nexa-icon.png" alt="Nexa" className="w-full h-full object-contain" />
             )}
           </div>
           {isSidebarOpen && (
@@ -371,21 +371,22 @@ const SuperAdminMain: React.FC<SuperAdminMainProps> = ({ theme, toggleTheme }) =
             <div className="pointer-events-none absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center gap-2.5">
               {isSuperAdminContext ? (
                 <>
-                  <img src="/1879-22.png" alt="" className="h-8 w-8 object-contain" width={32} height={32} />
-                  <span className={cn("whitespace-nowrap font-['Sen'] text-xl font-black tracking-tight", theme === 'dark' ? "text-white" : "text-slate-900")}>
-                    Nexa.Ai
-                  </span>
+                  <img
+                    src={theme === 'dark' ? "/icons/nexa-logo-light.png" : "/icons/nexa-logo.png"}
+                    alt="Nexa"
+                    className="h-7 w-auto object-contain"
+                  />
                 </>
               ) : (
                 <img
                   src={user?.tenantLogo
                     ? (user.tenantLogo.startsWith('http') ? user.tenantLogo : `${import.meta.env.VITE_API_URL || ''}/logos/${user.tenantLogo.replace(/^\/logos\//, '')}`)
-                    : '/1879-22.png'}
+                    : '/icons/nexa-icon.png'}
                   alt={user?.tenantLabel || user?.businessUnit || ''}
                   className="h-10 w-10 object-contain"
                   width={40}
                   height={40}
-                  onError={(e) => { (e.target as HTMLImageElement).src = '/1879-22.png'; }}
+                  onError={(e) => { (e.target as HTMLImageElement).src = '/icons/nexa-icon.png'; }}
                 />
               )}
             </div>
@@ -487,11 +488,11 @@ const SuperAdminMain: React.FC<SuperAdminMainProps> = ({ theme, toggleTheme }) =
                       alt=""
                       className="h-full w-full object-contain"
                       onError={(e) => {
-                        (e.target as HTMLImageElement).src = "/1879-22.png";
+                        (e.target as HTMLImageElement).src = "/icons/nexa-icon.png";
                       }}
                     />
                   ) : (
-                    <img src="/1879-22.png" alt="" className="h-full w-full object-contain" />
+                    <img src="/icons/nexa-icon.png" alt="" className="h-full w-full object-contain" />
                   )}
                 </div>
                 <div className="min-w-0">
