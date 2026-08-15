@@ -22,9 +22,12 @@ const AZURE_SSO_CALLBACK_URL = process.env.AZURE_SSO_CALLBACK_URL;
  * Microsoft only to be told `redirect_uri` was not a valid URI. That points the person
  * debugging at Microsoft, when the problem is entirely our own missing configuration.
  */
-const SSO_CONFIGURED = Boolean(AZURE_CLIENT_ID && AZURE_CLIENT_SECRET && AZURE_SSO_CALLBACK_URL);
+const AZURE =
+  AZURE_CLIENT_ID && AZURE_CLIENT_SECRET && AZURE_SSO_CALLBACK_URL
+    ? { clientId: AZURE_CLIENT_ID, clientSecret: AZURE_CLIENT_SECRET, callbackUrl: AZURE_SSO_CALLBACK_URL }
+    : null;
 
-if (!SSO_CONFIGURED) {
+if (!AZURE) {
   const missing = [
     !AZURE_CLIENT_ID && "AZURE_CLIENT_ID",
     !AZURE_CLIENT_SECRET && "AZURE_CLIENT_SECRET",
@@ -47,16 +50,16 @@ function ssoErrorRedirect(res: Response, reason: string) {
 // base64url-encoding it keeps the state param free of characters Microsoft/browsers might mangle.
 ssoAuthRouter.get("/microsoft", (_req: Request, res: Response) => {
   // Fail here rather than sending the user to Microsoft with placeholder values.
-  if (!SSO_CONFIGURED) return ssoErrorRedirect(res, "sso_not_configured");
+  if (!AZURE) return ssoErrorRedirect(res, "sso_not_configured");
 
   const nonce = crypto.randomUUID();
   const stateJwt = jwt.sign({ nonce }, JWT_SECRET, { expiresIn: "10m" });
   const state = Buffer.from(stateJwt).toString("base64url");
 
   const params = new URLSearchParams({
-    client_id: AZURE_CLIENT_ID,
+    client_id: AZURE.clientId,
     response_type: "code",
-    redirect_uri: AZURE_SSO_CALLBACK_URL,
+    redirect_uri: AZURE.callbackUrl,
     response_mode: "query",
     scope: MICROSOFT_SCOPE,
     state
@@ -68,7 +71,7 @@ ssoAuthRouter.get("/microsoft", (_req: Request, res: Response) => {
 // GET /api/v1/auth/sso/microsoft/callback — exchanges the code, resolves the account, and
 // redirects (never JSON) to a role-aware frontend URL carrying the app's tokens as query params.
 ssoAuthRouter.get("/microsoft/callback", async (req: Request, res: Response) => {
-  if (!SSO_CONFIGURED) return ssoErrorRedirect(res, "sso_not_configured");
+  if (!AZURE) return ssoErrorRedirect(res, "sso_not_configured");
 
   try {
     const { code, state } = req.query;
@@ -89,11 +92,11 @@ ssoAuthRouter.get("/microsoft/callback", async (req: Request, res: Response) => 
       const tokenResp = await axios.post(
         MICROSOFT_TOKEN_URL,
         new URLSearchParams({
-          client_id: AZURE_CLIENT_ID,
-          client_secret: AZURE_CLIENT_SECRET,
+          client_id: AZURE.clientId,
+          client_secret: AZURE.clientSecret,
           code,
           grant_type: "authorization_code",
-          redirect_uri: AZURE_SSO_CALLBACK_URL,
+          redirect_uri: AZURE.callbackUrl,
           scope: MICROSOFT_SCOPE
         }),
         { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
