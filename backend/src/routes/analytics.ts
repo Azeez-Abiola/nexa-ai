@@ -253,6 +253,102 @@ analyticsRouter.get("/audit-activity", adminAuthMiddleware, async (req: Authenti
 });
 
 /**
+ * Knowledge gaps — where Nexa is failing its users, rather than how busy it is.
+ *
+ * Three failures that were already being written to the audit log and never read:
+ *
+ *   • an answer nobody could get, because retrieval came back empty
+ *   • an answer somebody was refused, because their groups did not grant access
+ *   • a document that never became searchable, because processing failed
+ *
+ * The first is the useful one: it is literally a queue of what to upload next, in the
+ * users' own words. The third matters because it is silent — an admin uploads a policy,
+ * sees it listed, and never learns it failed to index.
+ *
+ * `?days=` widens the window (default 30, capped at 180 so the aggregate stays bounded).
+ */
+analyticsRouter.get("/knowledge-gaps", adminAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { businessUnit, isSuperAdmin } = req;
+    const { AuditLog } = await import("../models/AuditLog");
+
+    const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 180);
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    const scope = isSuperAdmin ? {} : { businessUnit };
+    const window = { ...scope, createdAt: { $gte: since } };
+
+    const [counts, dailyMisses, recentMisses, failedDocs] = await Promise.all([
+      // One pass for all three totals rather than three round trips.
+      AuditLog.aggregate([
+        {
+          $match: {
+            ...window,
+            eventType: { $in: ["rag_retrieval_empty", "rag_access_denied", "document_processing_failed", "rag_query"] }
+          }
+        },
+        { $group: { _id: "$eventType", count: { $sum: 1 } } }
+      ]),
+
+      AuditLog.aggregate([
+        { $match: { ...window, eventType: "rag_retrieval_empty" } },
+        { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } }, count: { $sum: 1 } } },
+        { $sort: { _id: 1 } }
+      ]),
+
+      // Group identical questions so one person asking five times does not crowd out
+      // five people asking once. The busiest gaps are the ones worth fixing first.
+      AuditLog.aggregate([
+        { $match: { ...window, eventType: "rag_retrieval_empty", "metadata.query": { $exists: true, $ne: "" } } },
+        {
+          $group: {
+            _id: { $toLower: "$metadata.query" },
+            query: { $first: "$metadata.query" },
+            businessUnit: { $first: "$businessUnit" },
+            count: { $sum: 1 },
+            lastAskedAt: { $max: "$createdAt" }
+          }
+        },
+        { $sort: { count: -1, lastAskedAt: -1 } },
+        { $limit: 25 },
+        { $project: { _id: 0, query: 1, businessUnit: 1, count: 1, lastAskedAt: 1 } }
+      ]),
+
+      AuditLog.find({ ...window, eventType: "document_processing_failed" })
+        .sort({ createdAt: -1 })
+        .limit(25)
+        .select("details businessUnit createdAt metadata")
+        .lean()
+    ]);
+
+    const countOf = (type: string) => counts.find((c: { _id: string }) => c._id === type)?.count || 0;
+    const totalQueries = countOf("rag_query");
+    const emptyRetrievals = countOf("rag_retrieval_empty");
+
+    res.json({
+      days,
+      emptyRetrievals,
+      accessDenied: countOf("rag_access_denied"),
+      failedDocuments: countOf("document_processing_failed"),
+      totalQueries,
+      // Share of questions the knowledge base could not answer at all. Null rather than
+      // zero when nothing was asked, so the UI shows "no data" instead of a flattering 0%.
+      missRate: totalQueries > 0 ? Number(((emptyRetrievals / totalQueries) * 100).toFixed(1)) : null,
+      dailyMisses: dailyMisses.map((d: { _id: string; count: number }) => ({ date: d._id, count: d.count })),
+      topUnanswered: recentMisses,
+      failedDocuments_list: failedDocs.map((d: any) => ({
+        details: d.details || "",
+        businessUnit: d.businessUnit,
+        filename: d.metadata?.filename || "",
+        createdAt: d.createdAt
+      }))
+    });
+  } catch (error) {
+    console.error("Knowledge gaps error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/**
  * Platform utilization per business unit, for cost apportionment.
  *
  * `?from=`/`?to=` accept ISO dates; `?format=csv` returns a downloadable file
