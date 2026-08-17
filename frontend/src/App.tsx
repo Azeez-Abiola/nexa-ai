@@ -1477,7 +1477,12 @@ export const App: React.FC = () => {
       fetchBuUsers(authToken);
       navigate(postLoginPath, { replace: true });
     } else {
-      window.history.pushState(null, "", "/user-chat");
+      // Router-aware navigation, not history.pushState. pushState changes the address bar
+      // without telling React Router, so useLocation kept reporting the old path and the
+      // SSO callback screen stayed mounted on its spinner until the user refreshed.
+      // Password login hid this, because /login separately falls through to the chat once
+      // authenticated regardless of the URL.
+      navigate("/user-chat", { replace: true });
       setIsConversationsLoading(true);
       axios.defaults.headers.common["Authorization"] = `Bearer ${authToken}`;
       applyTenantBrandFromSession(authUser.tenantColor);
