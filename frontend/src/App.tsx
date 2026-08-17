@@ -9,6 +9,7 @@ import {
   BiPaperclip, BiMicrophone, BiMoon, BiSun, BiCamera, BiCopy, BiCheck, BiLink, BiReply, BiSmile, BiX,
   BiPlay, BiPause, BiPhoneCall
 } from "react-icons/bi";
+import { PanelLeft } from "lucide-react";
 import DownloadPage from "./download/DownloadPage";
 import SsoCallback, { SsoError } from "./auth/SsoCallback";
 import VoiceCallOverlay from "./voice/VoiceCallOverlay";
@@ -369,6 +370,21 @@ export const App: React.FC = () => {
     return !!savedToken;
   });
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  /**
+   * Desktop collapse, kept separate from `sidebarOpen`.
+   *
+   * On phones the sidebar is a drawer that slides over the chat, and `sidebarOpen` drives
+   * that. On a wide screen it is a permanent column, and collapsing it should reclaim the
+   * space rather than overlay it. One flag cannot mean both without the two behaviours
+   * fighting on a tablet-sized window.
+   */
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("nexa-sidebar-collapsed") === "true";
+    } catch {
+      return false;
+    }
+  });
   const [isConversationsLoading, setIsConversationsLoading] = useState(() => {
     // If authenticated, we need to load conversations
     const savedToken = localStorage.getItem("token");
@@ -2950,7 +2966,25 @@ export const App: React.FC = () => {
     return <NewLandingPage />;
   }
 
-  const toggleSidebar = () => setSidebarOpen(!sidebarOpen);
+  const collapseSidebar = (collapsed: boolean) => {
+    setSidebarCollapsed(collapsed);
+    try {
+      localStorage.setItem("nexa-sidebar-collapsed", String(collapsed));
+    } catch {
+      /* private browsing — the preference just will not persist */
+    }
+  };
+
+  /**
+   * One control, two meanings, chosen by viewport: slide the drawer on a phone, collapse
+   * the column on a desktop. Read at click time rather than from state, so resizing the
+   * window never leaves the button doing the wrong thing.
+   */
+  const toggleSidebar = () => {
+    const isMobile = typeof window !== "undefined" && window.innerWidth <= 768;
+    if (isMobile) setSidebarOpen((prev) => !prev);
+    else collapseSidebar(!sidebarCollapsed);
+  };
   const chatHeaderTenantLogoUrl = resolveTenantLogoUrl(user?.tenantLogo);
 
   const ModelToggle = () => (
@@ -3054,7 +3088,7 @@ export const App: React.FC = () => {
     <>
       {isLoading && <LoginLoadingScreen userType={isAdminPage ? "admin" : "user"} />}
       <div className={`ufl-root ${theme === 'dark' ? 'dark-theme' : ''}`}>
-        <aside className={`sidebar ${sidebarOpen ? 'sidebar-open' : ''}`}>
+        <aside className={`sidebar ${sidebarOpen ? 'sidebar-open' : ''} ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
           <div className="sidebar-header-main">
             <div
               className="sidebar-logo"
@@ -3074,6 +3108,21 @@ export const App: React.FC = () => {
                 className="sidebar-logo-img"
               />
             </div>
+            <button
+              type="button"
+              className="sidebar-collapse-btn"
+              aria-label="Collapse sidebar"
+              onClick={(e) => {
+                e.stopPropagation();
+                // Closes the drawer on a phone and collapses the column on a desktop,
+                // which is what "hide this panel" means on each.
+                if (window.innerWidth <= 768) setSidebarOpen(false);
+                else collapseSidebar(true);
+              }}
+              title="Collapse sidebar"
+            >
+              <PanelLeft size={18} />
+            </button>
           </div>
 
           <div className="new-chat-container">
@@ -3440,9 +3489,9 @@ export const App: React.FC = () => {
             <div className="header-left-v2">
               <button
                 type="button"
-                className="sidebar-toggle-btn-header"
-                aria-label={sidebarOpen ? "Close conversation menu" : "Open conversation menu"}
-                aria-expanded={sidebarOpen}
+                className={`sidebar-toggle-btn-header${sidebarCollapsed ? ' is-visible' : ''}`}
+                aria-label={sidebarCollapsed ? "Expand sidebar" : sidebarOpen ? "Close conversation menu" : "Open conversation menu"}
+                aria-expanded={sidebarOpen || !sidebarCollapsed}
                 onClick={(e) => {
                   e.stopPropagation();
                   toggleSidebar();
@@ -4714,10 +4763,59 @@ export const App: React.FC = () => {
           display: flex;
           flex-direction: column;
           padding: 16px;
-          transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s ease;
+          transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s ease,
+                      width 0.25s cubic-bezier(0.4, 0, 0.2, 1), padding 0.25s cubic-bezier(0.4, 0, 0.2, 1);
           border-right: 1px solid #e5e7eb;
           z-index: 50;
+          flex-shrink: 0;
         }
+
+        /*
+         * Desktop collapse. Reclaims the space rather than sliding a panel over the chat,
+         * which is what a permanent column should do when you hide it. Scoped above the
+         * mobile breakpoint because below it the sidebar is a fixed-position drawer and
+         * animating its width would fight the transform that drives it.
+         */
+        @media (min-width: 769px) {
+          .sidebar.sidebar-collapsed {
+            width: 0;
+            padding-left: 0;
+            padding-right: 0;
+            border-right-color: transparent;
+            overflow: hidden;
+          }
+
+          /* Contents are hidden outright, not just clipped, so nothing inside stays
+             focusable by keyboard while the panel is invisible. */
+          .sidebar.sidebar-collapsed > * {
+            visibility: hidden;
+            opacity: 0;
+            pointer-events: none;
+          }
+        }
+
+        .sidebar-collapse-btn {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 32px;
+          height: 32px;
+          border: none;
+          border-radius: 8px;
+          background: transparent;
+          color: #6b7280;
+          cursor: pointer;
+          flex-shrink: 0;
+          transition: background 0.15s ease, color 0.15s ease;
+        }
+
+        .sidebar-collapse-btn:hover {
+          background: rgba(0, 0, 0, 0.06);
+          color: #111827;
+        }
+
+        .dark-theme .sidebar-collapse-btn { color: #9ca3af; }
+        .dark-theme .sidebar-collapse-btn:hover { background: rgba(255, 255, 255, 0.08); color: #f3f4f6; }
 
         .chat-sidebar-backdrop {
           display: none;
@@ -7900,6 +7998,12 @@ export const App: React.FC = () => {
         }
 
         /* Sidebar toggle from header (mobile-first: hidden on wide screens) */
+        /* Hidden on desktop while the sidebar is open, because the sidebar has its own
+           collapse control. Once collapsed this is the only way back, so it must appear. */
+        .sidebar-toggle-btn-header.is-visible {
+          display: flex;
+        }
+
         .sidebar-toggle-btn-header {
           display: none;
           align-items: center;

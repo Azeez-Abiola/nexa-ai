@@ -23,7 +23,8 @@ import {
   Moon,
   Sun,
   Search,
-  MessageSquare
+  MessageSquare,
+  PanelLeft
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
@@ -66,7 +67,31 @@ interface SuperAdminMainProps {
 }
 
 const SuperAdminMain: React.FC<SuperAdminMainProps> = ({ theme, toggleTheme }) => {
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  /**
+   * Collapsed sidebar, remembered per device.
+   *
+   * The collapsed layout already existed but nothing ever toggled it, so the sidebar was
+   * permanently expanded and the narrow variant was dead code.
+   */
+  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("nexa-admin-sidebar-collapsed") !== "true";
+    } catch {
+      return true;
+    }
+  });
+
+  const toggleSidebar = () => {
+    setIsSidebarOpen((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem("nexa-admin-sidebar-collapsed", String(!next));
+      } catch {
+        /* private browsing — the preference just will not persist */
+      }
+      return next;
+    });
+  };
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
@@ -190,9 +215,27 @@ const SuperAdminMain: React.FC<SuperAdminMainProps> = ({ theme, toggleTheme }) =
           ? "bg-[#1a1a1a] border-r border-[#333]"
           : "bg-white border-r border-slate-200"
       )}>
-        <div className="p-8 flex items-center gap-4">
+        <div className={cn("p-8 pb-4 flex items-center", isSidebarOpen ? "justify-end" : "justify-center")}>
+          <button
+            type="button"
+            onClick={toggleSidebar}
+            aria-label={isSidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
+            aria-expanded={isSidebarOpen}
+            title={isSidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
+            className={cn(
+              "rounded-lg p-1.5 transition-colors",
+              theme === 'dark'
+                ? "text-gray-500 hover:bg-[#2a2a2a] hover:text-gray-300"
+                : "text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+            )}
+          >
+            <PanelLeft size={18} />
+          </button>
+        </div>
+
+        <div className={cn("px-8 pb-8 flex items-center gap-4", !isSidebarOpen && "justify-center px-4")}>
           <div className={cn(
-            "w-12 h-12 rounded-2xl flex items-center justify-center p-2 shadow-sm overflow-hidden border",
+            "w-12 h-12 rounded-2xl flex items-center justify-center p-2 shadow-sm overflow-hidden border shrink-0",
             theme === 'dark' ? "bg-[#2a2a2a] border-[#3f3f3f]" : "bg-white border-slate-100"
           )}>
             {user?.tenantLogo ? (
