@@ -3108,20 +3108,6 @@ export const App: React.FC = () => {
                 className="sidebar-logo-img"
               />
             </div>
-            {/* Stands in for the lockup on the collapsed rail, where the wordmark cannot
-                fit. Both are in the DOM and CSS picks one, since the source cannot be
-                swapped from a stylesheet. */}
-            <img
-              src="/icons/nexa-icon.png"
-              alt="Nexa"
-              className="sidebar-logo-icon"
-              role="button"
-              tabIndex={0}
-              title="Start a new chat"
-              style={{ cursor: 'pointer' }}
-              onClick={handleNewChat}
-              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleNewChat(); } }}
-            />
             <button
               type="button"
               className="sidebar-collapse-btn"
@@ -4797,29 +4783,21 @@ export const App: React.FC = () => {
          */
         @media (min-width: 769px) {
           .sidebar.sidebar-collapsed {
-            width: 72px;
-            padding-left: 12px;
-            padding-right: 12px;
+            width: 60px;
+            padding-left: 8px;
+            padding-right: 8px;
             overflow: hidden;
           }
 
           .sidebar.sidebar-collapsed .sidebar-header-main {
-            flex-direction: column;
             justify-content: center;
-            gap: 10px;
             padding-bottom: 16px;
           }
 
-          /* The full lockup is far too wide for the rail; the square mark replaces it. */
+          /* The lockup is far too wide for the rail, and nothing replaces it: the
+             toggle stands alone at the top, so the rail reads as a strip of controls
+             rather than a squeezed version of the full sidebar. */
           .sidebar.sidebar-collapsed .sidebar-logo { display: none; }
-          .sidebar-logo-icon { display: none; }
-          .sidebar.sidebar-collapsed .sidebar-logo-icon {
-            display: block;
-            width: 30px;
-            height: 30px;
-            border-radius: 8px;
-            object-fit: contain;
-          }
 
           /* Titles cannot be shortened into anything meaningful, so the list steps aside
              rather than becoming a column of truncated fragments. */
