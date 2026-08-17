@@ -3108,18 +3108,33 @@ export const App: React.FC = () => {
                 className="sidebar-logo-img"
               />
             </div>
+            {/* Stands in for the lockup on the collapsed rail, where the wordmark cannot
+                fit. Both are in the DOM and CSS picks one, since the source cannot be
+                swapped from a stylesheet. */}
+            <img
+              src="/icons/nexa-icon.png"
+              alt="Nexa"
+              className="sidebar-logo-icon"
+              role="button"
+              tabIndex={0}
+              title="Start a new chat"
+              style={{ cursor: 'pointer' }}
+              onClick={handleNewChat}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleNewChat(); } }}
+            />
             <button
               type="button"
               className="sidebar-collapse-btn"
-              aria-label="Collapse sidebar"
+              aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+              aria-expanded={!sidebarCollapsed}
               onClick={(e) => {
                 e.stopPropagation();
-                // Closes the drawer on a phone and collapses the column on a desktop,
-                // which is what "hide this panel" means on each.
+                // Closes the drawer on a phone; on a desktop it toggles the rail, so the
+                // same control both hides the panel and brings it back.
                 if (window.innerWidth <= 768) setSidebarOpen(false);
-                else collapseSidebar(true);
+                else collapseSidebar(!sidebarCollapsed);
               }}
-              title="Collapse sidebar"
+              title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
             >
               <PanelLeft size={18} />
             </button>
@@ -3489,9 +3504,9 @@ export const App: React.FC = () => {
             <div className="header-left-v2">
               <button
                 type="button"
-                className={`sidebar-toggle-btn-header${sidebarCollapsed ? ' is-visible' : ''}`}
-                aria-label={sidebarCollapsed ? "Expand sidebar" : sidebarOpen ? "Close conversation menu" : "Open conversation menu"}
-                aria-expanded={sidebarOpen || !sidebarCollapsed}
+                className="sidebar-toggle-btn-header"
+                aria-label={sidebarOpen ? "Close conversation menu" : "Open conversation menu"}
+                aria-expanded={sidebarOpen}
                 onClick={(e) => {
                   e.stopPropagation();
                   toggleSidebar();
@@ -4771,26 +4786,65 @@ export const App: React.FC = () => {
         }
 
         /*
-         * Desktop collapse. Reclaims the space rather than sliding a panel over the chat,
-         * which is what a permanent column should do when you hide it. Scoped above the
-         * mobile breakpoint because below it the sidebar is a fixed-position drawer and
-         * animating its width would fight the transform that drives it.
+         * Desktop collapse: a narrow rail rather than nothing at all.
+         *
+         * The actions stay reachable as icons — new chat, theme, avatar, logout, profile —
+         * and only the conversation list goes, because a chat title cannot survive being
+         * squeezed to 72px and an icon cannot stand in for one.
+         *
+         * Scoped above the mobile breakpoint: below it the sidebar is a fixed-position
+         * drawer, and animating width there would fight the transform that drives it.
          */
         @media (min-width: 769px) {
           .sidebar.sidebar-collapsed {
-            width: 0;
-            padding-left: 0;
-            padding-right: 0;
-            border-right-color: transparent;
+            width: 72px;
+            padding-left: 12px;
+            padding-right: 12px;
             overflow: hidden;
           }
 
-          /* Contents are hidden outright, not just clipped, so nothing inside stays
-             focusable by keyboard while the panel is invisible. */
-          .sidebar.sidebar-collapsed > * {
+          .sidebar.sidebar-collapsed .sidebar-header-main {
+            flex-direction: column;
+            justify-content: center;
+            gap: 10px;
+            padding-bottom: 16px;
+          }
+
+          /* The full lockup is far too wide for the rail; the square mark replaces it. */
+          .sidebar.sidebar-collapsed .sidebar-logo { display: none; }
+          .sidebar-logo-icon { display: none; }
+          .sidebar.sidebar-collapsed .sidebar-logo-icon {
+            display: block;
+            width: 30px;
+            height: 30px;
+            border-radius: 8px;
+            object-fit: contain;
+          }
+
+          /* Titles cannot be shortened into anything meaningful, so the list steps aside
+             rather than becoming a column of truncated fragments. */
+          .sidebar.sidebar-collapsed .sidebar-conversations-v2 {
             visibility: hidden;
             opacity: 0;
             pointer-events: none;
+          }
+
+          /* Every remaining control keeps its icon and drops its label. */
+          .sidebar.sidebar-collapsed .new-chat-btn-v2 > span,
+          .sidebar.sidebar-collapsed .theme-toggle-btn > span:last-child,
+          .sidebar.sidebar-collapsed .sidebar-logout-btn > span,
+          .sidebar.sidebar-collapsed .user-info-v2 {
+            display: none;
+          }
+
+          .sidebar.sidebar-collapsed .new-chat-btn-v2,
+          .sidebar.sidebar-collapsed .theme-toggle-btn,
+          .sidebar.sidebar-collapsed .sidebar-logout-btn,
+          .sidebar.sidebar-collapsed .user-profile-v2 {
+            justify-content: center;
+            gap: 0;
+            padding-left: 0;
+            padding-right: 0;
           }
         }
 
@@ -7998,12 +8052,6 @@ export const App: React.FC = () => {
         }
 
         /* Sidebar toggle from header (mobile-first: hidden on wide screens) */
-        /* Hidden on desktop while the sidebar is open, because the sidebar has its own
-           collapse control. Once collapsed this is the only way back, so it must appear. */
-        .sidebar-toggle-btn-header.is-visible {
-          display: flex;
-        }
-
         .sidebar-toggle-btn-header {
           display: none;
           align-items: center;
