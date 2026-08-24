@@ -198,6 +198,17 @@ function formatCallDuration(totalSeconds: number): string {
   return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, "0")}m`;
 }
 
+/**
+ * Clock time under a group message. Rendered in the viewer's own locale and timezone,
+ * so two people in different offices each see when it landed for them.
+ */
+function formatMessageTime(timestamp: Date | string | undefined): string {
+  if (!timestamp) return "";
+  const d = new Date(timestamp);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+}
+
 function messageSnippet(content: string, max = 120): string {
   const clean = (content || "").split("\n").filter((l) => !l.startsWith("📎")).join(" ").trim();
   return clean.length > max ? `${clean.slice(0, max)}…` : clean;
@@ -3945,7 +3956,7 @@ export const App: React.FC = () => {
                     }
 
                     return (
-                    <div key={msgId} className={`message-row-v2 ${m.role}${m.redacted ? ' redacted' : ''}`}>
+                    <div key={msgId} className={`message-row-v2 ${m.role}${m.redacted ? ' redacted' : ''}${isActiveGroupChat && m.role === 'user' ? (isOwn ? ' own' : ' from-other') : ''}`}>
                       {m.role === 'assistant' && (
                         <div className="message-avatar-v2">
                           <img src={selectedAvatar || "/avatar-1.png"} alt="Nexa" className="bot-avatar-img" />
@@ -4134,6 +4145,9 @@ export const App: React.FC = () => {
                             </div>
                           ) : null}
                         </div>
+                        {isActiveGroupChat && m.timestamp ? (
+                          <span className="message-timestamp">{formatMessageTime(m.timestamp)}</span>
+                        ) : null}
                         {m.reactions && m.reactions.length > 0 ? (
                           <div className="message-reactions-row">
                             {(() => {
@@ -7033,6 +7047,31 @@ export const App: React.FC = () => {
           border-bottom-right-radius: 2px;
         }
 
+        /*
+         * Group chats only. Everyone else keeps the dark bubble; your own turns light, so
+         * you can find your contributions while scanning a long thread without reading
+         * names. Applied via a class rather than to .user generally, because in a solo
+         * chat every message is yours and the distinction would mean nothing.
+         */
+        .message-row-v2.user.own .message-bubble-v2 {
+          background: #e8e8ea;
+          color: #18181b;
+          border: 1px solid #dcdce0;
+        }
+
+        /* Timestamps sit under the bubble and follow its side of the thread. */
+        .message-timestamp {
+          display: block;
+          margin-top: 4px;
+          font-size: 11px;
+          line-height: 1;
+          color: #9ca3af;
+          font-variant-numeric: tabular-nums;
+        }
+
+        .message-row-v2.user .message-timestamp { text-align: right; }
+        .message-row-v2.assistant .message-timestamp { text-align: left; }
+
         .message-row-v2.assistant .message-bubble-v2 {
           background: #ffffff;
           border: 1px solid #e5e7eb;
@@ -7290,6 +7329,16 @@ export const App: React.FC = () => {
           border: 1px solid #3f3f46;
           color: #ffffff;
         }
+
+        /* Lighter than the others' bubbles in dark mode too, rather than literally light,
+           which would glare against the dark thread. */
+        .dark-theme .message-row-v2.user.own .message-bubble-v2 {
+          background: #3f3f46;
+          border-color: #52525b;
+          color: #fafafa;
+        }
+
+        .dark-theme .message-timestamp { color: #6b7280; }
 
         .dark-theme .message-row-v2.assistant .message-bubble-v2 {
           background: #2a2a2a;
