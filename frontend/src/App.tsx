@@ -199,14 +199,36 @@ function formatCallDuration(totalSeconds: number): string {
 }
 
 /**
- * Clock time under a group message. Rendered in the viewer's own locale and timezone,
- * so two people in different offices each see when it landed for them.
+ * When a message was sent, shown beneath it.
+ *
+ * Rendered in the reader's own locale and timezone, so colleagues in different offices
+ * each see when it landed for them. The date is relative near the present and absolute
+ * further back: "Today" and "Yesterday" are what people actually reach for, while a bare
+ * date is clearer than "6 days ago" once it is no longer within easy recall. The year
+ * only appears once it is not the current one, since repeating it earns nothing.
  */
-function formatMessageTime(timestamp: Date | string | undefined): string {
+function formatMessageTimestamp(timestamp: Date | string | undefined): string {
   if (!timestamp) return "";
   const d = new Date(timestamp);
   if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+
+  const time = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+
+  // Compared by calendar day rather than elapsed hours: a message sent at 23:50 is
+  // "Yesterday" at 00:10, not "an hour ago".
+  const startOfDay = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const dayDiff = Math.round((startOfDay(new Date()) - startOfDay(d)) / 86_400_000);
+
+  if (dayDiff === 0) return `Today, ${time}`;
+  if (dayDiff === 1) return `Yesterday, ${time}`;
+
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  const date = d.toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "short",
+    ...(sameYear ? {} : { year: "numeric" })
+  });
+  return `${date}, ${time}`;
 }
 
 function messageSnippet(content: string, max = 120): string {
@@ -4145,8 +4167,8 @@ export const App: React.FC = () => {
                             </div>
                           ) : null}
                         </div>
-                        {isActiveGroupChat && m.timestamp ? (
-                          <span className="message-timestamp">{formatMessageTime(m.timestamp)}</span>
+                        {m.timestamp ? (
+                          <span className="message-timestamp">{formatMessageTimestamp(m.timestamp)}</span>
                         ) : null}
                         {m.reactions && m.reactions.length > 0 ? (
                           <div className="message-reactions-row">
