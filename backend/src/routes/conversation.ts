@@ -1924,9 +1924,22 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
       }
 
       let generatedDocument: { url: string; filename: string; documentType: string } | undefined;
+      // Set when a file was promised and could not be produced, so the reply can own up
+      // to it. Silence here is the worst outcome available: the turn has already told the
+      // user their document is being prepared, so saying nothing leaves them waiting for
+      // something that is never coming and looks like the app hung.
+      let documentFailed = false;
       if (documentGenPromise) {
         const docResult = await documentGenPromise;
         if (docResult) generatedDocument = docResult;
+        else documentFailed = true;
+      }
+
+      if (documentFailed) {
+        const label = docRequest?.label || "document";
+        fullResponse +=
+          `\n\n---\n\n⚠️ I couldn't produce the ${label} file this time, so the content above is all I have. ` +
+          `Please try again in a moment, and let an administrator know if it keeps happening.`;
       }
 
       const sanitizedResponse = sanitizeAssistantResponse(fullResponse, {
