@@ -420,7 +420,9 @@ const DOCUMENT_GENERATION_RULES = `FILE GENERATION — you can create real, down
 2. If asked whether you can generate, create, export or download a document, the answer is YES. Never say you can only draft text for the user to copy and paste, and never suggest they paste it into Word or Google Docs themselves.
 3. Say which of the four formats you can produce and invite them to ask for one, e.g. "Yes — I can give you that as a Word document, Excel sheet, PowerPoint or PDF. Which would you like?"
 4. Ask for the format explicitly, because a file is only produced when the request names one. "Draft a report" returns text; "draft that report as a PDF" returns a file.
-5. Do NOT invent download links or claim a file is attached unless you were told in this turn that one is being generated. The system attaches it; you only describe what it contains.`
+5. Do NOT invent download links or claim a file is attached unless you were told in this turn that one is being generated. The system attaches it; you only describe what it contains.
+6. ONE file per reply. A message carries a single attachment, so if asked for two formats at once, produce the first and offer the second next: "Here's the PDF — say the word and I'll do the Excel version too." Never promise two files in one reply; only one can arrive.
+7. A follow-up like "as a PDF too" or "excel version" refers to whatever was just being discussed. Never restate the subject as something new, and never produce a document on a different topic than the conversation was about.`
 
 const VOICE_MODE_RULES = `VOICE MODE — you are being spoken aloud, not read:
 1. Never use markdown. No asterisks, headings, bullet points, numbered lists, tables, code blocks, or emoji/badges. They are read out literally and sound like noise.
@@ -1839,15 +1841,55 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
     // response below, so this still overlaps the streaming turn.
     if (docRequest) {
       const sourceMaterial = [inlineDocumentText, sessionContextString].filter(Boolean).join("\n\n");
-      const genPrompt = sourceMaterial
-        ? `${content}\n\n=== SOURCE MATERIAL ===\nBase the document entirely on the material below. Reproduce and reorganise its actual content — do NOT write a generic guide about the user's request, and do NOT invent topics that are not present here.\n\n${sourceMaterial}`
-        : content;
+
+      /*
+       * The conversation is source material too.
+       *
+       * A request for a file is usually a follow-up — "excel too now", "and as a PDF" —
+       * which says nothing about the subject. Sending only that line meant the generator
+       * had to invent one, so asking for a spreadsheet of the states just discussed
+       * produced a fabricated quarterly sales report instead.
+       *
+       * Bounded to the last few turns and truncated per message: enough for the generator
+       * to know what "it" refers to, without pushing the real material out of the window.
+       */
+      const HISTORY_TURNS = 6;
+      const HISTORY_CHARS_PER_MESSAGE = 2000;
+      const recentTurns = (group.messages || [])
+        .slice(-(HISTORY_TURNS + 1), -1)
+        .map((m) => {
+          const body = (m.content || "").trim();
+          if (!body) return "";
+          const clipped = body.length > HISTORY_CHARS_PER_MESSAGE
+            ? `${body.slice(0, HISTORY_CHARS_PER_MESSAGE)}…`
+            : body;
+          return `${m.role === "assistant" ? "Assistant" : "User"}: ${clipped}`;
+        })
+        .filter(Boolean)
+        .join("\n\n");
+
+      const promptParts = [`The user's request: ${content}`];
+
+      if (recentTurns) {
+        promptParts.push(
+          `=== CONVERSATION SO FAR ===\nThe request above is a follow-up to this conversation. If it does not say what the document should contain, the subject is whatever was being discussed here — usually the content of the most recent assistant reply. Reproduce that actual content; do NOT invent a new topic.\n\n${recentTurns}`
+        );
+      }
+
+      if (sourceMaterial) {
+        promptParts.push(
+          `=== SOURCE MATERIAL ===\nBase the document entirely on the material below. Reproduce and reorganise its actual content — do NOT write a generic guide about the user's request, and do NOT invent topics that are not present here.\n\n${sourceMaterial}`
+        );
+      }
+
+      const genPrompt = promptParts.join("\n\n");
 
       logger.info("[DocumentGen] Starting generation", {
         userId,
         documentType: docRequest.type,
         hasSourceMaterial: Boolean(sourceMaterial),
-        sourceChars: sourceMaterial.length
+        sourceChars: sourceMaterial.length,
+        historyChars: recentTurns.length
       });
 
       documentGenPromise = generateAndCacheDocument(genPrompt, docRequest.type, model)
