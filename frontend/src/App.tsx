@@ -534,6 +534,12 @@ export const App: React.FC = () => {
   const [playingMessageIndex, setPlayingMessageIndex] = useState<number | null>(null);
   const [loadingAudioIndex, setLoadingAudioIndex] = useState<number | null>(null);
   const [ttsRemaining, setTtsRemaining] = useState<number | null>(null);
+  /**
+   * The file currently being generated, if any. Generation runs alongside the streamed
+   * reply and usually finishes after it, so without something on screen the message just
+   * sits there looking done while work is still happening.
+   */
+  const [generatingDocument, setGeneratingDocument] = useState<{ type: string; label: string } | null>(null);
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
   const currentAudioUrlRef = useRef<string | null>(null);
   const [audioPaused, setAudioPaused] = useState(false);
@@ -2048,7 +2054,14 @@ export const App: React.FC = () => {
             try {
               const data = JSON.parse(line.slice(6));
 
+              if (data.generatingDocument) {
+                setGeneratingDocument(data.generatingDocument);
+              }
+
               if (data.done) {
+                // Whatever happened — file attached, or generation failed — the wait is
+                // over once the turn closes, so the indicator must not outlive it.
+                setGeneratingDocument(null);
                 // Capture final conversation data from server
                 if (data.conversation) {
                   finalConversation = data.conversation;
@@ -2179,6 +2192,9 @@ export const App: React.FC = () => {
     } finally {
       reader.releaseLock();
       abortControllerRef.current = null;
+      // Covers the paths `done` never reaches: an aborted generation or a dropped
+      // stream would otherwise leave the indicator spinning forever.
+      setGeneratingDocument(null);
     }
 
     return finalConversation;
@@ -4275,6 +4291,16 @@ export const App: React.FC = () => {
                           <span className="dot-v2"></span>
                         </div>
                       </div>
+                    </div>
+                  )}
+                  {/* Outlives the streamed text on purpose: the file is usually still
+                      being built after the reply has finished arriving. */}
+                  {generatingDocument && (
+                    <div className="doc-generating-row" aria-live="polite">
+                      <span className="doc-generating-pill">
+                        <span className="doc-generating-spinner" aria-hidden="true" />
+                        Preparing your {generatingDocument.label.toLowerCase()}…
+                      </span>
                     </div>
                   )}
                   {isActiveGroupChat && collaborativeTypers.length > 0 && (
@@ -6687,6 +6713,48 @@ export const App: React.FC = () => {
           max-width: 100%;
           width: 100%;
           animation: messageIn 0.3s ease-out forwards;
+        }
+
+        /* Shown while a requested file is still being built, after the reply has
+           finished streaming. Left-aligned with Nexa's messages, since it is her work. */
+        .doc-generating-row {
+          display: flex;
+          justify-content: flex-start;
+          width: 100%;
+        }
+
+        .doc-generating-pill {
+          display: inline-flex;
+          align-items: center;
+          gap: 9px;
+          padding: 8px 14px;
+          border-radius: 999px;
+          border: 1px solid #e5e7eb;
+          background: #ffffff;
+          color: #6b7280;
+          font-size: 13px;
+          font-weight: 500;
+        }
+
+        .doc-generating-spinner {
+          width: 13px;
+          height: 13px;
+          border-radius: 50%;
+          border: 2px solid rgba(237, 0, 0, 0.2);
+          border-top-color: var(--brand-color, #ed0000);
+          animation: docGeneratingSpin 0.7s linear infinite;
+        }
+
+        @keyframes docGeneratingSpin { to { transform: rotate(360deg); } }
+
+        @media (prefers-reduced-motion: reduce) {
+          .doc-generating-spinner { animation-duration: 2s; }
+        }
+
+        .dark-theme .doc-generating-pill {
+          background: #2a2a2a;
+          border-color: #3f3f3f;
+          color: #9ca3af;
         }
 
         /* Voice call marker — deliberately not a bubble, since nobody said it. */

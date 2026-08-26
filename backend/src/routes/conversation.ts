@@ -1892,6 +1892,11 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
         historyChars: recentTurns.length
       });
 
+      // Tell the client a file is on its way. Generation runs alongside the streamed
+      // reply and usually outlasts it, so without this the text finishes and the user
+      // stares at a finished message wondering whether anything is still happening.
+      res.write(`data: ${JSON.stringify({ generatingDocument: { type: docRequest.type, label: docRequest.label } })}\n\n`);
+
       documentGenPromise = generateAndCacheDocument(genPrompt, docRequest.type, model)
         .catch((err) => {
           const msg = err instanceof Error ? err.message : JSON.stringify(err);
