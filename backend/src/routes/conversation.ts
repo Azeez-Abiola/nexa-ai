@@ -404,6 +404,24 @@ async function buildKbInventoryNote(
  * prompt rather than the turn context because every turn in a call needs it, so it belongs
  * in the cached prefix instead of invalidating it on each turn.
  */
+/**
+ * Nexa really can produce files, and needs telling.
+ *
+ * The pipeline only announced itself through the per-turn note added when a request was
+ * detected, so asked "can you generate documents?" in the abstract, nothing fired and the
+ * model fell back on the usual assistant disclaimer and said no. Users ask before they
+ * try, so a working feature was being denied out of existence.
+ *
+ * Lives in the cached system prefix rather than the turn context: the capability is true
+ * on every turn, so re-sending it per turn would invalidate the cache for nothing.
+ */
+const DOCUMENT_GENERATION_RULES = `FILE GENERATION — you can create real, downloadable files:
+1. You can produce Word (.docx), Excel (.xlsx), PowerPoint (.pptx) and PDF (.pdf) files. The system builds the actual file and attaches it to your reply as a download.
+2. If asked whether you can generate, create, export or download a document, the answer is YES. Never say you can only draft text for the user to copy and paste, and never suggest they paste it into Word or Google Docs themselves.
+3. Say which of the four formats you can produce and invite them to ask for one, e.g. "Yes — I can give you that as a Word document, Excel sheet, PowerPoint or PDF. Which would you like?"
+4. Ask for the format explicitly, because a file is only produced when the request names one. "Draft a report" returns text; "draft that report as a PDF" returns a file.
+5. Do NOT invent download links or claim a file is attached unless you were told in this turn that one is being generated. The system attaches it; you only describe what it contains.`
+
 const VOICE_MODE_RULES = `VOICE MODE — you are being spoken aloud, not read:
 1. Never use markdown. No asterisks, headings, bullet points, numbered lists, tables, code blocks, or emoji/badges. They are read out literally and sound like noise.
 2. Answer in short, natural spoken sentences. Two or three sentences is the target, and rarely more than five.
@@ -446,6 +464,8 @@ function buildSystemPrompt(
 8. Be professional, helpful, and concise.
 
 ${KNOWLEDGE_BASE_VERSIONING_RULES}`);
+
+  sections.push(DOCUMENT_GENERATION_RULES);
 
   // Last so it overrides the formatting guidance above, which assumes a screen.
   if (options.voice) sections.push(VOICE_MODE_RULES);
