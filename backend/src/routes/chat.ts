@@ -4,7 +4,9 @@ import { authMiddleware, AuthenticatedRequest } from "../middleware/auth";
 import { getBusinessUnitLabel, getAllBusinessUnits } from "../config/businessUnits";
 import { parseModel, getStreamAIResponse, getGenerateAIResponse } from "../services/aiRouter";
 import { buildContextForQuery } from "../utils/contextBuilder";
-import { synthesizeSpeech, getSpeechQuota, ElevenLabsError } from "../services/elevenLabsService";
+// Goes through the speech dispatcher, not a vendor directly: which provider speaks is
+// an environment variable, and this route should never need to know which one won.
+import { synthesizeSpeech, getSpeechQuota, SpeechError, activeSpeechProvider } from "../services/speech";
 import { transcribeAudio, TranscriptionError, MAX_AUDIO_BYTES } from "../services/transcriptionService";
 
 import { RagDocument } from "../models/RagDocument";
@@ -64,7 +66,7 @@ chatRouter.post("/transcribe", authMiddleware, (req: AuthenticatedRequest, res) 
   });
 });
 
-// Read a message aloud via ElevenLabs. Sits behind the same aiLimiter/aiDailyLimiter
+// Read a message aloud. Sits behind the same aiLimiter/aiDailyLimiter
 // applied to the whole /api/v1/chat prefix in index.ts, since it costs real money per call.
 chatRouter.post("/tts", authMiddleware, async (req: AuthenticatedRequest, res) => {
   try {
@@ -78,7 +80,7 @@ chatRouter.post("/tts", authMiddleware, async (req: AuthenticatedRequest, res) =
     logger.error("TTS generation failed", { message: error instanceof Error ? error.message : String(error) });
     // Quota and configuration problems are actionable, so pass the reason through
     // rather than reporting every failure as a generic upstream error.
-    if (error instanceof ElevenLabsError) {
+    if (error instanceof SpeechError) {
       return res.status(error.status).json({ error: error.message });
     }
     res.status(502).json({ error: "Failed to generate speech" });
@@ -89,9 +91,10 @@ chatRouter.post("/tts", authMiddleware, async (req: AuthenticatedRequest, res) =
 // user clicks into a failure. Null when TTS isn't configured or the check itself fails.
 chatRouter.get("/tts/quota", authMiddleware, async (_req: AuthenticatedRequest, res) => {
   const quota = await getSpeechQuota();
-  if (!quota) return res.json({ available: false });
+  if (!quota) return res.json({ available: false, provider: activeSpeechProvider });
   res.json({
     available: true,
+    provider: activeSpeechProvider,
     used: quota.used,
     limit: quota.limit,
     remaining: Math.max(0, quota.limit - quota.used)

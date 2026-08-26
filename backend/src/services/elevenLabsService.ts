@@ -1,4 +1,5 @@
 import logger from "../utils/logger";
+import { SpeechError } from "./speech/types";
 
 if (!process.env.ELEVENLABS_API_KEY) {
   logger.warn("[ElevenLabsService] ELEVENLABS_API_KEY not set — text-to-speech requests will fail at runtime");
@@ -9,25 +10,20 @@ if (!process.env.ELEVENLABS_VOICE_ID) {
 
 const MAX_CHARS = 5000;
 
-/** Thrown with an HTTP status so the route can distinguish quota/plan problems from real faults. */
-export class ElevenLabsError extends Error {
-  constructor(message: string, readonly status: number, readonly upstreamStatus?: number) {
-    super(message);
+/**
+ * Thrown with an HTTP status so the route can distinguish quota/plan problems from real
+ * faults. Extends SpeechError so a route can catch every provider's failures with one
+ * check, whichever vendor happens to be speaking.
+ */
+export class ElevenLabsError extends SpeechError {
+  constructor(message: string, status: number, upstreamStatus?: number) {
+    super(message, status, upstreamStatus);
     this.name = "ElevenLabsError";
   }
 }
 
-/** Per-character playback timings, used to highlight words in step with the audio. */
-export type SpeechAlignment = {
-  characters: string[];
-  character_start_times_seconds: number[];
-  character_end_times_seconds: number[];
-};
-
-export type SpeechResult = {
-  audioBase64: string;
-  alignment: SpeechAlignment | null;
-};
+export type { SpeechAlignment, SpeechResult } from "./speech/types";
+import type { SpeechAlignment, SpeechResult } from "./speech/types";
 
 export async function synthesizeSpeech(text: string): Promise<SpeechResult> {
   const trimmed = text.trim().slice(0, MAX_CHARS);
