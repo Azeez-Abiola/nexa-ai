@@ -10,6 +10,7 @@ import {
   BiPlay, BiPause, BiPhoneCall
 } from "react-icons/bi";
 import { PanelLeft } from "lucide-react";
+import ConnectorSettings from "./ConnectorSettings";
 import DownloadPage from "./download/DownloadPage";
 import SsoCallback, { SsoError } from "./auth/SsoCallback";
 import VoiceCallOverlay from "./voice/VoiceCallOverlay";
@@ -601,6 +602,7 @@ export const App: React.FC = () => {
   const isAdminPage = location.pathname.startsWith('/admin');
   const isSuperAdminPage = location.pathname.startsWith('/super-admin');
   const isUserChatProfile = location.pathname === "/user-chat/profile";
+  const isConnectorSettings = location.pathname === "/settings/connectors";
   const isChatPage = location.pathname === "/user-chat";
   const userInitials = user
     ? `${user.fullName?.split(' ').map(n => n[0]).join('').toUpperCase() || ""}`
@@ -1153,6 +1155,7 @@ export const App: React.FC = () => {
       "/super-admin/login",
       "/contact",
       "/download",
+      "/settings/connectors",
       "/privacy",
       "/terms",
       "/accept-invite",
@@ -1543,7 +1546,13 @@ export const App: React.FC = () => {
       window.location.href = "/super-admin/dashboard";
     } else if (authUser.isAdmin === true) {
       window.location.href = "/admin/dashboard";
-    } else if (postLoginPath && postLoginPath.startsWith("/shared/")) {
+    } else if (
+      postLoginPath &&
+      // Connectors joins share links here because Microsoft's consent flow returns to
+      // /settings/connectors with the outcome on the query string. Dropping the stashed
+      // path would land the user in the chat with no idea whether it worked.
+      (postLoginPath.startsWith("/shared/") || postLoginPath.startsWith("/settings/connectors"))
+    ) {
       setIsConversationsLoading(true);
       axios.defaults.headers.common["Authorization"] = `Bearer ${authToken}`;
       applyTenantBrandFromSession(authUser.tenantColor);
@@ -2077,6 +2086,11 @@ export const App: React.FC = () => {
 
               if (data.generatingDocument) {
                 setGeneratingDocument(data.generatingDocument);
+                // Must not fall through. This event carries no `fullResponse`, and the
+                // assignment further down would reset the streamed text to "" — blanking
+                // the reply mid-answer. The toolCall/toolResult branches continue for the
+                // same reason.
+                continue;
               }
 
               if (data.done) {
@@ -3062,6 +3076,27 @@ export const App: React.FC = () => {
     // Authenticated — render chat shell below; the effect below loads the share.
   }
 
+  /*
+   * /settings/connectors — requires auth, like the chat itself.
+   *
+   * Needs handling here rather than falling through to the unmatched-route branch,
+   * because Microsoft's consent flow lands back on this exact URL. A session that
+   * expired mid-consent would otherwise drop the user on the marketing page with their
+   * result on the query string, so the path is stashed and replayed after login.
+   */
+  if (location.pathname === "/settings/connectors") {
+    if (!isAuthenticated) {
+      try {
+        sessionStorage.setItem("post-login-redirect", `${location.pathname}${location.search}`);
+      } catch {
+        /* ignore */
+      }
+      window.history.replaceState(null, "", "/login");
+      return <Login onLoginSuccess={handleLogin} />;
+    }
+    // Authenticated — falls through to the chat shell, which renders the page.
+  }
+
   // Access-request respond links — process token then redirect to user-chat
   if (location.pathname === '/access-request/respond') {
     return <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100vh', fontFamily:'Arial', color:'#555' }}>Processing request…</div>;
@@ -3836,7 +3871,14 @@ export const App: React.FC = () => {
             </div>
           )}
 
-          {isUserChatProfile && user ? (
+          {isConnectorSettings ? (
+            <ConnectorSettings
+              token={token}
+              theme={theme}
+              isAdmin={Boolean(user?.isAdmin)}
+              onBack={() => navigate("/user-chat")}
+            />
+          ) : isUserChatProfile && user ? (
             <UserChatProfile
               user={user}
               theme={theme}
