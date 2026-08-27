@@ -28,6 +28,7 @@ import { adminDocumentsRouter } from "./routes/adminDocuments";
 import { adminKnowledgeGroupsRouter } from "./routes/adminKnowledgeGroups";
 import { adminAuditLogsRouter } from "./routes/adminAuditLogs";
 import { adminConnectorsRouter } from "./routes/adminConnectors";
+import { connectorAuthRouter } from "./routes/connectorAuth";
 import { BusinessUnit } from "./models/BusinessUnit";
 import { tenantMiddleware } from "./middleware/tenant";
 import { authLimiter, aiLimiter, aiDailyLimiter } from "./middleware/rateLimiter";
@@ -184,6 +185,7 @@ app.use("/api/v1/admin/user-groups", adminKnowledgeGroupsRouter);
 app.use("/api/v1/admin/knowledge-groups", adminKnowledgeGroupsRouter); // legacy alias
 app.use("/api/v1/admin/audit-logs", adminAuditLogsRouter);
 app.use("/api/v1/admin/connectors", adminConnectorsRouter);
+app.use("/api/v1/connectors", connectorAuthRouter);
 app.use("/api/v1/analytics", analyticsRouter);
 app.use("/api/v1/provisioning", provisioningRouter);
 app.use("/api/v1/employee-invite", employeeInviteRouter);

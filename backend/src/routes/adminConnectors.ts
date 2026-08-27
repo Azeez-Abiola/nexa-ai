@@ -63,10 +63,15 @@ adminConnectorsRouter.get("/", async (req: AuthenticatedRequest, res: Response) 
           kind: connector.kind,
           transport: connector.transport,
           /**
-           * Surfaced explicitly for the data-residency question a holding company
-           * has to be able to answer: which of these send our data off our network.
+           * The data-residency answer a holding company has to be able to give:
+           * which of these send our data off our network. Read from the connector's
+           * own record rather than inferred from `kind` — Microsoft 365 runs
+           * in-process and still sends file contents to Microsoft, so inferring it
+           * would have reported the opposite of the truth.
            */
-          dataLeavesNetwork: connector.kind === "remote",
+          dataLeavesNetwork: connector.dataEgress === "third_party",
+          /** Identity each user must connect before the connector works for them. */
+          requiresIdentity: connector.requiresIdentity,
           globallyEnabled: connector.enabled,
           settings: rule
             ? {

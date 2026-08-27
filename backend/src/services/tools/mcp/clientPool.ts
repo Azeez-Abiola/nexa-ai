@@ -1,10 +1,12 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { ConnectorDocument } from "../../../models/Connector";
 import { ToolAccess, ToolContext } from "../types";
 import { callerMeta } from "./callerContext";
 import { createKnowledgeBaseServer, KNOWLEDGE_BASE_CONNECTOR_ID } from "./knowledgeBaseServer";
+import { createMicrosoftGraphServer, MICROSOFT_CONNECTOR_ID } from "./microsoftGraphServer";
 import logger from "../../../utils/logger";
 
 /**
@@ -56,8 +58,12 @@ const connecting = new Map<string, Promise<PooledSession>>();
  * path serves both kinds — without a child process to supervise or a port to
  * expose for something that never leaves the deployment.
  */
-const FIRST_PARTY_SERVERS: Record<string, () => ReturnType<typeof createKnowledgeBaseServer>> = {
-  [KNOWLEDGE_BASE_CONNECTOR_ID]: createKnowledgeBaseServer
+const FIRST_PARTY_SERVERS: Record<string, () => Server> = {
+  [KNOWLEDGE_BASE_CONNECTOR_ID]: createKnowledgeBaseServer,
+  // First-party in the sense that matters here — Nexa runs it, so its calls pass the
+  // RBAC check and reach the audit log — even though it talks to Microsoft. Where the
+  // data goes is recorded on the connector row as `dataEgress`.
+  [MICROSOFT_CONNECTOR_ID]: createMicrosoftGraphServer
 };
 
 /**

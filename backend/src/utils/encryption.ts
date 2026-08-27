@@ -69,3 +69,63 @@ export function serializeMessages(messages: any[] | null | undefined): any[] {
     return plain;
   });
 }
+
+// ─── Connector credentials ────────────────────────────────────────────────────
+//
+// Third-party OAuth refresh tokens are encrypted with their own key, separate from
+// the one protecting message content. The two have different blast radii: a leaked
+// message key exposes conversation history, whereas a leaked connector key exposes
+// live, writable access to employees' Microsoft accounts. Sharing one key would mean
+// a single compromise did both, and would make rotating either one impossible
+// without touching the other.
+
+const CONNECTOR_KEY_ENV = "CONNECTOR_TOKEN_ENCRYPTION_KEY";
+
+function getConnectorKey(): Buffer {
+  const hex = process.env[CONNECTOR_KEY_ENV];
+  if (!hex || hex.length !== 64) {
+    // Deliberately fatal rather than falling back to the message key. A silent
+    // fallback would "work" in every test and quietly collapse the two blast radii
+    // into one in production — the sort of thing nobody discovers until after a
+    // breach. Generate one with: openssl rand -hex 32
+    throw new Error(
+      `${CONNECTOR_KEY_ENV} must be a 64-character hex string (32 bytes). Generate one with: openssl rand -hex 32`
+    );
+  }
+  return Buffer.from(hex, "hex");
+}
+
+/** Whether connector credentials can be stored at all in this deployment. */
+export function connectorEncryptionAvailable(): boolean {
+  return (process.env[CONNECTOR_KEY_ENV] || "").length === 64;
+}
+
+/** Encrypt a connector credential (OAuth refresh token) for storage at rest. */
+export function encryptSecret(plaintext: string): string {
+  const key = getConnectorKey();
+  const iv = randomBytes(IV_BYTES);
+  const cipher = createCipheriv(ALGORITHM, key, iv);
+  const encrypted = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return PREFIX + iv.toString("hex") + ":" + tag.toString("hex") + ":" + encrypted.toString("hex");
+}
+
+/**
+ * Decrypt a stored connector credential.
+ *
+ * Throws on any failure, unlike decrypt() above. A message that will not decrypt is
+ * better shown as ciphertext than as a 500; a refresh token that will not decrypt
+ * must not be treated as an empty string and sent to Microsoft as a credential.
+ */
+export function decryptSecret(value: string): string {
+  if (typeof value !== "string" || !value.startsWith(PREFIX)) {
+    throw new Error("Stored connector credential is not in the expected encrypted form");
+  }
+  const key = getConnectorKey();
+  const parts = value.slice(PREFIX.length).split(":");
+  if (parts.length !== 3) throw new Error("Stored connector credential is malformed");
+  const [ivHex, tagHex, ciphertextHex] = parts;
+  const decipher = createDecipheriv(ALGORITHM, key, Buffer.from(ivHex, "hex"));
+  decipher.setAuthTag(Buffer.from(tagHex, "hex"));
+  return decipher.update(Buffer.from(ciphertextHex, "hex")).toString("utf8") + decipher.final("utf8");
+}

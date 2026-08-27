@@ -10,6 +10,27 @@ import mongoose, { Schema, Document } from "mongoose";
  */
 export type ConnectorKind = "first_party" | "remote";
 
+/**
+ * Where a connector's data actually goes.
+ *
+ * Deliberately stored rather than derived from `kind`. The Microsoft 365 connector is
+ * a first-party server — Nexa runs it, so its calls pass the RBAC check and land in
+ * the audit log — but it plainly does send data to Microsoft. Inferring residency
+ * from where the server runs would have reported that connector as keeping data on
+ * the network, which is the one thing a holding company must not be told wrongly.
+ */
+export type ConnectorDataEgress = "none" | "third_party";
+
+/**
+ * The identity provider a user must have connected before this connector works.
+ *
+ * Null for connectors that ride Nexa's own RBAC (the knowledge base). Set when the
+ * connector calls a third party with the employee's own delegated credentials, which
+ * is what keeps permission inheritance intact instead of Nexa holding a service
+ * account with everyone's access at once.
+ */
+export type ConnectorIdentityRequirement = "microsoft" | null;
+
 /** MCP transport. In-process for first-party servers, HTTP for remote ones. */
 export type ConnectorTransport = "in_memory" | "streamable_http";
 
@@ -43,6 +64,8 @@ export interface ConnectorDocument extends Document {
   label: string;
   description: string;
   kind: ConnectorKind;
+  dataEgress: ConnectorDataEgress;
+  requiresIdentity: ConnectorIdentityRequirement;
   transport: ConnectorTransport;
   /** Required for `streamable_http`; unused for in-process servers. */
   endpoint?: string;
@@ -73,6 +96,8 @@ const ConnectorSchema = new Schema<ConnectorDocument>(
     label: { type: String, required: true, trim: true },
     description: { type: String, default: "" },
     kind: { type: String, enum: ["first_party", "remote"], required: true },
+    dataEgress: { type: String, enum: ["none", "third_party"], required: true },
+    requiresIdentity: { type: String, enum: ["microsoft", null], default: null },
     transport: { type: String, enum: ["in_memory", "streamable_http"], required: true },
     endpoint: { type: String, default: null },
     enabled: { type: Boolean, default: true, index: true },

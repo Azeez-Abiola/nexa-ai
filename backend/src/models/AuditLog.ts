@@ -12,6 +12,8 @@ export type AuditEventType =
   | "connector_tool_call"
   | "connector_tool_denied"
   | "connector_settings_changed"
+  | "connector_identity_connected"
+  | "connector_identity_disconnected"
   | "conversation_shared"
   | "conversation_share_denied"
   | "conversation_share_revoked"
@@ -54,6 +56,8 @@ const AuditLogSchema = new Schema<AuditLogDocument>(
         "connector_tool_call",
         "connector_tool_denied",
         "connector_settings_changed",
+        "connector_identity_connected",
+        "connector_identity_disconnected",
         "conversation_shared",
         "conversation_share_denied",
         "conversation_share_revoked",

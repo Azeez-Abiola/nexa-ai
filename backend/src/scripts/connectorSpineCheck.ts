@@ -17,6 +17,9 @@ import { callerMeta } from "../services/tools/mcp/callerContext";
 import { toResponsesTools, toChatCompletionsTools } from "../services/tools/adapters/openaiShape";
 import { toAnthropicTools } from "../services/tools/adapters/anthropicShape";
 import { qualifyToolName, CanonicalTool, ToolContext } from "../services/tools/types";
+import { createMicrosoftGraphServer } from "../services/tools/mcp/microsoftGraphServer";
+import { encodeState, decodeState } from "../services/tools/auth/microsoftAuth";
+import { encryptSecret, decryptSecret } from "../utils/encryption";
 
 let failures = 0;
 function check(name: string, cond: boolean, detail?: unknown) {
@@ -105,6 +108,63 @@ async function main() {
     responses[0].name === anthropic[0].name);
 
   await client.close();
+
+  // ── 7. Microsoft OAuth state must be authenticated ────────────────────────
+  // The consent callback is an unauthenticated browser redirect, so `state` is the
+  // only thing carrying the user's identity. If it were forgeable, an attacker could
+  // bind their own Microsoft account to someone else's Nexa user.
+  const goodState = encodeState("user-abc");
+  check("signed state round-trips to the same user", decodeState(goodState)?.userId === "user-abc");
+
+  const tamperedUser = Buffer.from(
+    Buffer.from(goodState, "base64url").toString("utf8").replace("user-abc", "user-xyz")
+  ).toString("base64url");
+  check("state with a swapped userId is rejected", decodeState(tamperedUser) === null);
+
+  check("garbage state is rejected", decodeState("not-a-real-state") === null);
+
+  const staleRaw = Buffer.from(goodState, "base64url").toString("utf8").split(".");
+  staleRaw[1] = String(Date.now() - 60 * 60 * 1000); // an hour old
+  check("expired state is rejected",
+    decodeState(Buffer.from(staleRaw.join(".")).toString("base64url")) === null);
+
+  // ── 8. Connector credentials use their own key ────────────────────────────
+  process.env.CONNECTOR_TOKEN_ENCRYPTION_KEY = "a".repeat(64);
+  const sealed = encryptSecret("refresh-token-value");
+  check("refresh token round-trips through its own key", decryptSecret(sealed) === "refresh-token-value");
+  check("ciphertext does not contain the plaintext", !sealed.includes("refresh-token-value"));
+
+  process.env.CONNECTOR_TOKEN_ENCRYPTION_KEY = "b".repeat(64);
+  let wrongKeyRejected = false;
+  try { decryptSecret(sealed); } catch { wrongKeyRejected = true; }
+  check("a credential sealed with another key will not decrypt", wrongKeyRejected);
+
+  // ── 9. The Graph server ───────────────────────────────────────────────────
+  const [gClient, gServer] = InMemoryTransport.createLinkedPair();
+  const graph = createMicrosoftGraphServer();
+  const graphClient = new Client({ name: "test", version: "1.0.0" }, { capabilities: {} });
+  await graph.connect(gServer);
+  await graphClient.connect(gClient);
+
+  const graphTools = await graphClient.listTools();
+  const graphNames = graphTools.tools.map((t) => t.name).sort();
+  check("Graph server exposes the three read tools",
+    JSON.stringify(graphNames) === '["list_recent_files","read_file","search_files"]', graphNames);
+  check("every Graph tool is read-only",
+    graphTools.tools.every((t) => t.annotations?.readOnlyHint === true));
+
+  // Graph is only ever called with a delegated user token, so a call with no user
+  // behind it must be refused rather than falling back to anything broader.
+  const noUser = await graphClient.callTool({
+    name: "search_files",
+    arguments: { query: "budget" },
+    _meta: callerMeta({ businessUnit: "UAC Foods", isAdmin: true, provider: "gpt" } as ToolContext)
+  });
+  check("Graph call with no user identity is refused", noUser.isError === true,
+    (noUser.content as any[])?.[0]?.text?.slice(0, 90));
+
+  await graphClient.close();
+
   console.log(failures === 0 ? "\nAll spine checks passed." : `\n${failures} check(s) failed.`);
   process.exit(failures === 0 ? 0 : 1);
 }

@@ -2,6 +2,8 @@ import { Connector, ConnectorDocument, ConnectorEnablement } from "../../models/
 import { getAllBusinessUnits } from "../../config/businessUnits";
 import { ToolContext } from "./types";
 import { KNOWLEDGE_BASE_CONNECTOR_ID } from "./mcp/knowledgeBaseServer";
+import { MICROSOFT_CONNECTOR_ID } from "./mcp/microsoftGraphServer";
+import { hasMicrosoftIdentity, microsoftConnectorConfigured } from "./auth/microsoftAuth";
 import { invalidateCatalogCache } from "./mcp/clientPool";
 import logger from "../../utils/logger";
 
@@ -19,6 +21,8 @@ interface FirstPartyConnectorSeed {
   connectorId: string;
   label: string;
   description: string;
+  dataEgress: "none" | "third_party";
+  requiresIdentity: "microsoft" | null;
   /**
    * Whether the connector is live for a business unit as soon as it is seeded.
    *
@@ -36,7 +40,21 @@ const FIRST_PARTY_SEEDS: FirstPartyConnectorSeed[] = [
     label: "Knowledge Base",
     description:
       "Search and list the organization's approved internal documents. Runs inside Nexa; no data leaves the deployment.",
+    dataEgress: "none",
+    requiresIdentity: null,
     autoApprove: true
+  },
+  {
+    connectorId: MICROSOFT_CONNECTOR_ID,
+    label: "Microsoft 365",
+    description:
+      "Search and read the employee's own OneDrive and SharePoint files. Each user connects their own Microsoft account, so results never exceed what that person can already open. Queries and file contents transit Microsoft Graph.",
+    dataEgress: "third_party",
+    requiresIdentity: "microsoft",
+    // Not auto-approved, unlike the knowledge base. This one sends queries and
+    // document text to Microsoft, so a business unit's administrator decides whether
+    // it goes live — that is exactly the judgement the approval gate exists for.
+    autoApprove: false
   }
 ];
 
@@ -60,6 +78,8 @@ export async function bootstrapConnectors(): Promise<void> {
         label: seed.label,
         description: seed.description,
         kind: "first_party",
+        dataEgress: seed.dataEgress,
+        requiresIdentity: seed.requiresIdentity,
         transport: "in_memory",
         enabled: true,
         enablement: businessUnits.map((bu) => ({
@@ -78,9 +98,14 @@ export async function bootstrapConnectors(): Promise<void> {
       continue;
     }
 
-    // Keep copy in sync with the code, leave policy alone.
+    // Keep copy in sync with the code, leave policy alone. dataEgress and
+    // requiresIdentity are facts about the connector's implementation, not admin
+    // decisions, so they are corrected on every boot — a connector that started
+    // routing data somewhere new must not keep reporting the old answer.
     existing.label = seed.label;
     existing.description = seed.description;
+    existing.dataEgress = seed.dataEgress;
+    existing.requiresIdentity = seed.requiresIdentity;
 
     // A business unit created after the connector was seeded would otherwise never
     // get an enablement row, leaving the connector permanently invisible to it.
@@ -135,11 +160,71 @@ function isVisible(connector: ConnectorDocument, ctx: ToolContext): boolean {
   return true;
 }
 
-/** Every connector this user may currently use. */
+/**
+ * Whether this deployment could ever serve a connector needing this identity.
+ *
+ * Separate from whether the *user* has connected: a missing AZURE_CLIENT_ID is an
+ * operator problem and the connector should not be offered to anyone, whereas an
+ * unconnected user should be invited to connect.
+ */
+function identityProviderConfigured(requirement: ConnectorDocument["requiresIdentity"]): boolean {
+  if (!requirement) return true;
+  if (requirement === "microsoft") return microsoftConnectorConfigured();
+  return false;
+}
+
+/** Whether this specific user has granted the identity the connector needs. */
+async function userHasIdentity(
+  requirement: ConnectorDocument["requiresIdentity"],
+  ctx: ToolContext
+): Promise<boolean> {
+  if (!requirement) return true;
+  if (!ctx.userId) return false;
+  if (requirement === "microsoft") return hasMicrosoftIdentity(ctx.userId);
+  return false;
+}
+
+export interface ConnectorAvailability {
+  /** Admin-approved, and the user has any identity it needs — tools can be offered. */
+  usable: ConnectorDocument[];
+  /**
+   * Approved and configured, but this user has not connected their account yet.
+   *
+   * Kept apart from `usable` rather than merged or dropped. Its tools must not be
+   * offered — they would fail on every call — but the assistant should still be able
+   * to say "connect Microsoft 365 in your settings and I can search your files",
+   * which it cannot do if the connector is invisible to it.
+   */
+  needsUserConnection: ConnectorDocument[];
+}
+
+/** Split the connectors visible to this user by whether they can actually be called. */
+export async function connectorAvailability(ctx: ToolContext): Promise<ConnectorAvailability> {
+  if (!ctx.businessUnit) return { usable: [], needsUserConnection: [] };
+
+  const visible = (await Connector.find({ enabled: true })).filter(
+    (c) => isVisible(c, ctx) && identityProviderConfigured(c.requiresIdentity)
+  );
+
+  const usable: ConnectorDocument[] = [];
+  const needsUserConnection: ConnectorDocument[] = [];
+
+  // Checked in parallel: each is an independent lookup, and a user with several
+  // identity-backed connectors should not pay for them in series mid-turn.
+  const checks = await Promise.all(
+    visible.map(async (c) => ({ connector: c, ready: await userHasIdentity(c.requiresIdentity, ctx) }))
+  );
+
+  for (const { connector, ready } of checks) {
+    (ready ? usable : needsUserConnection).push(connector);
+  }
+
+  return { usable, needsUserConnection };
+}
+
+/** Every connector this user may currently call. */
 export async function connectorsForContext(ctx: ToolContext): Promise<ConnectorDocument[]> {
-  if (!ctx.businessUnit) return [];
-  const candidates = await Connector.find({ enabled: true });
-  return candidates.filter((c) => isVisible(c, ctx));
+  return (await connectorAvailability(ctx)).usable;
 }
 
 /**

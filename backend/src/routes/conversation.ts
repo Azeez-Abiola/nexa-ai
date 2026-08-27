@@ -13,7 +13,7 @@ import {
 } from "../services/openaiService";
 import { parseModel, getStreamAIResponse, getGenerateAIResponse, getModelLabel, AIModel } from "../services/aiRouter";
 import { ToolContext } from "../services/tools/types";
-import { connectorsForContext } from "../services/tools/registry";
+import { connectorAvailability } from "../services/tools/registry";
 import { buildContextForQuery } from "../utils/contextBuilder";
 import { KNOWLEDGE_BASE_VERSIONING_RULES } from "../prompts/knowledgeBaseBehavior";
 import { uploadDocument, uploadChatImage } from "../services/cloudinaryService";
@@ -460,7 +460,7 @@ const VOICE_MODE_RULES = `VOICE MODE — you are being spoken aloud, not read:
 function buildSystemPrompt(
   businessUnit: string,
   activeModel: "gpt" | "claude" | "kimi" | "deepseek" = "gpt",
-  options: { voice?: boolean; connectors?: string[] } = {}
+  options: { voice?: boolean; connectors?: string[]; connectableConnectors?: string[] } = {}
 ): string {
   const modelLabel = getModelLabel(activeModel);
   const sections: string[] = [
@@ -506,6 +506,20 @@ You have live tools connected to: ${options.connectors.join(", ")}.
 - Use them when the answer depends on current data from those systems, and prefer a tool call over guessing or asking the user to look it up themselves.
 - Say what you checked when a tool provided the answer, so the user knows it is live rather than remembered.
 - If a tool fails or returns nothing, say so plainly and answer with what you do have. Never describe a tool result you did not receive, and never claim to have checked a system you were not given a tool for.`);
+  }
+
+  /**
+   * Connectors the user could switch on but has not.
+   *
+   * Told to the model separately from the ones it has, and with no tools attached.
+   * The alternative was to say nothing, which produces the worst version of this
+   * interaction: the user asks about a file in their OneDrive, the assistant says it
+   * has no access to their files, and never mentions that connecting the account is
+   * a button away in their own settings.
+   */
+  if (options.connectableConnectors?.length) {
+    sections.push(`AVAILABLE BUT NOT CONNECTED:
+${options.connectableConnectors.join(", ")} could be connected by this user but has not been. You have NO tools for it and must not attempt to use it or imply you already checked it. If the user asks for something it would have answered, say plainly that they can connect it under Settings → Connectors and you will be able to help once they have.`);
   }
 
   sections.push(DOCUMENT_GENERATION_RULES);
@@ -1977,11 +1991,12 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
 
     // Registry lookup only — no MCP round trip. Enough to know what to tell the
     // model it has; the tools themselves are resolved inside the provider.
-    const connectorLabels = (await connectorsForContext(toolContext)).map((c) => c.label);
+    const availability = await connectorAvailability(toolContext);
 
     const systemPrompt = buildSystemPrompt(businessUnit, model, {
       voice: voiceMode,
-      connectors: connectorLabels
+      connectors: availability.usable.map((c) => c.label),
+      connectableConnectors: availability.needsUserConnection.map((c) => c.label)
     });
     const turnContext = buildTurnContext({
       sessionContextString,
