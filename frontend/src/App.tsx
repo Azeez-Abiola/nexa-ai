@@ -64,6 +64,17 @@ interface GeneratedDocument {
   documentType: string;
 }
 
+/** One connector tool call made while producing an assistant reply. */
+interface ToolActivity {
+  tool: string;
+  connector: string;
+  label: string;
+  /** Undefined while the call is still running. */
+  ok?: boolean;
+  summary?: string;
+  durationMs?: number;
+}
+
 interface Message {
   role: "user" | "assistant";
   content: string;
@@ -75,6 +86,8 @@ interface Message {
   imageUrls?: string[];
   sources?: MessageSource[];
   generatedDocument?: GeneratedDocument;
+  /** Connectors this reply consulted. Persisted, so it survives a reload. */
+  toolActivity?: ToolActivity[];
   timestamp: Date;
   /** Set on shared-with-me view when the recipient lacks access to the cited sources. */
   redacted?: boolean;
@@ -540,6 +553,14 @@ export const App: React.FC = () => {
    * sits there looking done while work is still happening.
    */
   const [generatingDocument, setGeneratingDocument] = useState<{ type: string; label: string } | null>(null);
+  /**
+   * Connector calls in flight for the current turn.
+   *
+   * Transient: cleared when the turn closes, at which point the same information is
+   * on the assistant message itself. It exists so the longest pause in a turn — a
+   * connector round trip — is visibly something happening rather than a hang.
+   */
+  const [activeToolCalls, setActiveToolCalls] = useState<ToolActivity[]>([]);
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
   const currentAudioUrlRef = useRef<string | null>(null);
   const [audioPaused, setAudioPaused] = useState(false);
@@ -2062,6 +2083,9 @@ export const App: React.FC = () => {
                 // Whatever happened — file attached, or generation failed — the wait is
                 // over once the turn closes, so the indicator must not outlive it.
                 setGeneratingDocument(null);
+                // The finished message carries its own toolActivity from here on, so
+                // the transient indicator would otherwise be shown twice.
+                setActiveToolCalls([]);
                 // Capture final conversation data from server
                 if (data.conversation) {
                   finalConversation = data.conversation;
@@ -2091,6 +2115,39 @@ export const App: React.FC = () => {
 
               if (data.error) {
                 throw new Error(data.error);
+              }
+
+              // Handled before the fullResponse assignment below: tool events carry no
+              // fullResponse, and falling through would reset the streamed text to "".
+              if (data.toolCall) {
+                setActiveToolCalls((prev) => [
+                  ...prev,
+                  {
+                    tool: data.toolCall.tool,
+                    connector: data.toolCall.connector,
+                    label: data.toolCall.label
+                  }
+                ]);
+                continue;
+              }
+
+              if (data.toolResult) {
+                setActiveToolCalls((prev) => {
+                  const next = [...prev];
+                  const i = next.findIndex(
+                    (c) => c.tool === data.toolResult.tool && c.ok === undefined
+                  );
+                  if (i >= 0) {
+                    next[i] = {
+                      ...next[i],
+                      ok: data.toolResult.ok,
+                      summary: data.toolResult.summary,
+                      durationMs: data.toolResult.durationMs
+                    };
+                  }
+                  return next;
+                });
+                continue;
               }
 
               // Status events arrive before the AI starts — show them as placeholder text
@@ -4151,6 +4208,28 @@ export const App: React.FC = () => {
                                   </div>
                                 );
                               })()}
+                          {/* What this reply consulted. Shown above Sources because it
+                              answers a different question: Sources is where the text
+                              came from, this is what was checked to get it. */}
+                          {m.role === "assistant" && m.toolActivity && m.toolActivity.length > 0 ? (
+                            <div className="message-tools-v2">
+                              <span className="message-sources-label-v2">Checked</span>
+                              {m.toolActivity.map((a, i) => (
+                                <span
+                                  key={`${a.tool}-${i}`}
+                                  className={`message-tool-pill-v2${a.ok === false ? " message-tool-pill-failed-v2" : ""}`}
+                                  title={a.summary || a.label}
+                                >
+                                  <span className="message-source-pill-icon-v2">
+                                    {a.ok === false ? <BiLink size={12} /> : <BiLibrary size={12} />}
+                                  </span>
+                                  <span className="message-source-pill-title-v2">
+                                    {a.ok === false ? `${a.label} — unavailable` : a.label}
+                                  </span>
+                                </span>
+                              ))}
+                            </div>
+                          ) : null}
                           {m.role === "assistant" && m.sources && m.sources.length > 0 ? (
                             <div className="message-sources-v2">
                               <span className="message-sources-label-v2">Sources</span>
@@ -4316,6 +4395,24 @@ export const App: React.FC = () => {
                           <span className="dot-v2"></span>
                         </div>
                       </div>
+                    </div>
+                  )}
+                  {/* A connector round trip is the longest pause in a turn, so it is
+                      announced as it starts rather than reported once it is over. */}
+                  {activeToolCalls.length > 0 && (
+                    <div className="doc-generating-row" aria-live="polite">
+                      {activeToolCalls.map((call, i) => (
+                        <span
+                          key={`${call.tool}-${i}`}
+                          className="doc-generating-pill"
+                          title={call.summary || call.connector}
+                        >
+                          {call.ok === undefined ? (
+                            <span className="doc-generating-spinner" aria-hidden="true" />
+                          ) : null}
+                          {call.ok === false ? `${call.label} — unavailable` : `${call.label}…`}
+                        </span>
+                      ))}
                     </div>
                   )}
                   {/* Outlives the streamed text on purpose: the file is usually still
@@ -7283,6 +7380,36 @@ export const App: React.FC = () => {
           flex-shrink: 0;
         }
 
+        .message-tools-v2 {
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+          gap: 6px;
+          margin-top: 10px;
+        }
+        .message-tool-pill-v2 {
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          padding: 3px 9px;
+          border-radius: 999px;
+          font-size: 12px;
+          border: 1px solid rgba(0, 0, 0, 0.08);
+          background: rgba(0, 0, 0, 0.03);
+          color: #444;
+        }
+        .dark-theme .message-tool-pill-v2 {
+          border-color: rgba(255, 255, 255, 0.12);
+          background: rgba(255, 255, 255, 0.06);
+          color: #cfcfcf;
+        }
+        /* A failed check is muted rather than alarming: the reply already says in
+           words that something could not be reached, and a red badge on an answer
+           that is otherwise fine overstates it. */
+        .message-tool-pill-failed-v2 {
+          opacity: 0.6;
+          text-decoration: line-through;
+        }
         .message-sources-v2 {
           display: flex;
           flex-wrap: wrap;

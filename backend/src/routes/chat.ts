@@ -367,11 +367,15 @@ chatRouter.post("/public/stream", async (req, res) => {
       );
 
       let fullResponse = "";
-      for await (const chunk of stream) {
-        fullResponse += chunk;
+      for await (const event of stream) {
+        // Text only. This endpoint is unauthenticated, so it is given no tool context
+        // and no connector can be reached from here — but the stream is typed as
+        // events, and appending one to a string would send "[object Object]".
+        if (event.type !== "text") continue;
+        fullResponse += event.text;
         res.write(`data: ${JSON.stringify({
           type: "chunk",
-          content: chunk
+          content: event.text
         })}\n\n`);
       }
 

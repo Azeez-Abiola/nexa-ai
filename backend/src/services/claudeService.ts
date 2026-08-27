@@ -5,6 +5,10 @@ import { PolicyContext, ImageAttachment, WebSource } from "./openaiService";
 import logger from "../utils/logger";
 import { recordUsage } from "./usageService";
 import { isRetryableFailure, retryDelayMs } from "./providerHealth";
+import { toAnthropicTools, parseAnthropicToolCalls, anthropicToolResultMessage } from "./tools/adapters/anthropicShape";
+import { CompletedToolCall, runToolCalls } from "./tools/loop";
+import { resolveToolCatalog } from "./tools/router";
+import { MAX_TOOL_ITERATIONS, StreamEvent, ToolContext } from "./tools/types";
 
 if (!process.env.ANTHROPIC_API_KEY) {
   logger.warn("[ClaudeService] ANTHROPIC_API_KEY not set — Claude requests will fail at runtime");
@@ -279,24 +283,26 @@ export async function generateAIResponse(
 
 // ─── streamAIResponse ─────────────────────────────────────────────────────────
 
-export async function* streamAIResponse(
-  userMessage: string,
-  policies: PolicyContext[],
-  conversationHistory: Message[],
-  businessUnit: string = "",
-  customSystemPrompt?: string,
-  imageAttachments?: ImageAttachment[],
-  webSources?: WebSource[]
-): AsyncGenerator<string, void, unknown> {
-  const buLabel  = await getBusinessUnitLabel(businessUnit);
-  const policyContext = customSystemPrompt ? "" : buildPolicyContext(policies);
-  const system   = buildSystem(businessUnit, buLabel, Boolean(policyContext), customSystemPrompt);
-  const messages = buildClaudeMessages(conversationHistory, userMessage, imageAttachments, policyContext);
-  const tools    = webSearchTools();
-
-  let hasYielded = false;
+/**
+ * One model call, streamed.
+ *
+ * Split out from the tool loop because retries belong here and nowhere else: an
+ * attempt that failed executed no tools, so replaying it is safe, whereas replaying
+ * a whole loop iteration would re-run every tool call it contained.
+ *
+ * Returns the assembled message so the caller can read `stop_reason` and pull out
+ * tool-use blocks. Returns null when the call failed without producing anything and
+ * is not worth retrying.
+ */
+async function* streamOneTurn(
+  system: Anthropic.TextBlockParam[],
+  messages: Anthropic.MessageParam[],
+  tools: Anthropic.Messages.ToolUnion[],
+  businessUnit: string,
+  webSources: WebSource[] | undefined,
+  hasYieldedGlobally: boolean
+): AsyncGenerator<StreamEvent, Anthropic.Message | null, unknown> {
   let lastError: unknown = null;
-  const totalStart = Date.now();
 
   for (let attempt = 0; attempt < STREAM_MAX_ATTEMPTS; attempt++) {
     if (attempt > 0) {
@@ -304,7 +310,6 @@ export async function* streamAIResponse(
       logger.warn("[Claude/Stream] Retrying after error", {
         attempt,
         delayMs,
-        totalElapsedMs: Date.now() - totalStart,
         error: lastError instanceof Error ? lastError.message : String(lastError),
       });
       await sleep(delayMs);
@@ -312,9 +317,10 @@ export async function* streamAIResponse(
 
     const controller = new AbortController();
     const timeoutId  = setTimeout(() => controller.abort(), STREAM_TIMEOUT_MS);
+    let yieldedThisAttempt = false;
 
     try {
-      logger.info("[Claude/Stream] Request", { model: MODEL, attempt });
+      logger.info("[Claude/Stream] Request", { model: MODEL, attempt, tools: tools.length });
 
       const stream = claude.messages.stream(
         { model: MODEL, system, messages, max_tokens: 8192, ...(tools.length ? { tools } : {}) },
@@ -327,30 +333,21 @@ export async function* streamAIResponse(
           event.delta.type === "text_delta" &&
           event.delta.text
         ) {
-          yield event.delta.text;
-          hasYielded = true;
+          yield { type: "text", text: event.delta.text };
+          yieldedThisAttempt = true;
         }
       }
 
-      // Sweep web_search_tool_result blocks from the assembled message for source
-      // pills, and report cache effectiveness.
-      try {
-        const finalMessage = await stream.finalMessage();
-        logCacheUsage("Stream", finalMessage.usage);
-        recordUsage({ businessUnit, provider: "claude", modelId: MODEL, usage: finalMessage.usage, mode: "stream" });
-        collectSourcesFromContent(finalMessage.content, webSources);
-      } catch (finalErr) {
-        logger.warn("[Claude/Stream] finalMessage() unavailable after stream", {
-          error: finalErr instanceof Error ? finalErr.message : String(finalErr),
-        });
-      }
-
-      lastError = null;
-      break;
+      const finalMessage = await stream.finalMessage();
+      logCacheUsage("Stream", finalMessage.usage);
+      recordUsage({ businessUnit, provider: "claude", modelId: MODEL, usage: finalMessage.usage, mode: "stream" });
+      collectSourcesFromContent(finalMessage.content, webSources);
+      return finalMessage;
     } catch (err) {
       clearTimeout(timeoutId);
       if (isAbortError(err)) throw new Error("Request timeout");
-      if (hasYielded) throw err;
+      // Output already committed to the client — nothing to retry onto.
+      if (yieldedThisAttempt || hasYieldedGlobally) throw err;
       lastError = err;
       if (!isRetryableError(err)) break;
     } finally {
@@ -358,10 +355,93 @@ export async function* streamAIResponse(
     }
   }
 
-  if (!hasYielded && lastError) {
+  if (lastError) {
     throw new Error(
       `Failed to generate Claude response: ${lastError instanceof Error ? lastError.message : String(lastError)}`
     );
+  }
+
+  return null;
+}
+
+/**
+ * Stream a response, executing connector tools as Claude asks for them.
+ *
+ * Two kinds of tool are in play at once and they are handled quite differently.
+ * Hosted web search runs on Anthropic's servers and needs nothing from us but a
+ * declaration. Connector tools are ours to execute, and arrive as `tool_use` blocks
+ * that must be answered with `tool_result` blocks in a user-role message.
+ *
+ * Mixing them makes `pause_turn` a real case rather than a theoretical one: a long
+ * hosted-search turn can stop early and expects the assistant turn to be handed back
+ * to continue. Left unhandled it reads as a finished answer that stops mid-sentence,
+ * with nothing in the logs to explain it.
+ */
+export async function* streamAIResponse(
+  userMessage: string,
+  policies: PolicyContext[],
+  conversationHistory: Message[],
+  businessUnit: string = "",
+  customSystemPrompt?: string,
+  imageAttachments?: ImageAttachment[],
+  webSources?: WebSource[],
+  toolContext?: ToolContext
+): AsyncGenerator<StreamEvent, void, unknown> {
+  const buLabel  = await getBusinessUnitLabel(businessUnit);
+  const policyContext = customSystemPrompt ? "" : buildPolicyContext(policies);
+  const system   = buildSystem(businessUnit, buLabel, Boolean(policyContext), customSystemPrompt);
+  const messages = buildClaudeMessages(conversationHistory, userMessage, imageAttachments, policyContext);
+
+  const catalog = toolContext ? await resolveToolCatalog(toolContext) : [];
+  const connectorTools = toAnthropicTools(catalog);
+
+  let hasYielded = false;
+
+  for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
+    // On the final permitted iteration the connector tools are withheld, which is
+    // what actually forces an answer out of the model. Hosted web search stays — it
+    // costs no round trip of ours and Anthropic bounds it with max_uses.
+    const isFinalIteration = iteration === MAX_TOOL_ITERATIONS - 1;
+    const tools: Anthropic.Messages.ToolUnion[] = [
+      ...webSearchTools(),
+      ...(isFinalIteration ? [] : connectorTools),
+    ];
+
+    const turn = streamOneTurn(system, messages, tools, businessUnit, webSources, hasYielded);
+
+    // Forwarded by hand rather than with `yield*` because the loop has to both pass
+    // the events through and keep the generator's return value.
+    let message: Anthropic.Message | null = null;
+    while (true) {
+      const next = await turn.next();
+      if (next.done) { message = next.value; break; }
+      if (next.value.type === "text") hasYielded = true;
+      yield next.value;
+    }
+
+    if (!message) return;
+
+    // Hosted tool hit its own iteration limit. Hand the assistant turn back so it
+    // can continue from where it stopped.
+    if (message.stop_reason === "pause_turn") {
+      messages.push({ role: "assistant", content: message.content });
+      continue;
+    }
+
+    const calls = parseAnthropicToolCalls(message.content);
+    if (calls.length === 0) return;
+
+    logger.info("[Claude/Stream] Tool round", {
+      iteration,
+      calls: calls.map((c) => c.name),
+    });
+
+    messages.push({ role: "assistant", content: message.content });
+
+    const results: CompletedToolCall[] = [];
+    yield* runToolCalls(calls, catalog, toolContext!, results);
+
+    messages.push(anthropicToolResultMessage(results));
   }
 }
 

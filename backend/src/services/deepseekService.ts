@@ -6,7 +6,8 @@ import { PolicyContext, ImageAttachment, WebSource } from "./openaiService";
 import { isSimpleQuery } from "../utils/queryClassifier";
 import logger from "../utils/logger";
 import { recordUsage } from "./usageService";
-import { isRetryableFailure, retryDelayMs } from "./providerHealth";
+import { streamWithTools } from "./tools/chatCompletionsLoop";
+import { StreamEvent, ToolContext } from "./tools/types";
 
 if (!process.env.DEEPSEEK_API_KEY) {
   logger.warn("[DeepSeekService] DEEPSEEK_API_KEY not set — DeepSeek requests will fail at runtime");
@@ -18,8 +19,6 @@ const deepseek = new OpenAI({
 });
 export const MODEL = process.env.DEEPSEEK_MODEL || "deepseek-v4-flash";
 
-const STREAM_MAX_ATTEMPTS  = 3;
-const RETRY_BASE_DELAY_MS  = 1_000;
 const STREAM_TIMEOUT_MS    = 90_000;
 const HISTORY_TOKEN_BUDGET = 4_000;
 const IMAGE_TOKEN_ESTIMATE = 500;
@@ -33,21 +32,6 @@ interface Message {
   role: "user" | "assistant" | "system";
   content: string;
   imageUrls?: string[];
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function isRetryableError(err: unknown): boolean {
-  // Shared classifier: retries only transient failures (rate limits, 5xx,
-  // transport blips) and never an exhausted quota or bad key. Also honours
-  // `retry-after` — see providerHealth.ts.
-  return isRetryableFailure(err);
-}
-
-function isAbortError(err: unknown): boolean {
-  return err instanceof Error && (err.message.includes("aborted") || err.name === "AbortError");
 }
 
 function stripJsonFences(raw: string): string {
@@ -185,79 +169,31 @@ export async function* streamAIResponse(
   customSystemPrompt?: string,
   imageAttachments?: ImageAttachment[],
   // DeepSeek's endpoint has no hosted web-search tool; accepted for signature parity, unused.
-  _webSources?: WebSource[]
-): AsyncGenerator<string, void, unknown> {
+  _webSources?: WebSource[],
+  toolContext?: ToolContext
+): AsyncGenerator<StreamEvent, void, unknown> {
   const buLabel    = await getBusinessUnitLabel(businessUnit);
   const history    = trimHistory(conversationHistory);
   const imageCount = (imageAttachments?.length ?? 0) + history.reduce((n, m) => n + (m.imageUrls?.length ?? 0), 0);
   const { system, maxTokens } = buildSystem(businessUnit, buLabel, policies, userMessage, imageCount, customSystemPrompt);
   const messages = buildDeepSeekMessages(system, history, userMessage, imageAttachments);
 
-  let hasYielded = false;
-  let lastError: unknown = null;
-  const totalStart = Date.now();
+  logger.info("[DeepSeek/Stream] Request", { model: MODEL, connectors: Boolean(toolContext) });
 
-  for (let attempt = 0; attempt < STREAM_MAX_ATTEMPTS; attempt++) {
-    if (attempt > 0) {
-      const delayMs = retryDelayMs(lastError, attempt, RETRY_BASE_DELAY_MS);
-      logger.warn("[DeepSeek/Stream] Retrying after error", {
-        attempt,
-        delayMs,
-        totalElapsedMs: Date.now() - totalStart,
-        error: lastError instanceof Error ? lastError.message : String(lastError),
-      });
-      await sleep(delayMs);
-    }
-
-    const controller = new AbortController();
-    const timeoutId  = setTimeout(() => controller.abort(), STREAM_TIMEOUT_MS);
-
-    try {
-      logger.info("[DeepSeek/Stream] Request", { model: MODEL, attempt });
-
-      const stream = await deepseek.chat.completions.create(
-        {
-          model: MODEL,
-          messages,
-          max_tokens: maxTokens,
-          stream: true,
-          // Chat Completions omits usage from stream chunks unless asked; without
-          // this the final chunk carries no token counts to record.
-          stream_options: { include_usage: true },
-        },
-        { signal: controller.signal }
-      );
-
-      let streamUsage: unknown;
-      for await (const chunk of stream) {
-        // The usage-bearing final chunk has an empty choices array.
-        if (chunk.usage) streamUsage = chunk.usage;
-        const delta = chunk.choices[0]?.delta?.content;
-        if (delta) {
-          yield delta;
-          hasYielded = true;
-        }
-      }
-      recordUsage({ businessUnit, provider: "deepseek", modelId: MODEL, usage: streamUsage, mode: "stream" });
-
-      lastError = null;
-      break;
-    } catch (err) {
-      clearTimeout(timeoutId);
-      if (isAbortError(err)) throw new Error("Request timeout");
-      if (hasYielded) throw err;
-      lastError = err;
-      if (!isRetryableError(err)) break;
-    } finally {
-      clearTimeout(timeoutId);
-    }
-  }
-
-  if (!hasYielded && lastError) {
-    throw new Error(
-      `Failed to generate DeepSeek response: ${lastError instanceof Error ? lastError.message : String(lastError)}`
-    );
-  }
+  // The retry, timeout and tool-loop mechanics are shared with the other
+  // OpenAI-compatible provider — see tools/chatCompletionsLoop.ts. Only the client,
+  // model and prompt are DeepSeek-specific, and they are all above this line.
+  yield* streamWithTools({
+    client: deepseek,
+    model: MODEL,
+    provider: "deepseek",
+    logLabel: "DeepSeek",
+    messages,
+    maxTokens,
+    toolContext,
+    onUsage: (usage) =>
+      recordUsage({ businessUnit, provider: "deepseek", modelId: MODEL, usage, mode: "stream" })
+  });
 }
 
 // ─── generateJsonContent (for document generation) ───────────────────────────

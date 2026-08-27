@@ -12,6 +12,8 @@ import {
   ImageAttachment
 } from "../services/openaiService";
 import { parseModel, getStreamAIResponse, getGenerateAIResponse, getModelLabel, AIModel } from "../services/aiRouter";
+import { ToolContext } from "../services/tools/types";
+import { connectorsForContext } from "../services/tools/registry";
 import { buildContextForQuery } from "../utils/contextBuilder";
 import { KNOWLEDGE_BASE_VERSIONING_RULES } from "../prompts/knowledgeBaseBehavior";
 import { uploadDocument, uploadChatImage } from "../services/cloudinaryService";
@@ -458,7 +460,7 @@ const VOICE_MODE_RULES = `VOICE MODE — you are being spoken aloud, not read:
 function buildSystemPrompt(
   businessUnit: string,
   activeModel: "gpt" | "claude" | "kimi" | "deepseek" = "gpt",
-  options: { voice?: boolean } = {}
+  options: { voice?: boolean; connectors?: string[] } = {}
 ): string {
   const modelLabel = getModelLabel(activeModel);
   const sections: string[] = [
@@ -489,6 +491,22 @@ function buildSystemPrompt(
 8. Be professional, helpful, and concise.
 
 ${KNOWLEDGE_BASE_VERSIONING_RULES}`);
+
+  /**
+   * Only added when connectors are actually live for this user.
+   *
+   * Telling the model about tools it has not been given is the failure mode this
+   * guards against — it produces an assistant that offers to check a system it
+   * cannot reach, or claims it already did. The list comes from the registry, so if
+   * an admin disables a connector the prompt stops mentioning it on the next turn.
+   */
+  if (options.connectors?.length) {
+    sections.push(`CONNECTED SYSTEMS:
+You have live tools connected to: ${options.connectors.join(", ")}.
+- Use them when the answer depends on current data from those systems, and prefer a tool call over guessing or asking the user to look it up themselves.
+- Say what you checked when a tool provided the answer, so the user knows it is live rather than remembered.
+- If a tool fails or returns nothing, say so plainly and answer with what you do have. Never describe a tool result you did not receive, and never claim to have checked a system you were not given a tool for.`);
+  }
 
   sections.push(DOCUMENT_GENERATION_RULES);
 
@@ -1939,7 +1957,32 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
     const failedDocNames = [...new Set([...sessionStatus.failed, ...extractionFailedNames])];
     // Multipart turns arrive as strings, JSON turns as a real boolean — accept both.
     const voiceMode = req.body.voice === true || req.body.voice === "true";
-    const systemPrompt = buildSystemPrompt(businessUnit, model, { voice: voiceMode });
+    /**
+     * Who the connector layer acts as.
+     *
+     * Built from the verified JWT — never the request body, never anything the model
+     * produced. This object is the sole authority on what the turn may reach, and it
+     * is what makes a connector call inherit the user's own permissions rather than
+     * Nexa's.
+     */
+    const toolContext: ToolContext = {
+      userId: req.userId,
+      adminId: req.adminId,
+      email: req.email,
+      businessUnit,
+      department: req.department,
+      isAdmin: Boolean(req.isAdmin),
+      provider: model
+    };
+
+    // Registry lookup only — no MCP round trip. Enough to know what to tell the
+    // model it has; the tools themselves are resolved inside the provider.
+    const connectorLabels = (await connectorsForContext(toolContext)).map((c) => c.label);
+
+    const systemPrompt = buildSystemPrompt(businessUnit, model, {
+      voice: voiceMode,
+      connectors: connectorLabels
+    });
     const turnContext = buildTurnContext({
       sessionContextString,
       globalContextString: globalContext.hybridContextString,
@@ -1969,6 +2012,7 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
 
     let fullResponse = "";
     const webSources: { title: string; link: string }[] = [];
+
     try {
       const generator = getStreamAIResponse(model)(
         aiUserMessage,
@@ -1981,14 +2025,73 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
         businessUnit,
         systemPrompt,
         imageAttachments.length > 0 ? imageAttachments : undefined,
-        webSources
+        webSources,
+        toolContext
       );
 
       let firstChunk = true;
-      for await (const chunk of generator) {
-        if (firstChunk) { t.ttftMs = Date.now() - t.start; firstChunk = false; }
-        fullResponse += chunk;
-        res.write(`data: ${JSON.stringify({ chunk, fullResponse })}\n\n`);
+      /**
+       * Tool activity for this turn, in the order it happened.
+       *
+       * Kept so it can be persisted on the assistant message: reopening a
+       * conversation should still show that an answer came from a connector rather
+       * than silently presenting it as something the model knew.
+       */
+      const toolActivity: Array<{
+        tool: string;
+        connector: string;
+        label: string;
+        ok?: boolean;
+        summary?: string;
+        durationMs?: number;
+      }> = [];
+
+      for await (const event of generator) {
+        if (event.type === "text") {
+          if (firstChunk) { t.ttftMs = Date.now() - t.start; firstChunk = false; }
+          fullResponse += event.text;
+          res.write(`data: ${JSON.stringify({ chunk: event.text, fullResponse })}\n\n`);
+          continue;
+        }
+
+        if (event.type === "tool_call") {
+          toolActivity.push({
+            tool: event.tool,
+            connector: event.connectorLabel || event.connector,
+            label: event.label
+          });
+          // Sent as it starts, not after it finishes. A connector call is the longest
+          // pause in a turn, and an unexplained pause reads as a hang.
+          res.write(
+            `data: ${JSON.stringify({
+              toolCall: {
+                callId: event.callId,
+                tool: event.tool,
+                connector: event.connectorLabel || event.connector,
+                label: event.label
+              }
+            })}\n\n`
+          );
+          continue;
+        }
+
+        const entry = toolActivity.find((a) => a.tool === event.tool && a.ok === undefined);
+        if (entry) {
+          entry.ok = event.ok;
+          entry.summary = event.summary;
+          entry.durationMs = event.durationMs;
+        }
+        res.write(
+          `data: ${JSON.stringify({
+            toolResult: {
+              callId: event.callId,
+              tool: event.tool,
+              ok: event.ok,
+              summary: event.summary,
+              durationMs: event.durationMs
+            }
+          })}\n\n`
+        );
       }
 
       // Build structured source pills for the UI (KB docs + web results).
@@ -2032,7 +2135,8 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
         timestamp: new Date(),
         messageId: randomUUID(),
         ...(sources.length > 0 ? { sources } : {}),
-        ...(attachDocument ? { generatedDocument } : {})
+        ...(attachDocument ? { generatedDocument } : {}),
+        ...(toolActivity.length > 0 ? { toolActivity } : {})
       };
       group.messages.push(assistantMessage);
 
@@ -2060,6 +2164,7 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
           fullResponse: sanitizedResponse,
           uploadedDocuments: uploadedDocsWithMeta,
           ...(attachDocument ? { generatedDocument } : {}),
+          ...(toolActivity.length > 0 ? { toolActivity } : {}),
           conversation
         })}\n\n`
       );

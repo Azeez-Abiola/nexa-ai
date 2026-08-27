@@ -27,6 +27,25 @@ export interface MessageReaction {
   emoji: string;
 }
 
+/**
+ * One connector tool call made while producing an assistant reply.
+ *
+ * Persisted rather than treated as transient UI state: an answer that came from a
+ * live connector is a different kind of claim than one the model produced from its
+ * own knowledge, and reopening the conversation later should still say so.
+ */
+export interface MessageToolActivity {
+  /** Qualified tool name, e.g. "knowledge_base__search_documents". */
+  tool: string;
+  /** Connector display label, for the UI. */
+  connector: string;
+  /** Human phrasing shown to the user, e.g. "Searching the knowledge base". */
+  label: string;
+  ok?: boolean;
+  summary?: string;
+  durationMs?: number;
+}
+
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
@@ -42,6 +61,8 @@ export interface ChatMessage {
   sources?: MessageSource[];
   /** AI-generated file (docx/xlsx/pptx/pdf) attached to this assistant reply. */
   generatedDocument?: GeneratedDocument;
+  /** Connector tools called while producing this reply, in order. */
+  toolActivity?: MessageToolActivity[];
   timestamp: Date;
   /** Set on user messages in collaborative conversations so recipients know who sent what. */
   senderId?: string;
@@ -118,6 +139,18 @@ const MessageReactionSchema = new Schema<MessageReaction>(
   { _id: false }
 );
 
+const MessageToolActivitySchema = new Schema<MessageToolActivity>(
+  {
+    tool: { type: String, required: true },
+    connector: { type: String, default: "" },
+    label: { type: String, default: "" },
+    ok: { type: Boolean, default: undefined },
+    summary: { type: String, default: undefined },
+    durationMs: { type: Number, default: undefined },
+  },
+  { _id: false }
+);
+
 const MessageSchema = new Schema<ChatMessage>(
   {
     role: { type: String, enum: ["user", "assistant"], required: true },
@@ -136,6 +169,7 @@ const MessageSchema = new Schema<ChatMessage>(
     imageUrls: { type: [String], default: undefined },
     sources: { type: [MessageSourceSchema], default: undefined },
     generatedDocument: { type: GeneratedDocumentSchema, default: undefined },
+    toolActivity: { type: [MessageToolActivitySchema], default: undefined },
     timestamp: { type: Date, default: Date.now },
     senderId: { type: String, default: undefined },
     senderName: { type: String, default: undefined },

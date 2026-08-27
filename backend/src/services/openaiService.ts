@@ -6,6 +6,10 @@ import { isSimpleQuery } from "../utils/queryClassifier";
 import logger from "../utils/logger";
 import { recordUsage } from "./usageService";
 import { classifyProviderError, isRetryableFailure, retryDelayMs } from "./providerHealth";
+import { toResponsesTools, parseResponsesToolCalls, responsesToolResult } from "./tools/adapters/openaiShape";
+import { CompletedToolCall, runToolCalls } from "./tools/loop";
+import { resolveToolCatalog } from "./tools/router";
+import { CanonicalTool, MAX_TOOL_ITERATIONS, StreamEvent, ToolContext } from "./tools/types";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -354,6 +358,16 @@ export async function generateAIResponse(
   }
 }
 
+/**
+ * Stream a response, executing connector tools as the model asks for them.
+ *
+ * GPT reaches connectors the same way the other three providers do — Nexa executes
+ * the tool and feeds the result back. The Responses API's own MCP tool type is
+ * deliberately not used: it has OpenAI's servers connect to the MCP server directly,
+ * which would route the call around the Tool Router, the RBAC check, and the audit
+ * log. For a holding company that needs to answer who did what, in which system, the
+ * shortcut costs exactly the things the gateway exists to provide.
+ */
 export async function* streamAIResponse(
   userMessage: string,
   policies: PolicyContext[],
@@ -361,37 +375,130 @@ export async function* streamAIResponse(
   businessUnit: string = "",
   customSystemPrompt?: string,
   imageAttachments?: ImageAttachment[],
-  webSources?: WebSource[]
-): AsyncGenerator<string, void, unknown> {
+  webSources?: WebSource[],
+  toolContext?: ToolContext
+): AsyncGenerator<StreamEvent, void, unknown> {
   const buLabel = await getBusinessUnitLabel(businessUnit);
-  const {
-    instructions, input, maxOutputTokens, lightMode, estimatedTokens, imageCount, tools, toolChoice,
-  } = buildRequestParams(
+  const params  = buildRequestParams(
     userMessage, policies, conversationHistory, buLabel, customSystemPrompt, imageAttachments
   );
 
-  // Log request payload summary before sending (no PII — sizes only).
+  /**
+   * Light mode gets no connectors, for the same reason it gets no web search: a
+   * greeting does not need the knowledge base, and the tool catalog is charged as
+   * input tokens on every turn that carries it. Scoping the catalog to turns that
+   * could plausibly use it is the difference between connectors being affordable
+   * across four providers and not.
+   */
+  const catalog: CanonicalTool[] =
+    toolContext && !params.lightMode ? await resolveToolCatalog(toolContext) : [];
+  const connectorTools = toResponsesTools(catalog);
+
   logger.info("[OpenAI/Stream] Request payload", {
     model:            MODEL,
-    lightMode,
-    instructionChars: instructions.length,
-    inputMessages:    input.length,
-    imageCount,
-    maxOutputTokens,
-    estimatedTokens,
-    webSearch:        Boolean(tools?.length),
+    lightMode:        params.lightMode,
+    instructionChars: params.instructions.length,
+    inputMessages:    params.input.length,
+    imageCount:       params.imageCount,
+    maxOutputTokens:  params.maxOutputTokens,
+    estimatedTokens:  params.estimatedTokens,
+    webSearch:        Boolean(params.tools?.length),
+    connectorTools:   connectorTools.length,
   });
 
-  // The Responses API uses `instructions` + `input` — no legacy `messages` field.
-  const requestParams = {
-    model:             MODEL,
-    instructions,
-    input,
-    max_output_tokens: maxOutputTokens,
-    reasoning:         { effort: REASONING_EFFORT },
-    ...(tools ? { tools } : {}),
-    ...(toolChoice ? { tool_choice: toolChoice } : {}),
-  } as const;
+  // Grows within the turn as tool calls and their results are appended.
+  const input: OpenAI.Responses.ResponseInputItem[] = [
+    ...(params.input as OpenAI.Responses.ResponseInputItem[]),
+  ];
+  let hasYielded = false;
+
+  for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
+    // Withholding the tools on the last permitted iteration is what forces an
+    // answer. Hosted web search stays — OpenAI bounds that one itself.
+    const isFinalIteration = iteration === MAX_TOOL_ITERATIONS - 1;
+    const tools: OpenAI.Responses.Tool[] = [
+      ...(params.tools ?? []),
+      ...(isFinalIteration ? [] : connectorTools),
+    ];
+
+    // No `stream` field: this same object is handed to both `responses.stream()` and
+    // the non-streaming `responses.create()` fallback inside the helper.
+    const requestParams: OpenAI.Responses.ResponseCreateParamsNonStreaming = {
+      model:             MODEL,
+      instructions:      params.instructions,
+      input,
+      max_output_tokens: params.maxOutputTokens,
+      reasoning:         { effort: REASONING_EFFORT },
+      ...(tools.length ? { tools } : {}),
+      ...(params.toolChoice ? { tool_choice: params.toolChoice } : {}),
+    };
+
+    const turn = streamSingleTurn(requestParams, businessUnit, webSources, hasYielded);
+
+    // Forwarded by hand rather than with `yield*`, because the loop needs both the
+    // events and the generator's return value.
+    let output: unknown[] = [];
+    while (true) {
+      const next = await turn.next();
+      if (next.done) { output = next.value ?? []; break; }
+      if (next.value.type === "text") hasYielded = true;
+      yield next.value;
+    }
+
+    const calls = parseResponsesToolCalls(output);
+    if (calls.length === 0) return;
+
+    logger.info("[OpenAI/Stream] Tool round", {
+      iteration,
+      calls: calls.map((c) => c.name),
+    });
+
+    /**
+     * Every output item is echoed back, not just the function calls. The Responses
+     * API is stateless when driven this way, and gpt-5 emits reasoning items
+     * alongside its function calls that it expects to see again on the next request
+     * — dropping them loses the model's own working state mid-turn.
+     */
+    input.push(...(output as OpenAI.Responses.ResponseInputItem[]));
+
+    const results: CompletedToolCall[] = [];
+    yield* runToolCalls(calls, catalog, toolContext!, results);
+
+    for (const result of results) {
+      input.push(responsesToolResult(result.callId, result.content));
+    }
+  }
+}
+
+/**
+ * One model call, streamed.
+ *
+ * This is the whole of the previous streamAIResponse, unchanged in substance: the
+ * three retry attempts, the several gpt-5 text-recovery paths, and the
+ * non-streaming fallback all still live here. It became a helper so the tool loop
+ * above it can call it repeatedly, and retries stay scoped to a single call —
+ * replaying a loop iteration would re-execute every tool in it.
+ *
+ * Returns the completed response's output items, which is where the model's
+ * function calls are found.
+ */
+async function* streamSingleTurn(
+  requestParams: OpenAI.Responses.ResponseCreateParamsNonStreaming,
+  businessUnit: string,
+  webSources: WebSource[] | undefined,
+  hasYieldedGlobally: boolean
+): AsyncGenerator<StreamEvent, unknown[], unknown> {
+  /** Output items from the completed response — the source of function calls. */
+  let outputItems: unknown[] = [];
+
+  // The request payload is logged by the caller, which knows the real light-mode,
+  // token-estimate and image counts. Logging it again from here would have meant
+  // inventing those values.
+  logger.info("[OpenAI/Stream] Turn", {
+    model:         MODEL,
+    inputItems:    (requestParams.input as unknown[]).length,
+    tools:         requestParams.tools?.length ?? 0,
+  });
 
   let hasYielded   = false;
   let doneFallback = "";
@@ -420,7 +527,14 @@ export async function* streamAIResponse(
         maxAttempts: STREAM_MAX_ATTEMPTS,
       });
 
-      const stream        = openai.responses.stream(requestParams, { signal: controller.signal });
+      // Cast because the two entry points disagree about `stream` in their types —
+      // `.stream()` wants it absent-or-true, `.create()` (used by the fallback below)
+      // wants it absent-or-false. One object has to serve both, and omitting the
+      // field entirely is what both actually accept at runtime.
+      const stream        = openai.responses.stream(
+        requestParams as unknown as Parameters<typeof openai.responses.stream>[0],
+        { signal: controller.signal }
+      );
       let firstChunk      = true;
       const seenEventTypes: string[] = [];
 
@@ -441,7 +555,7 @@ export async function* streamAIResponse(
 
         if (event.type === "response.output_text.delta") {
           const delta = (event as any).delta ?? "";
-          if (delta) { yield delta; hasYielded = true; }
+          if (delta) { yield { type: "text", text: delta }; hasYielded = true; }
         } else if (event.type === "response.output_text.annotation.added") {
           // Web search citations arrive as url_citation annotations — collect for source pills.
           const ann = (event as any).annotation;
@@ -484,9 +598,13 @@ export async function* streamAIResponse(
       // fully-assembled Response object. Covers any event-type gap between gpt-5
       // and what the iterator exposes (e.g. text only in response.completed), and
       // sweeps url_citation annotations in case they weren't emitted as stream events.
-      if ((!hasYielded && !doneFallback.trim()) || webSources) {
+      // Now unconditional: the completed response is the only place the model's
+      // function calls appear, so a turn that skipped this would silently drop every
+      // tool call the model made.
+      {
         try {
           const finalResp = await stream.finalResponse();
+          outputItems = (finalResp as unknown as OpenAI.Responses.Response).output ?? [];
           collectSourcesFromResponse(finalResp as unknown as OpenAI.Responses.Response, webSources);
           recordUsage({
             businessUnit,
@@ -539,7 +657,7 @@ export async function* streamAIResponse(
 
       // If we already yielded some chunks, the client has partial data — retrying
       // would send a duplicate response, so just surface the error.
-      if (hasYielded) {
+      if (hasYielded || hasYieldedGlobally) {
         clearTimeout(timeoutId);
         throw new Error(
           `Stream interrupted: ${err instanceof Error ? err.message : String(err)}`
@@ -562,8 +680,8 @@ export async function* streamAIResponse(
 
   // gpt-5 may deliver text only via the "done" event path, with no per-character deltas.
   if (!hasYielded && doneFallback.trim() && !lastError) {
-    yield doneFallback.trim();
-    return;
+    yield { type: "text", text: doneFallback.trim() };
+    return outputItems;
   }
 
   if (!hasYielded && lastError) {
@@ -607,7 +725,7 @@ export async function* streamAIResponse(
         chars:      text.length,
       });
 
-      yield text;
+      yield { type: "text", text };
     } catch (fallbackErr) {
       logger.error("[OpenAI/Stream] Non-streaming fallback also failed", {
         fallbackMs: Date.now() - fallbackStart,
@@ -623,6 +741,8 @@ export async function* streamAIResponse(
       clearTimeout(timeoutId);
     }
   }
+
+  return outputItems;
 }
 
 export async function generateConversationTitle(userMessage: string): Promise<string> {

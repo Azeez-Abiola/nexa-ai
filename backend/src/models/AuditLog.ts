@@ -9,6 +9,9 @@ export type AuditEventType =
   | "rag_retrieval_empty"
   | "rag_access_denied"
   | "chunk_embedding_batch_completed"
+  | "connector_tool_call"
+  | "connector_tool_denied"
+  | "connector_settings_changed"
   | "conversation_shared"
   | "conversation_share_denied"
   | "conversation_share_revoked"
@@ -48,6 +51,9 @@ const AuditLogSchema = new Schema<AuditLogDocument>(
         "rag_retrieval_empty",
         "rag_access_denied",
         "chunk_embedding_batch_completed",
+        "connector_tool_call",
+        "connector_tool_denied",
+        "connector_settings_changed",
         "conversation_shared",
         "conversation_share_denied",
         "conversation_share_revoked",
