@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { Search, TrendingUp, ShieldCheck, ClipboardCheck, BookOpen, ArrowRight, BarChart3, Cpu, Layers, Users, ListChecks } from "lucide-react";
+import { Search, TrendingUp, ShieldCheck, ClipboardCheck, BookOpen, ArrowRight, BarChart3, Cpu, Layers, Users, ListChecks, Check } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import {
   Dialog,
@@ -16,67 +16,106 @@ type Feature = {
   highlight: boolean;
   detailTitle: string;
   detailParagraphs: string[];
+  /** "What you can do" — capabilities in plain terms, under the prose. Optional so a
+      card without a list still renders. */
+  detailBullets?: string[];
 };
 
 const features: Feature[] = [
   {
     icon: Layers,
-    title: "Multi-Modal AI Engine",
-    desc: "Text, documents, images, spreadsheets, and voice. One assistant that understands every format your team works in.",
+    title: "Multimodal AI",
+    desc: "Work with text, documents, spreadsheets, images and voice, all in one conversation with Nexa.",
     highlight: false,
-    detailTitle: "Multi-modal AI engine",
+    detailTitle: "Multimodal AI",
     detailParagraphs: [
-      "Nexa is not limited to plain text. Drop in a scanned contract, a chart from a board pack, a spreadsheet export, or a photo from the plant floor and ask questions about it in the same conversation.",
-      "Documents, tables, and images are processed into a shared understanding layer, so a single question can draw on a policy PDF, a financial workbook, and a diagram at once.",
-      "Voice input and spoken responses let field and operations teams use Nexa hands-free, while the same permissions and audit rules apply across every format.",
+      "Nexa understands more than plain text. Upload a document, spreadsheet, image, chart or other supported file and ask questions about it directly in your conversation.",
+      "Analyse a financial report, review a scanned contract, interpret a chart, summarise a document or extract information from a spreadsheet without switching between different tools.",
+      "Nexa can also support voice interactions, allowing users to ask questions and receive spoken responses where enabled. The same access controls and security policies apply regardless of the format you are working with.",
+    ],
+    detailBullets: [
+      "Ask questions about documents and files",
+      "Analyse spreadsheets and business data",
+      "Understand charts, diagrams and images",
+      "Summarise and extract information",
+      "Interact with Nexa using voice",
     ],
   },
   {
     icon: Users,
-    title: "Collaboration & Teamwork",
-    desc: "Group chats, shared conversations and live presence bring the whole team into the same thread with Nexa.",
+    title: "AI-Powered Team Collaboration",
+    desc: "Bring your team and Nexa into the same conversation to share knowledge, solve problems and get work done together.",
     highlight: false,
-    detailTitle: "Collaboration & teamwork",
+    detailTitle: "AI-powered team collaboration",
     detailParagraphs: [
-      "Start a group conversation with colleagues and Nexa together. Everyone sees the same answers, the same sources, and the same follow-up questions. No more forwarding screenshots.",
-      "Share a thread with a teammate or an entire business unit, hand off work in progress, and keep the full history in one place instead of scattered across inboxes.",
-      "Typing indicators and real-time updates keep group sessions feeling live, while role-based access still governs which documents each participant can see.",
+      "Nexa brings people and AI into the same workspace. Create shared conversations where team members can discuss an issue, exchange information and ask Nexa questions without leaving the conversation.",
+      "Instead of copying information between emails, chats and AI tools, your team can work from a shared thread and use Nexa to summarise discussions, answer questions, analyse information and support decision-making.",
+      "Everyone can contribute to the same conversation while Nexa provides AI assistance when needed.",
+    ],
+    detailBullets: [
+      "Create shared conversations with colleagues",
+      "Bring Nexa into team discussions",
+      "Ask questions and get AI assistance",
+      "Share information and files with your team",
+      "Keep discussions and AI responses in one place",
     ],
   },
   {
     icon: ListChecks,
     title: "Integrated Task Management",
-    desc: "Turn answers into action. Create, assign and track tasks without ever leaving the conversation.",
+    desc: "Turn conversations into action. Create, assign and track tasks without leaving Nexa.",
     highlight: false,
     detailTitle: "Integrated task management",
     detailParagraphs: [
-      "When a conversation surfaces something that needs doing, capture it as a task on the spot, with owner, due date, and a link back to the thread that created it.",
-      "Nexa can draft the task list for you: ask it to break down a policy rollout or an audit finding into steps, then assign them to the right people.",
-      "Track status across your team so follow-ups from meetings, reviews, and compliance checks stop falling through the cracks.",
+      "Great conversations should lead to action. Nexa helps your team turn decisions, requests and follow-ups into actionable tasks without leaving the conversation.",
+      "Create tasks, assign them to the right people, set deadlines and track progress from one place. This makes it easier to move from discussing what needs to be done to actually getting it done.",
+      "For example, after a team discussion, Nexa can help turn agreed actions into structured tasks that can be assigned and followed through.",
+    ],
+    detailBullets: [
+      "Create tasks from conversations",
+      "Assign tasks to team members",
+      "Set deadlines and priorities",
+      "Track task status and progress",
+      "Keep tasks connected to the conversation that created them",
     ],
   },
   {
     icon: Search,
-    title: "Smart Document Search & Retrieval",
-    desc: "Find exactly what you need across thousands of documents. Nexa understands meaning, not just keywords.",
+    title: "Ask Your Documents",
+    desc: "Find the information you need across your organisation's documents by simply asking Nexa in natural language.",
     highlight: false,
-    detailTitle: "Smart document search & retrieval",
+    detailTitle: "Ask your documents",
     detailParagraphs: [
-      "Nexa indexes your approved PDFs, policies, SOPs, and reports so employees can ask questions in plain language and get answers with traceability back to the source document.",
-      "Semantic search goes beyond keyword matching to surface the right clause, table, or paragraph even when users do not know the exact file name or location.",
-      "Administrators can refresh the knowledge base as documents change, so responses stay aligned with the latest approved materials.",
+      "Finding information should not require searching through folders, opening multiple files and scanning pages of documents.",
+      "With Nexa, you can ask questions in everyday language and find relevant information across your organisation's connected knowledge sources.",
+      "Ask questions such as \"What is our travel policy?\", \"What are the payment terms in this contract?\" or \"What changed in the latest policy?\" and Nexa can identify relevant information from the documents available to you.",
+      "Nexa helps employees spend less time searching and more time using the information they need.",
+    ],
+    detailBullets: [
+      "Search across large document collections",
+      "Ask questions using natural language",
+      "Find relevant policies and procedures",
+      "Retrieve information from business documents",
+      "Reduce time spent manually searching for information",
     ],
   },
   {
     icon: TrendingUp,
     title: "AI-Powered Analysis",
-    desc: "Analyze financial reports, spot trends, compare data across periods, all through natural conversation.",
+    desc: "Analyse reports, compare data, identify trends and uncover business insights simply by asking Nexa questions.",
     highlight: false,
     detailTitle: "AI-powered analysis",
     detailParagraphs: [
-      "Finance and strategy teams can compare periods, highlight variances, and explore management commentary through guided conversation, always grounded in documents they are allowed to see.",
-      "Use Nexa to prep for reviews: ask for summaries of key risks, revenue drivers, or cost lines that moved, then drill into the underlying filings or internal packs.",
-      "Outputs are assistive: critical numbers and decisions should still be validated in your official systems of record.",
+      "Nexa helps turn business information into actionable insights. Instead of manually reviewing reports or building every analysis from scratch, ask Nexa questions about your data and documents using natural language.",
+      "Compare performance across periods, identify trends, summarise reports, investigate changes and explore business information through conversation.",
+      "For example, you could ask: \"Compare our Q2 expenses with Q1 and highlight the biggest changes.\" Nexa can analyse the available information and present the findings in a way that is easier to understand and act on.",
+    ],
+    detailBullets: [
+      "Analyse business and financial reports",
+      "Compare data across periods",
+      "Identify trends and changes",
+      "Summarise complex information",
+      "Ask follow-up questions in natural language",
     ],
   },
   {
@@ -93,50 +132,80 @@ const features: Feature[] = [
   },
   {
     icon: ClipboardCheck,
-    title: "Compliance & Audit Readiness",
-    desc: "Instant access to policies and procedures. Full audit trails of every query and response.",
+    title: "Compliance & Audit Support",
+    desc: "Give teams quick access to policies and procedures while maintaining visibility into how Nexa is used.",
     highlight: false,
-    detailTitle: "Compliance & audit readiness",
+    detailTitle: "Compliance & audit support",
     detailParagraphs: [
-      "Employees can pull the current version of HR, legal, or safety policies without hunting through shared drives.",
-      "Administrators benefit from visibility into how the assistant is used, supporting internal audit and governance workflows.",
-      "Retention and handling of conversations follow your deployment model and organizational policies.",
+      "Nexa helps organisations make important policies, procedures and business information easier to find and use.",
+      "Employees can quickly access approved information instead of relying on outdated documents, personal copies or informal explanations. Where audit logging is enabled, Nexa also provides visibility into user interactions, helping organisations understand how the platform is being used.",
+      "This creates a more structured approach to accessing organisational knowledge and supports governance, compliance and audit activities.",
+    ],
+    detailBullets: [
+      "Make policies and procedures easier to access",
+      "Help employees find approved information",
+      "Maintain visibility into Nexa usage",
+      "Support governance and compliance processes",
+      "Provide an auditable record where logging is enabled",
     ],
   },
   {
     icon: BookOpen,
     title: "Continuous Learning Knowledge Base",
-    desc: "As new documents are approved, Nexa learns and evolves. Always current, always accurate.",
+    desc: "Keep Nexa aligned with your organisation's latest policies, procedures and approved information.",
     highlight: false,
     detailTitle: "Continuous learning knowledge base",
     detailParagraphs: [
-      "When teams upload new versions or categories of documents, Nexa’s retrieval layer is updated so answers reflect what is approved for use.",
-      "Knowledge groups let you segment content by function, for example finance vs. plant operations, without duplicating infrastructure.",
-      "The result is a single assistant experience that stays relevant as your organization’s information estate grows.",
+      "Your organisation's knowledge is constantly changing. Policies are updated, procedures evolve and new documents are introduced.",
+      "Nexa's knowledge base allows organisations to add and update approved information so employees can access the latest available content when asking questions.",
+      "When information changes, the knowledge available to Nexa can be refreshed without requiring employees to manually search through multiple locations for the latest version.",
+      "This helps create a centralised, accessible source of organisational knowledge that evolves with the business.",
+    ],
+    detailBullets: [
+      "Add and update organisational documents",
+      "Maintain a centralised knowledge source",
+      "Make new policies and procedures available",
+      "Reduce reliance on outdated information",
+      "Keep organisational knowledge accessible to employees",
     ],
   },
   {
     icon: BarChart3,
     title: "Insights & Adoption Analytics",
-    desc: "See what your team is asking, which documents drive answers, and where knowledge gaps are forming.",
+    desc: "Understand how your teams use Nexa, what they're asking, and where knowledge gaps are emerging.",
     highlight: false,
     detailTitle: "Insights & adoption analytics",
     detailParagraphs: [
-      "Administrators get a clear view of usage trends: top questions, most-cited documents, and active users by department, so adoption is measurable, not assumed.",
-      "Surface knowledge gaps quickly: when employees repeatedly ask questions Nexa cannot confidently answer, you know exactly which content to publish or update next.",
-      "Tie usage back to ROI by understanding which teams benefit most and where to invest in expanding the knowledge base.",
+      "Nexa does not just help your employees, it can also help your organisation understand how AI is being used.",
+      "Usage and adoption analytics give administrators visibility into how teams interact with Nexa, the types of questions employees ask, and the information they rely on most.",
+      "These insights can help organisations identify frequently requested information, discover knowledge gaps, improve the knowledge base and understand where Nexa is delivering value.",
+    ],
+    detailBullets: [
+      "Monitor platform usage and adoption",
+      "Identify frequently asked questions",
+      "Understand how teams use Nexa",
+      "Identify potential knowledge gaps",
+      "Improve your organisational knowledge base",
+      "Measure adoption over time",
     ],
   },
   {
     icon: Cpu,
-    title: "Multiple LLM Support",
-    desc: "Run different large language models side-by-side, selecting the best for each task.",
+    title: "Multiple AI Models",
+    desc: "Choose from leading AI models to balance capability, speed and cost for different tasks.",
     highlight: false,
-    detailTitle: "Multiple LLM support",
+    detailTitle: "Multiple AI models",
     detailParagraphs: [
-      "Choose from a portfolio of models including Claude, GPT, Kimi, and DeepSeek to balance speed, cost, and capability.",
-      "Switch models per query or define fallback logic for robust responses.",
-      "Future‑proof your AI stack as new models become available."
+      "Nexa is not tied to a single AI model. It can connect to multiple AI models, including GPT, Claude, Kimi and DeepSeek, giving organisations greater flexibility over how AI capabilities are used.",
+      "Different models can have different strengths, costs and performance characteristics. Nexa allows organisations to select the model that best fits a particular task or configure model selection according to their needs.",
+      "As new and more capable AI models become available, Nexa's multi-model architecture provides flexibility to evolve the AI stack without rebuilding the entire platform.",
+    ],
+    detailBullets: [
+      "Work with multiple AI models from one platform",
+      "Select different models for different use cases",
+      "Balance capability, speed and cost",
+      "Configure model preferences or fallback options",
+      "Add new models as your AI strategy evolves",
     ],
   },
 ];
@@ -217,6 +286,24 @@ const FeaturesSection = () => {
                 {active.detailParagraphs.map((p, idx) => (
                   <p key={idx}>{p}</p>
                 ))}
+
+                {/* Scannable capabilities after the prose. Rendered only when a card has
+                    them, so the older cards keep their current shape. */}
+                {active.detailBullets?.length ? (
+                  <div className="pt-2">
+                    <h4 className="mb-3 text-[13px] font-bold uppercase tracking-widest text-foreground/70">
+                      What you can do
+                    </h4>
+                    <ul className="space-y-2">
+                      {active.detailBullets.map((item, idx) => (
+                        <li key={idx} className="flex gap-2.5">
+                          <Check className="mt-[3px] h-4 w-4 shrink-0 text-[var(--brand-color,#ed0000)]" />
+                          <span>{item}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
               </div>
             </>
           ) : null}
