@@ -120,14 +120,21 @@ const features: Feature[] = [
   },
   {
     icon: ShieldCheck,
-    title: "Role-Based Access & Security",
-    desc: "Granular permissions ensure every user only sees what they're authorized to access.",
+    title: "Secure, Role-Based Access",
+    desc: "Control who can access information and features based on their role, responsibilities and permissions.",
     highlight: true,
-    detailTitle: "Role-based access & security",
+    detailTitle: "Secure, role-based access",
     detailParagraphs: [
-      "Access is tied to your organization structure: business unit, grade or role, and knowledge groups so that sensitive material never appears in the wrong context.",
-      "Every query runs with the same entitlement rules as your knowledge base, reducing the risk of over-sharing compared to ad-hoc document sharing.",
-      "Designed for enterprise environments where IT and compliance teams need predictable, auditable behavior.",
+      "Enterprise AI needs enterprise-grade access control. Nexa allows organisations to manage what users can access based on their assigned roles and permissions.",
+      "This means employees can use Nexa to access the information and capabilities relevant to their work without automatically gaining access to information they are not authorised to see.",
+      "Access controls can be applied across users, content and platform capabilities, helping organisations maintain appropriate boundaries around sensitive business information.",
+    ],
+    detailBullets: [
+      "Define user roles and permissions",
+      "Control access to information",
+      "Restrict sensitive content to authorised users",
+      "Manage access based on responsibilities",
+      "Support organisational security and governance",
     ],
   },
   {
