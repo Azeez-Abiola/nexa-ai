@@ -52,7 +52,7 @@ function isConfigured(model: AIModel): boolean {
  * Failover exists because a dead provider (exhausted credit, bad key) would
  * otherwise surface to the user as an error while three other models sit idle.
  */
-function failoverChain(model: AIModel): AIModel[] {
+export function failoverChain(model: AIModel): AIModel[] {
   return [model, ...FALLBACK_ORDER.filter((m) => m !== model && isConfigured(m))];
 }
 

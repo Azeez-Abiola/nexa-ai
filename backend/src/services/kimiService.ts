@@ -271,7 +271,8 @@ export async function generateJsonContent(system: string, userPrompt: string): P
       { role: "system", content: system + "\n\nIMPORTANT: Respond ONLY with valid JSON. No markdown fences, no extra text, no explanation." },
       { role: "user", content: userPrompt },
     ],
-    max_tokens: 4000,
+    // Documents run long; 4000 truncated them mid-JSON and the parse failed.
+    max_tokens: 8000,
     stream: false,
   });
 

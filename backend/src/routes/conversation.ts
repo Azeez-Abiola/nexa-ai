@@ -156,7 +156,8 @@ interface GeneratedDocResult {
 async function generateAndCacheDocument(
   prompt: string,
   docType: DocumentType,
-  model: AIModel = "gpt"
+  model: AIModel = "gpt",
+  businessUnit?: string
 ): Promise<GeneratedDocResult> {
   const content = await generateDocumentContent(prompt, docType, model);
 
@@ -175,11 +176,33 @@ async function generateAndCacheDocument(
   const filename = `nexa-${docType}-${timestamp}.${docType}`;
   const mimeType = MIME_TYPES[docType];
 
-  const id = cacheDocument(buffer, filename, mimeType);
-  const downloadUrl = `/api/v1/conversations/download-doc/${id}`;
-
-  logger.info("[DocumentGen] Document cached", { filename, id });
-  return { url: downloadUrl, filename, documentType: docType };
+  /*
+   * Stored, not remembered.
+   *
+   * Generated files used to live in a Map in this process, which meant a download only
+   * worked while that process stayed up and only for 24 hours. A deploy, a second
+   * instance, or simply opening yesterday's conversation gave a dead button and a blank
+   * page. Cloudinary already holds every uploaded document, so generated ones go to the
+   * same place and the link keeps working.
+   */
+  try {
+    const { secureUrl } = await uploadDocument(buffer, filename, businessUnit || "shared", mimeType);
+    // fl_attachment makes the browser save the file rather than try to display it. The
+    // anchor's own download attribute cannot do this: it is ignored cross-origin.
+    const downloadUrl = secureUrl.replace("/raw/upload/", "/raw/upload/fl_attachment/");
+    logger.info("[DocumentGen] Document stored", { filename, documentType: docType });
+    return { url: downloadUrl, filename, documentType: docType };
+  } catch (err) {
+    // Falling back to the in-memory cache rather than failing the turn: a short-lived
+    // download beats telling the user their document could not be produced when it
+    // demonstrably was. Logged as a warning so the storage problem is still visible.
+    logger.warn("[DocumentGen] Durable upload failed — falling back to in-memory copy", {
+      filename,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    const id = cacheDocument(buffer, filename, mimeType);
+    return { url: `/api/v1/conversations/download-doc/${id}`, filename, documentType: docType };
+  }
 }
 
 export const conversationRouter = express.Router();
@@ -1897,7 +1920,7 @@ conversationRouter.post("/:id/message-stream", authMiddleware, async (req: Authe
       // stares at a finished message wondering whether anything is still happening.
       res.write(`data: ${JSON.stringify({ generatingDocument: { type: docRequest.type, label: docRequest.label } })}\n\n`);
 
-      documentGenPromise = generateAndCacheDocument(genPrompt, docRequest.type, model)
+      documentGenPromise = generateAndCacheDocument(genPrompt, docRequest.type, model, businessUnit)
         .catch((err) => {
           const msg = err instanceof Error ? err.message : JSON.stringify(err);
           logger.error("[DocumentGen] Generation failed", { userId, documentType: docRequest.type, error: msg });

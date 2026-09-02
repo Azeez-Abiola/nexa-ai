@@ -3,7 +3,8 @@ import { DocxContent, XlsxContent, PptxContent } from "./documentGeneratorServic
 import { generateJsonContent as claudeGenerateJsonContent } from "./claudeService";
 import { generateJsonContent as kimiGenerateJsonContent } from "./kimiService";
 import { generateJsonContent as deepseekGenerateJsonContent } from "./deepseekService";
-import { AIModel } from "./aiRouter";
+import { AIModel, failoverChain } from "./aiRouter";
+import logger from "../utils/logger";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -68,7 +69,8 @@ Rules:
 - notes is optional but helpful for complex slides
 - The first slide content will be used as an agenda or overview`;
 
-async function callJsonModel(system: string, userPrompt: string, model: AIModel = "gpt"): Promise<string> {
+/** Ask one specific provider for the JSON. Throws on failure; the caller handles failover. */
+async function callOneModel(system: string, userPrompt: string, model: AIModel): Promise<string> {
   if (model === "claude") {
     return claudeGenerateJsonContent(system, userPrompt);
   }
@@ -86,10 +88,64 @@ async function callJsonModel(system: string, userPrompt: string, model: AIModel 
       { role: "user", content: userPrompt },
     ],
     response_format: { type: "json_object" },
-    max_tokens: 4000,
+    // gpt-4o allows more, and documents run long; 4000 truncated them mid-JSON.
+    max_tokens: 16000,
     temperature: 0.7,
   });
   return response.choices[0]?.message?.content ?? "{}";
+}
+
+/**
+ * The selected model, then any other configured one.
+ *
+ * Chat has had this for a while; document generation did not, so a single dead provider
+ * meant no file at all while three working models sat idle. That is exactly what
+ * happened when Moonshot retired the pinned Kimi model: replies kept arriving via the
+ * chat router's failover, and every document request failed.
+ */
+async function callJsonModel(system: string, userPrompt: string, model: AIModel = "gpt"): Promise<string> {
+  const chain = failoverChain(model);
+  let lastError: unknown;
+
+  for (const provider of chain) {
+    try {
+      const raw = await callOneModel(system, userPrompt, provider);
+      if (provider !== model) {
+        logger.info("[DocumentGen] Served by fallback provider", { requested: model, servedBy: provider });
+      }
+      return raw;
+    } catch (err) {
+      lastError = err;
+      // Named, because the previous log said only that generation failed. Working out
+      // which provider was even asked took a database query and four probes.
+      logger.warn("[DocumentGen] Provider failed", {
+        provider,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error("All providers failed to generate document content");
+}
+
+/**
+ * Parse the model's JSON, or say plainly that it did not return usable JSON.
+ *
+ * The raw failure is "Unexpected end of JSON input", which describes the symptom of a
+ * truncated response without naming the cause. Whoever reads the log needs to know the
+ * model ran out of room rather than that the parser is broken.
+ */
+function parseDocumentJson<T>(raw: string, documentType: DocumentType): T {
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    const truncated = raw.length > 0 && !raw.trimEnd().endsWith("}");
+    throw new Error(
+      truncated
+        ? `Model response for the ${documentType} was cut off before the JSON finished (${raw.length} chars). The document is likely too long for one response.`
+        : `Model did not return valid JSON for the ${documentType}.`
+    );
+  }
 }
 
 export async function generateDocumentContent(
@@ -99,7 +155,7 @@ export async function generateDocumentContent(
 ): Promise<DocxContent | XlsxContent | PptxContent> {
   if (documentType === "xlsx") {
     const raw = await callJsonModel(XLSX_SYSTEM, prompt, model);
-    const parsed = JSON.parse(raw) as XlsxContent;
+    const parsed = parseDocumentJson<XlsxContent>(raw, documentType);
     if (!parsed.sheets || !Array.isArray(parsed.sheets) || parsed.sheets.length === 0) {
       throw new Error("AI returned invalid spreadsheet structure");
     }
@@ -108,7 +164,7 @@ export async function generateDocumentContent(
 
   if (documentType === "pptx") {
     const raw = await callJsonModel(PPTX_SYSTEM, prompt, model);
-    const parsed = JSON.parse(raw) as PptxContent;
+    const parsed = parseDocumentJson<PptxContent>(raw, documentType);
     if (!parsed.slides || !Array.isArray(parsed.slides) || parsed.slides.length === 0) {
       throw new Error("AI returned invalid presentation structure");
     }
@@ -117,7 +173,7 @@ export async function generateDocumentContent(
 
   // docx and pdf share the same structure
   const raw = await callJsonModel(DOCX_SYSTEM, prompt, model);
-  const parsed = JSON.parse(raw) as DocxContent;
+  const parsed = parseDocumentJson<DocxContent>(raw, documentType);
   if (!parsed.sections || !Array.isArray(parsed.sections) || parsed.sections.length === 0) {
     throw new Error("AI returned invalid document structure");
   }

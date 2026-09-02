@@ -372,7 +372,8 @@ export async function generateJsonContent(system: string, userPrompt: string): P
     model: MODEL,
     system: system + "\n\nIMPORTANT: Respond ONLY with valid JSON. No markdown fences, no extra text, no explanation.",
     messages: [{ role: "user", content: userPrompt }],
-    max_tokens: 4000,
+    // Documents run long; 4000 truncated them mid-JSON and the parse failed.
+    max_tokens: 8000,
   });
 
   const raw = response.content
