@@ -81,6 +81,29 @@ const SuperAdminMain: React.FC<SuperAdminMainProps> = ({ theme, toggleTheme }) =
     }
   });
 
+  /**
+   * Leave the dashboard and use Nexa as an employee.
+   *
+   * The chat reads its session from `nexa-token`, while a super admin signs in under
+   * `cpanelToken`. Copying it across first means the switch works from either kind of
+   * admin session instead of silently landing on the login screen.
+   */
+  const switchToChat = () => {
+    try {
+      if (!localStorage.getItem("nexa-token")) {
+        const adminToken = localStorage.getItem("cpanelToken");
+        const adminUser = localStorage.getItem("cpanelUser");
+        if (adminToken) localStorage.setItem("nexa-token", adminToken);
+        if (adminUser) localStorage.setItem("nexa-user", adminUser);
+      }
+    } catch {
+      /* private browsing — the chat will send them to login, which is the honest outcome */
+    }
+    // A full load, not a router push: the chat is a different shell with its own
+    // bootstrap, and pushing into it from here leaves the dashboard's state mounted.
+    window.location.href = "/user-chat";
+  };
+
   const toggleSidebar = () => {
     setIsSidebarOpen((prev) => {
       const next = !prev;
@@ -441,6 +464,43 @@ const SuperAdminMain: React.FC<SuperAdminMainProps> = ({ theme, toggleTheme }) =
                 )}
                 <p className={cn("text-sm font-bold leading-none", theme === 'dark' ? "text-white" : "text-slate-900")}>{user?.fullName || user?.email}</p>
               </div>
+              {/* Admin and employee are two ways of using Nexa, not two accounts. The backend
+                  already treats an admin's token as a user on the chat routes, so this only
+                  has to move them there. Hidden for super admins, whose SUPERADMIN business
+                  unit has no knowledge base of its own to chat against. */}
+              {!isSuperAdminContext && (
+                <div
+                  className={cn(
+                    "hidden items-center rounded-2xl border p-1 sm:flex",
+                    theme === 'dark' ? "border-[#3f3f3f] bg-[#333]" : "border-slate-200 bg-slate-100"
+                  )}
+                  role="group"
+                  aria-label="Switch between admin and chat"
+                >
+                  <span
+                    className={cn(
+                      "rounded-xl px-3 py-1.5 text-xs font-bold",
+                      theme === 'dark' ? "bg-[#1a1a1a] text-white" : "bg-white text-slate-900 shadow-sm"
+                    )}
+                    aria-current="page"
+                  >
+                    Admin
+                  </span>
+                  <button
+                    type="button"
+                    onClick={switchToChat}
+                    title="Use Nexa as an employee"
+                    className={cn(
+                      "rounded-xl px-3 py-1.5 text-xs font-bold transition-colors",
+                      theme === 'dark'
+                        ? "text-gray-400 hover:text-white"
+                        : "text-slate-500 hover:text-slate-900"
+                    )}
+                  >
+                    Chat
+                  </button>
+                </div>
+              )}
               <NotificationsBell isDark={theme === 'dark'} />
               <div
                 className={cn(

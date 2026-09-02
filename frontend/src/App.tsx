@@ -3574,6 +3574,26 @@ export const App: React.FC = () => {
               ) : null}
             </div>
             <div className="header-actions-v2">
+              {/* The way back for an admin who switched into the chat. Only shown to
+                  admins, since nobody else has a dashboard to return to. */}
+              {user?.isAdmin ? (
+                <button
+                  type="button"
+                  className="header-action-btn-v2"
+                  aria-label="Return to the admin dashboard"
+                  title="Return to the admin dashboard"
+                  onClick={() => {
+                    // Full load rather than a router push: the dashboard is a separate
+                    // shell that bootstraps its own session and branding.
+                    window.location.href = user?.businessUnit === "SUPERADMIN"
+                      ? "/super-admin/dashboard"
+                      : "/admin/dashboard";
+                  }}
+                >
+                  <BiGridAlt size={18} />
+                  <span className="header-action-label-v2">Admin</span>
+                </button>
+              ) : null}
               {/* Switch from typing to talking. Hidden on a shared-with-me conversation for
                   the same reason the input is: it is read-only, so there is no turn to take. */}
               {!currentConversation?.isShared ? (
