@@ -3045,7 +3045,7 @@ export const App: React.FC = () => {
     >
       <option value="gpt">GPT-5</option>
       <option value="claude">Claude Opus 4.8</option>
-      <option value="kimi">Kimi k2.5</option>
+      <option value="kimi">Kimi k2.6</option>
       <option value="deepseek">DeepSeek v4</option>
     </select>
   );
@@ -3574,25 +3574,30 @@ export const App: React.FC = () => {
               ) : null}
             </div>
             <div className="header-actions-v2">
-              {/* The way back for an admin who switched into the chat. Only shown to
-                  admins, since nobody else has a dashboard to return to. */}
+              {/* The same control as the dashboard header, with Chat active. A matching
+                  pair reads as one switch you can flip either way, where a lone "back"
+                  button on this side would read as an exit. Only for admins: nobody else
+                  has a dashboard to switch to. */}
               {user?.isAdmin ? (
-                <button
-                  type="button"
-                  className="header-action-btn-v2"
-                  aria-label="Return to the admin dashboard"
-                  title="Return to the admin dashboard"
-                  onClick={() => {
-                    // Full load rather than a router push: the dashboard is a separate
-                    // shell that bootstraps its own session and branding.
-                    window.location.href = user?.businessUnit === "SUPERADMIN"
-                      ? "/super-admin/dashboard"
-                      : "/admin/dashboard";
-                  }}
-                >
-                  <BiGridAlt size={18} />
-                  <span className="header-action-label-v2">Admin</span>
-                </button>
+                <div className="mode-switch-v2" role="group" aria-label="Switch between admin and chat">
+                  <button
+                    type="button"
+                    className="mode-switch-btn-v2"
+                    title="Return to the admin dashboard"
+                    onClick={() => {
+                      // Full load rather than a router push: the dashboard is a separate
+                      // shell that bootstraps its own session and branding.
+                      window.location.href = user?.businessUnit === "SUPERADMIN"
+                        ? "/super-admin/dashboard"
+                        : "/admin/dashboard";
+                    }}
+                  >
+                    Admin
+                  </button>
+                  <span className="mode-switch-btn-v2 mode-switch-btn-v2--active" aria-current="page">
+                    Chat
+                  </span>
+                </div>
               ) : null}
               {/* Switch from typing to talking. Hidden on a shared-with-me conversation for
                   the same reason the input is: it is read-only, so there is no turn to take. */}
@@ -5671,6 +5676,44 @@ export const App: React.FC = () => {
             padding: 0 24px;
           }
         }
+
+        /* Mirrors the segmented control in the admin dashboard header. */
+        .mode-switch-v2 {
+          display: inline-flex;
+          align-items: center;
+          gap: 2px;
+          padding: 3px;
+          border-radius: 999px;
+          background: #f1f2f4;
+          border: 1px solid #e5e7eb;
+        }
+
+        .mode-switch-btn-v2 {
+          border: none;
+          background: transparent;
+          border-radius: 999px;
+          padding: 5px 12px;
+          font-size: 12px;
+          font-weight: 700;
+          color: #6b7280;
+          cursor: pointer;
+          white-space: nowrap;
+          transition: background 0.15s ease, color 0.15s ease;
+        }
+
+        .mode-switch-btn-v2:hover { color: #111827; }
+
+        .mode-switch-btn-v2--active {
+          background: #ffffff;
+          color: #111827;
+          box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+          cursor: default;
+        }
+
+        .dark-theme .mode-switch-v2 { background: #333; border-color: #3f3f3f; }
+        .dark-theme .mode-switch-btn-v2 { color: #9ca3af; }
+        .dark-theme .mode-switch-btn-v2:hover { color: #fff; }
+        .dark-theme .mode-switch-btn-v2--active { background: #1a1a1a; color: #fff; }
 
         /* Listening for the wake phrase. A live microphone must be visible in the UI,
            never a silent background state the user cannot tell is running. */

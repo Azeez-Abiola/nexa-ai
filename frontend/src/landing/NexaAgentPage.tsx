@@ -26,7 +26,7 @@ const features = [
   {
     icon: MessageSquare,
     title: "Chat with any model",
-    description: "Claude Opus 4.8, GPT-5, Kimi k2.5, or DeepSeek v4 — pick per conversation.",
+    description: "Claude Opus 4.8, GPT-5, Kimi k2.6, or DeepSeek v4 — pick per conversation.",
   },
   {
     icon: FileEdit,

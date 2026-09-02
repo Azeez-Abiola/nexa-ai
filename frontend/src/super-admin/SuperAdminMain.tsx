@@ -23,7 +23,6 @@ import {
   Moon,
   Sun,
   Search,
-  MessageSquare,
   PanelLeft
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -57,7 +56,6 @@ import UsersManagement from './pages/UsersManagement';
 import BusinessProfile from './pages/BusinessProfile';
 import AdminUserGroupsPage from './pages/AdminUserGroupsPage';
 import Analytics from './pages/Analytics';
-import AskNexa from './pages/AskNexa';
 import { hexToHslSpace, DEFAULT_RING_HSL } from '@/lib/brandCss';
 import { ChatGptStyleMenuIcon } from '@/components/ChatGptStyleMenuIcon';
 
@@ -206,7 +204,6 @@ const SuperAdminMain: React.FC<SuperAdminMainProps> = ({ theme, toggleTheme }) =
   ] : [
     { name: 'Dashboard', path: '/admin/dashboard', icon: LayoutDashboard },
     { name: 'Knowledge Base', path: '/admin/knowledge', icon: BookOpen },
-    { name: 'Ask Nexa', path: '/admin/ask-nexa', icon: MessageSquare },
     { name: 'Users', path: '/admin/users', icon: Users },
     { name: 'Departments', path: '/admin/departments', icon: Layers },
     { name: 'Categories', path: '/admin/categories', icon: FolderTree },
@@ -532,7 +529,10 @@ const SuperAdminMain: React.FC<SuperAdminMainProps> = ({ theme, toggleTheme }) =
                   <Route path="/admin/access-requests" element={<Navigate to="/super-admin/access-requests" replace />} />
                   <Route path="/admin/analytics" element={<Analytics />} />
                   <Route path="/admin/knowledge" element={<KnowledgeBase />} />
-                  <Route path="/admin/ask-nexa" element={<AskNexa />} />
+                  {/* Ask Nexa retired: the header toggle opens the real chat instead of a
+                      cut-down copy embedded here. Redirected so old links and bookmarks
+                      land somewhere sensible rather than on the catch-all. */}
+                  <Route path="/admin/ask-nexa" element={<Navigate to="/admin/dashboard" replace />} />
                   <Route path="/admin/user-groups" element={<AdminUserGroupsPage />} />
                   <Route path="/admin/knowledge-groups" element={<Navigate to="/admin/user-groups" replace />} />
                   <Route path="/admin/users" element={<UsersManagement />} />
