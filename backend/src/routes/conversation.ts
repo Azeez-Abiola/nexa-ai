@@ -711,25 +711,32 @@ conversationRouter.get("/", authMiddleware, async (req: AuthenticatedRequest, re
 
 conversationRouter.post("/", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    let userConversations = await Conversation.findOne({ userId: req.userId });
-
-    if (!userConversations) {
-      userConversations = new Conversation({
-        userId: req.userId,
-        businessUnit: req.businessUnit,
-        conversationGroups: []
-      });
-    }
-
+    // No read first: the upsert below both creates the document and pushes the group,
+    // so fetching it only to discard it was a round trip that decided nothing.
     const newGroup = {
       _id: new Types.ObjectId(),
       title: "New Chat",
       messages: []
     };
 
+    /*
+     * businessUnit must be set on insert.
+     *
+     * This upsert used to push the group and nothing else, so when it created the
+     * document it produced one with no businessUnit — a field the schema marks required.
+     * updateOne skips full-document validation, so Mongo accepted it, and every later
+     * .save() on that document failed instead: pinning, reactions, notes, renaming,
+     * sharing and the call log all returned 500 for those accounts and nowhere said why.
+     *
+     * A discarded `new Conversation({ ... businessUnit })` used to sit above this,
+     * looking like it handled the case. It was never saved.
+     */
     await Conversation.updateOne(
       { userId: req.userId },
-      { $push: { conversationGroups: newGroup } },
+      {
+        $push: { conversationGroups: newGroup },
+        $setOnInsert: { businessUnit: req.businessUnit }
+      },
       { upsert: true }
     );
 
