@@ -23,9 +23,9 @@ export class ElevenLabsError extends SpeechError {
 }
 
 export type { SpeechAlignment, SpeechResult } from "./speech/types";
-import type { SpeechAlignment, SpeechResult } from "./speech/types";
+import type { SpeechAlignment, SpeechIntent, SpeechResult } from "./speech/types";
 
-export async function synthesizeSpeech(text: string): Promise<SpeechResult> {
+export async function synthesizeSpeech(text: string, intent: SpeechIntent = "rich"): Promise<SpeechResult> {
   const trimmed = text.trim().slice(0, MAX_CHARS);
   if (!trimmed) throw new ElevenLabsError("No text to synthesize", 400);
 
@@ -35,7 +35,17 @@ export async function synthesizeSpeech(text: string): Promise<SpeechResult> {
   const voiceId = process.env.ELEVENLABS_VOICE_ID;
   if (!voiceId) throw new ElevenLabsError("Text-to-speech is not configured", 503);
 
-  const modelId = process.env.ELEVENLABS_MODEL_ID || "eleven_multilingual_v2";
+  /*
+   * Two models, chosen by what the caller needs.
+   *
+   * Flash returns in roughly 370ms against multilingual's ~1100ms, measured on this
+   * account, and costs half as much per character. Multilingual is the warmer read.
+   * A call takes the fast one because a second of dead air is the thing people notice;
+   * read-aloud takes the rich one because nobody is waiting on a turn.
+   */
+  const modelId = intent === "fast"
+    ? process.env.ELEVENLABS_FAST_MODEL_ID || "eleven_flash_v2_5"
+    : process.env.ELEVENLABS_MODEL_ID || "eleven_multilingual_v2";
 
   // The /with-timestamps variant returns the audio base64-encoded alongside
   // per-character timings. Costs the same, and the timings are what let the client

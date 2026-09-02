@@ -6,7 +6,7 @@ import { parseModel, getStreamAIResponse, getGenerateAIResponse } from "../servi
 import { buildContextForQuery } from "../utils/contextBuilder";
 // Goes through the speech dispatcher, not a vendor directly: which provider speaks is
 // an environment variable, and this route should never need to know which one won.
-import { synthesizeSpeech, getSpeechQuota, SpeechError, activeSpeechProvider } from "../services/speech";
+import { synthesizeSpeech, getSpeechQuota, SpeechError, activeSpeechProvider, type SpeechIntent } from "../services/speech";
 import { transcribeAudio, TranscriptionError, MAX_AUDIO_BYTES } from "../services/transcriptionService";
 
 import { RagDocument } from "../models/RagDocument";
@@ -73,7 +73,11 @@ chatRouter.post("/tts", authMiddleware, async (req: AuthenticatedRequest, res) =
     const text = String(req.body?.text || "").trim();
     if (!text) return res.status(400).json({ error: "text is required" });
 
-    const { audioBase64, alignment } = await synthesizeSpeech(text);
+    // Voice mode asks for "fast"; the read-aloud button leaves it unset and gets the
+    // richer voice. Defaulting to rich keeps existing callers sounding as they did.
+    const intent: SpeechIntent = req.body?.intent === "fast" ? "fast" : "rich";
+
+    const { audioBase64, alignment } = await synthesizeSpeech(text, intent);
     res.setHeader("Cache-Control", "no-store");
     res.json({ audio: audioBase64, alignment });
   } catch (error) {

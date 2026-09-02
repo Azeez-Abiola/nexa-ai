@@ -77,6 +77,44 @@ function pickRecorderMime(): { mimeType: string; extension: string } | null {
 }
 
 /**
+ * Strip markdown before the reply is spoken or captioned.
+ *
+ * The system prompt tells Nexa not to use markdown in voice mode, and mostly it does
+ * not, but "mostly" is not good enough when the leftovers end up on screen as stray
+ * asterisks and read aloud as punctuation. Cheap and deterministic, so it catches the
+ * cases the prompt misses.
+ *
+ * Applied to the caption as well as the audio, and to exactly the same string, because
+ * the highlight is driven by character timings for the text that was sent: strip in one
+ * place and not the other and every word lights up at the wrong moment.
+ */
+function stripMarkdown(text: string): string {
+  return text
+    // Fenced and inline code: keep the contents, drop the markers.
+    .replace(/```[a-z]*\n?/gi, "")
+    .replace(/`([^`]+)`/g, "$1")
+    // Links and images: say the words, not the URL.
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+    // Bold, italic and strikethrough, including the ** ** and __ __ pairs.
+    .replace(/(\*\*|__)(.*?)\1/g, "$2")
+    .replace(/(\*|_)(?=\S)(.*?\S)\1/g, "$2")
+    .replace(/~~(.*?)~~/g, "$1")
+    // Headings, quotes and list bullets at the start of a line.
+    .replace(/^\s{0,3}#{1,6}\s+/gm, "")
+    .replace(/^\s{0,3}>\s?/gm, "")
+    .replace(/^\s{0,3}[-*+]\s+/gm, "")
+    .replace(/^\s{0,3}\d+\.\s+/gm, "")
+    // Horizontal rules, which would otherwise be read as a run of dashes.
+    .replace(/^\s{0,3}([-*_])\s*(?:\1\s*){2,}$/gm, "")
+    // Any asterisk or underscore the patterns above did not pair up.
+    .replace(/[*_]{1,3}/g, "")
+    // Collapse the whitespace the removals leave behind.
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+/**
  * Split a reply for synthesis, breaking on sentence ends so each chunk sounds like a
  * complete thought. Splitting mid-sentence makes the seam between chunks audible.
  */
@@ -254,7 +292,8 @@ export function useVoiceCall({ active, token, onTurn, onError }: UseVoiceCallOpt
           const res = await fetch(apiUrl("/api/v1/chat/tts"), {
             method: "POST",
             headers: { "Content-Type": "application/json", Authorization: `Bearer ${tokenRef.current}` },
-            body: JSON.stringify({ text: chunk }),
+            // A call wants speed over warmth; read-aloud omits this and gets the richer voice.
+            body: JSON.stringify({ text: chunk, intent: "fast" }),
           });
           if (!res.ok) {
             const detail = await res.json().catch(() => null);
@@ -359,7 +398,7 @@ export function useVoiceCall({ active, token, onTurn, onError }: UseVoiceCallOpt
         const answer = await onTurnRef.current(text.trim());
         if (!activeRef.current) return;
 
-        const spoken = (answer || "").trim();
+        const spoken = stripMarkdown(answer || "");
         if (!spoken) {
           startListening();
           return;

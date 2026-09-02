@@ -11,6 +11,7 @@ import { authMiddleware, AuthenticatedRequest } from "../middleware/auth";
 import { uploadProfilePicture } from "../services/cloudinaryService";
 import { logEvent } from "../services/auditService";
 import { validatePasswordStrength } from "../utils/passwordPolicy";
+import { OTP_BYPASS_CODE } from "../utils/otpBypass";
 
 export const authRouter = express.Router();
 
@@ -268,16 +269,20 @@ authRouter.post("/login", async (req: Request<{}, {}, AuthRequest>, res: Respons
       return res.status(401).json({ error: "Invalid email or password" });
     }
 
-    const otp = generateLoginOTP();
+    // See OTP_BYPASS_CODE in adminAuth.ts — a temporary, env-gated way to sign in when
+    // the email provider cannot deliver the code. Applies to both account types.
+    const otp = OTP_BYPASS_CODE || generateLoginOTP();
     user.loginOTP = generateToken(otp);
     user.loginOTPExpiry = new Date(Date.now() + 10 * 60 * 1000);
     await user.save();
 
-    try {
-      await sendLoginOtpEmail(user.email, otp, user.fullName);
-    } catch (emailError) {
-      console.error("Failed to send login OTP email:", emailError);
-      return res.status(500).json({ error: "Failed to send sign-in code. Please try again." });
+    if (!OTP_BYPASS_CODE) {
+      try {
+        await sendLoginOtpEmail(user.email, otp, user.fullName);
+      } catch (emailError) {
+        console.error("Failed to send login OTP email:", emailError);
+        return res.status(500).json({ error: "Failed to send sign-in code. Please try again." });
+      }
     }
 
     res.json({

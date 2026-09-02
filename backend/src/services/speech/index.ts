@@ -1,10 +1,10 @@
 import logger from "../../utils/logger";
 import { azureSpeechProvider } from "./azureSpeechProvider";
 import { elevenLabsProvider } from "./elevenLabsProvider";
-import { SpeechError, type SpeechProvider, type SpeechQuota, type SpeechResult } from "./types";
+import { SpeechError, type SpeechIntent, type SpeechProvider, type SpeechQuota, type SpeechResult } from "./types";
 
 export { SpeechError };
-export type { SpeechAlignment, SpeechResult, SpeechQuota } from "./types";
+export type { SpeechAlignment, SpeechResult, SpeechQuota, SpeechIntent } from "./types";
 
 const PROVIDERS: Record<string, SpeechProvider> = {
   azure: azureSpeechProvider,
@@ -48,8 +48,8 @@ logger.info(`[Speech] Text-to-speech provider: ${provider.name}`);
 /** Which vendor is live, for diagnostics. */
 export const activeSpeechProvider = provider.name;
 
-export function synthesizeSpeech(text: string): Promise<SpeechResult> {
-  return provider.synthesize(text);
+export function synthesizeSpeech(text: string, intent?: SpeechIntent): Promise<SpeechResult> {
+  return provider.synthesize(text, intent);
 }
 
 export function getSpeechQuota(): Promise<SpeechQuota> {

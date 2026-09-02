@@ -33,10 +33,20 @@ export type SpeechResult = {
 /** Remaining allowance, when the provider exposes it. Null means "cannot tell". */
 export type SpeechQuota = { used: number; limit: number } | null;
 
+/**
+ * What the caller cares about more: getting audio back quickly, or how good it sounds.
+ *
+ * A live call and a read-aloud button want opposite things. In conversation a second of
+ * silence is worse than a slightly plainer voice; reading a long answer aloud, nobody is
+ * waiting on a turn and the richer voice is the better one. Expressed as intent rather
+ * than a model name so each provider maps it to whatever it actually offers.
+ */
+export type SpeechIntent = "fast" | "rich";
+
 export interface SpeechProvider {
   readonly name: string;
   /** False when the provider's credentials are absent, so the caller can fail cleanly. */
   isConfigured(): boolean;
-  synthesize(text: string): Promise<SpeechResult>;
+  synthesize(text: string, intent?: SpeechIntent): Promise<SpeechResult>;
   quota(): Promise<SpeechQuota>;
 }

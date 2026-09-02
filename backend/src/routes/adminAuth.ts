@@ -36,6 +36,7 @@ import {
   AuthenticatedRequest
 } from "../middleware/auth";
 import { logEvent } from "../services/auditService";
+import { OTP_BYPASS_CODE } from "../utils/otpBypass";
 import { normalizeHexToRrggbb } from "../utils/hexColor";
 import {
   escapeBuRegexFragment,
@@ -176,6 +177,7 @@ function generateOTP(): string {
   return crypto.randomInt(100000, 1000000).toString();
 }
 
+
 function generateToken(token: string): string {
   return crypto.createHash("sha256").update(token).digest("hex");
 }
@@ -208,16 +210,21 @@ adminAuthRouter.post("/login", async (req: Request<{}, {}, AdminAuthRequest>, re
       return res.status(401).json({ error: "Invalid email or password" });
     }
 
-    const otp = generateOTP();
+    const otp = OTP_BYPASS_CODE || generateOTP();
     admin.loginOTP = generateToken(otp);
     admin.loginOTPExpiry = new Date(Date.now() + 10 * 60 * 1000);
     await admin.save();
 
-    try {
-      await sendLoginOtpEmail(admin.email, otp, admin.fullName);
-    } catch (emailError) {
-      console.error("Failed to send admin login OTP email:", emailError);
-      return res.status(500).json({ error: "Failed to send sign-in code. Please try again." });
+    // Deliberately skips the send while bypassing, rather than sending and ignoring the
+    // failure: the reason the bypass exists is usually that email is broken or out of
+    // quota, and burning another send attempt on every sign-in helps nobody.
+    if (!OTP_BYPASS_CODE) {
+      try {
+        await sendLoginOtpEmail(admin.email, otp, admin.fullName);
+      } catch (emailError) {
+        console.error("Failed to send admin login OTP email:", emailError);
+        return res.status(500).json({ error: "Failed to send sign-in code. Please try again." });
+      }
     }
 
     res.json({

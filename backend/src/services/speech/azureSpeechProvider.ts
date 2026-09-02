@@ -1,5 +1,5 @@
 import logger from "../../utils/logger";
-import { SpeechError, type SpeechProvider, type SpeechQuota, type SpeechResult } from "./types";
+import { SpeechError, type SpeechIntent, type SpeechProvider, type SpeechQuota, type SpeechResult } from "./types";
 
 /**
  * Azure AI Speech, via the REST endpoint rather than the Speech SDK.
@@ -48,7 +48,8 @@ export const azureSpeechProvider: SpeechProvider = {
     return Boolean(KEY && REGION);
   },
 
-  async synthesize(text: string): Promise<SpeechResult> {
+  // Intent is accepted and ignored: one neural voice, one latency profile.
+  async synthesize(text: string, _intent?: SpeechIntent): Promise<SpeechResult> {
     const trimmed = text.trim().slice(0, MAX_CHARS);
     if (!trimmed) throw new SpeechError("No text to synthesize", 400);
     if (!this.isConfigured()) {

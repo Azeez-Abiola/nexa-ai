@@ -1,5 +1,5 @@
 import { synthesizeSpeech as elevenLabsSynthesize, getSpeechQuota as elevenLabsQuota } from "../elevenLabsService";
-import type { SpeechProvider, SpeechQuota, SpeechResult } from "./types";
+import type { SpeechIntent, SpeechProvider, SpeechQuota, SpeechResult } from "./types";
 
 /**
  * The existing ElevenLabs service, wrapped to fit the shared contract.
@@ -16,8 +16,8 @@ export const elevenLabsProvider: SpeechProvider = {
   },
 
   // ElevenLabsError extends SpeechError, so failures already satisfy the contract.
-  synthesize(text: string): Promise<SpeechResult> {
-    return elevenLabsSynthesize(text);
+  synthesize(text: string, intent?: SpeechIntent): Promise<SpeechResult> {
+    return elevenLabsSynthesize(text, intent);
   },
 
   quota(): Promise<SpeechQuota> {
