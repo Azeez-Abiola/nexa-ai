@@ -20,8 +20,15 @@ type UseVoiceCallOptions = {
   onError?: (message: string, fatal: boolean) => void;
 };
 
-/** Silence this long after you have spoken ends your turn. Short enough to feel responsive, long enough to survive a mid-sentence pause. */
-const END_OF_TURN_SILENCE_MS = 800;
+/**
+ * Silence this long after you have spoken ends your turn.
+ *
+ * 800ms was too eager: people pause mid-thought — "so, the thing is… " — and Nexa took
+ * the gap as the end of the sentence and started answering half a question. Waiting
+ * longer costs a little responsiveness on every turn and buys not being interrupted,
+ * which is the trade worth making. Raise it further if it still cuts in.
+ */
+const END_OF_TURN_SILENCE_MS = 1400;
 /** Frames above threshold before we believe speech started, so a single click or knock cannot trigger a turn. */
 const SPEECH_ONSET_FRAMES = 3;
 /** Barge-in needs more evidence than turn onset: the speaker is bleeding into the mic, and a false trigger cuts Nexa off mid-word. */
@@ -89,12 +96,47 @@ function chunkForSpeech(text: string): string[] {
   return chunks.filter(Boolean);
 }
 
+type SpeechAlignment = {
+  characters: string[];
+  character_start_times_seconds: number[];
+};
+
+/**
+ * When each word begins, derived from the per-character timings.
+ *
+ * A word starts at its first non-space character, which is all the caption needs: it
+ * highlights on word boundaries, not letters.
+ */
+function wordStartTimes(alignment: SpeechAlignment): number[] {
+  const starts: number[] = [];
+  let inWord = false;
+  for (let i = 0; i < alignment.characters.length; i++) {
+    const isSpace = /\s/.test(alignment.characters[i]);
+    if (!isSpace && !inWord) {
+      starts.push(alignment.character_start_times_seconds[i] ?? 0);
+      inWord = true;
+    } else if (isSpace) {
+      inWord = false;
+    }
+  }
+  return starts;
+}
+
 export function useVoiceCall({ active, token, onTurn, onError }: UseVoiceCallOptions) {
   const [status, setStatus] = useState<CallStatus>("connecting");
   const [muted, setMuted] = useState(false);
   /** Your last utterance and Nexa's last reply, shown as captions on the call screen. */
   const [transcript, setTranscript] = useState("");
   const [reply, setReply] = useState("");
+  /**
+   * How much of the reply has actually been spoken, in words.
+   *
+   * Driven by the per-character timings ElevenLabs returns alongside the audio, so the
+   * caption tracks the voice rather than guessing from elapsed time. Lets the screen
+   * show what is being said right now instead of the whole answer at once, which on a
+   * long reply is a wall of text with no clue where the voice has got to.
+   */
+  const [spokenWords, setSpokenWords] = useState(0);
 
   const streamRef = useRef<MediaStream | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -124,6 +166,9 @@ export function useVoiceCall({ active, token, onTurn, onError }: UseVoiceCallOpt
   onErrorRef.current = onError;
   const tokenRef = useRef(token);
   tokenRef.current = token;
+
+  /** Word start times (seconds) for the chunk now playing, plus how many words preceded it. */
+  const captionRef = useRef<{ starts: number[]; offset: number } | null>(null);
 
   const noiseFloorRef = useRef(0);
   const calibratingUntilRef = useRef(0);
@@ -203,7 +248,8 @@ export function useVoiceCall({ active, token, onTurn, onError }: UseVoiceCallOpt
       const chunks = chunkForSpeech(text);
       if (chunks.length === 0) return;
 
-      const fetchChunk = async (chunk: string): Promise<Blob | null> => {
+      type Spoken = { blob: Blob; starts: number[] | null };
+      const fetchChunk = async (chunk: string): Promise<Spoken | null> => {
         try {
           const res = await fetch(apiUrl("/api/v1/chat/tts"), {
             method: "POST",
@@ -214,9 +260,12 @@ export function useVoiceCall({ active, token, onTurn, onError }: UseVoiceCallOpt
             const detail = await res.json().catch(() => null);
             throw new Error(detail?.error || `HTTP ${res.status}`);
           }
-          const data = (await res.json()) as { audio: string };
+          const data = (await res.json()) as { audio: string; alignment: SpeechAlignment | null };
           const bytes = Uint8Array.from(atob(data.audio), (c) => c.charCodeAt(0));
-          return new Blob([bytes], { type: "audio/mpeg" });
+          return {
+            blob: new Blob([bytes], { type: "audio/mpeg" }),
+            starts: data.alignment ? wordStartTimes(data.alignment) : null,
+          };
         } catch (err) {
           onErrorRef.current?.(err instanceof Error ? err.message : "Couldn't generate speech", true);
           return null;
@@ -224,14 +273,24 @@ export function useVoiceCall({ active, token, onTurn, onError }: UseVoiceCallOpt
       };
 
       let pending = fetchChunk(chunks[0]);
+      // Words already spoken by earlier chunks, so the caption highlights a position in
+      // the whole reply rather than restarting at each chunk boundary.
+      let wordOffset = 0;
+
       for (let i = 0; i < chunks.length; i++) {
-        const blob = await pending;
+        const spoken = await pending;
         // Hung up or interrupted while the audio was being generated.
         if (!activeRef.current || statusRef.current !== "speaking") return;
-        if (!blob) return;
+        if (!spoken) return;
         pending = i + 1 < chunks.length ? fetchChunk(chunks[i + 1]) : Promise.resolve(null);
 
-        const url = URL.createObjectURL(blob);
+        const chunkWordCount = chunks[i].split(/\s+/).filter(Boolean).length;
+        captionRef.current = spoken.starts ? { starts: spoken.starts, offset: wordOffset } : null;
+        // Without timings the caption cannot follow the voice, so show the chunk as
+        // spoken rather than leaving it dimmed and looking stuck.
+        if (!spoken.starts) setSpokenWords(wordOffset + chunkWordCount);
+
+        const url = URL.createObjectURL(spoken.blob);
         audioUrlRef.current = url;
         const el = audioElRef.current!;
         el.src = url;
@@ -250,6 +309,11 @@ export function useVoiceCall({ active, token, onTurn, onError }: UseVoiceCallOpt
         } finally {
           URL.revokeObjectURL(url);
           if (audioUrlRef.current === url) audioUrlRef.current = null;
+          wordOffset += chunkWordCount;
+          captionRef.current = null;
+          // Settle on the chunk boundary so a word cannot be left un-highlighted by a
+          // timing that lands just after the audio ends.
+          setSpokenWords(wordOffset);
         }
       }
     },
@@ -301,6 +365,7 @@ export function useVoiceCall({ active, token, onTurn, onError }: UseVoiceCallOpt
           return;
         }
         setReply(spoken);
+        setSpokenWords(0);
         setCallStatus("speaking");
         await speak(spoken);
       } catch (err) {
@@ -414,6 +479,20 @@ export function useVoiceCall({ active, token, onTurn, onError }: UseVoiceCallOpt
       }
 
       if (state === "speaking") {
+        // Follow the voice word by word. Done here rather than on the audio element's
+        // timeupdate event, which fires about four times a second — far too coarse to
+        // land on the right word.
+        const caption = captionRef.current;
+        const el = audioElRef.current;
+        if (caption && el) {
+          const t = el.currentTime;
+          let count = 0;
+          while (count < caption.starts.length && caption.starts[count] <= t) count++;
+          // Only when it changes: this runs every frame, and setting state at 60fps to
+          // store the same number would re-render the caption for nothing.
+          setSpokenWords((prev) => (prev === caption.offset + count ? prev : caption.offset + count));
+        }
+
         // Barge-in. Echo cancellation removes most of Nexa's own voice from the mic, but
         // not all of it on loudspeakers, so this needs a higher bar than turn onset.
         if (micLevel > threshold * BARGE_IN_MULTIPLIER) {
@@ -445,6 +524,7 @@ export function useVoiceCall({ active, token, onTurn, onError }: UseVoiceCallOpt
     setCallStatus("connecting");
     setTranscript("");
     setReply("");
+    setSpokenWords(0);
     levelRef.current = 0;
     noiseFloorRef.current = 0;
 
@@ -550,9 +630,10 @@ export function useVoiceCall({ active, token, onTurn, onError }: UseVoiceCallOpt
   /** Cut Nexa off mid-sentence and take the turn back. */
   const interrupt = useCallback(() => {
     if (statusRef.current !== "speaking") return;
+    captionRef.current = null;
     stopPlayback();
     startListening();
   }, [startListening, stopPlayback]);
 
-  return { status, muted, toggleMute, transcript, reply, getLevel, interrupt };
+  return { status, muted, toggleMute, transcript, reply, spokenWords, getLevel, interrupt };
 }

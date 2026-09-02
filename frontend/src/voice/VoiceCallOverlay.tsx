@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { BiMicrophone, BiMicrophoneOff, BiPhoneOff } from "react-icons/bi";
 import type { CallStatus } from "./useVoiceCall";
 import styles from "./voiceCall.module.css";
@@ -8,6 +8,8 @@ type VoiceCallOverlayProps = {
   muted: boolean;
   transcript: string;
   reply: string;
+  /** How many words of the reply have been spoken, for the live caption. */
+  spokenWords: number;
   error: string | null;
   /** Sampled every frame by the visualiser rather than passed as a prop, so the meter animates without re-rendering. */
   getLevel: () => number;
@@ -128,11 +130,52 @@ function useVisualizer(
   }, [canvasRef, getLevel]);
 }
 
+/**
+ * Nexa's reply, lit up as she says it.
+ *
+ * Words already spoken are bright, the rest sit back, and the container keeps the word
+ * being spoken in view so the text scrolls itself. On a long answer this is the
+ * difference between a wall of text and being able to follow along.
+ */
+function SpokenCaption({ text, spokenWords }: { text: string; spokenWords: number }) {
+  const words = useMemo(() => text.split(/(\s+)/), [text]);
+  const activeRef = useRef<HTMLSpanElement>(null);
+
+  // Follow the voice. "nearest" scrolls only when the word has actually left the box,
+  // so the text sits still and then moves up a line, rather than creeping continuously.
+  useEffect(() => {
+    activeRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [spokenWords]);
+
+  let wordIndex = -1;
+  return (
+    <p className={styles.nexa} aria-live="off">
+      {words.map((part, i) => {
+        // The split keeps whitespace, which is not a word and must not be counted.
+        if (/^\s+$/.test(part)) return <span key={i}>{part}</span>;
+        wordIndex++;
+        const isSpoken = wordIndex < spokenWords;
+        const isCurrent = wordIndex === spokenWords - 1;
+        return (
+          <span
+            key={i}
+            ref={isCurrent ? activeRef : undefined}
+            className={isSpoken ? styles.wordSpoken : styles.wordPending}
+          >
+            {part}
+          </span>
+        );
+      })}
+    </p>
+  );
+}
+
 export default function VoiceCallOverlay({
   status,
   muted,
   transcript,
   reply,
+  spokenWords,
   error,
   getLevel,
   onToggleMute,
@@ -165,7 +208,7 @@ export default function VoiceCallOverlay({
         <div className={styles.captions}>
           {error ? <p className={styles.error}>{error}</p> : null}
           {transcript ? <p className={styles.you}>{transcript}</p> : null}
-          {reply ? <p className={styles.nexa}>{reply}</p> : null}
+          {reply ? <SpokenCaption text={reply} spokenWords={spokenWords} /> : null}
         </div>
       </div>
 

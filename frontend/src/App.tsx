@@ -4565,6 +4565,7 @@ export const App: React.FC = () => {
             muted={voiceCall.muted}
             transcript={voiceCall.transcript}
             reply={voiceCall.reply}
+            spokenWords={voiceCall.spokenWords}
             error={voiceCallError}
             getLevel={voiceCall.getLevel}
             onToggleMute={voiceCall.toggleMute}
