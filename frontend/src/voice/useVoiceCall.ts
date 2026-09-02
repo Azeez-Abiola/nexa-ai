@@ -34,14 +34,39 @@ const SPEECH_ONSET_FRAMES = 3;
 /** Barge-in needs more evidence than turn onset: the speaker is bleeding into the mic, and a false trigger cuts Nexa off mid-word. */
 const BARGE_IN_FRAMES = 6;
 const BARGE_IN_MULTIPLIER = 2.2;
-/** A single turn cannot run forever; force the turn closed rather than uploading a huge clip. */
-const MAX_TURN_MS = 30_000;
+/**
+ * Force the turn closed rather than uploading a huge clip. 30s cut people off mid-question
+ * when they were asking something considered, which read as Nexa interrupting.
+ */
+const MAX_TURN_MS = 60_000;
 /** While waiting for speech we roll the recorder over so an idle call never accumulates minutes of silence. */
 const IDLE_RECORDER_RESET_MS = 10_000;
 /** Absolute floor for the speech threshold, so a silent room cannot calibrate itself into hair-trigger sensitivity. */
 const MIN_SPEECH_THRESHOLD = 0.014;
-const NOISE_FLOOR_MULTIPLIER = 3;
+
+/**
+ * Two thresholds, not one.
+ *
+ * Starting a turn should take clear evidence, so the bar is high. Staying in one should
+ * not: ordinary speech dips below any threshold constantly — between words, and through
+ * every unvoiced consonant, the s and f and t sounds that carry almost no energy. Judging
+ * "still talking" by the same bar as "started talking" meant those dips counted as
+ * silence, and enough of them in a row ended the turn mid-sentence.
+ */
+const SPEECH_START_MULTIPLIER = 3;
+const SPEECH_CONTINUE_MULTIPLIER = 1.3;
+
+/**
+ * Ceiling on the measured noise floor.
+ *
+ * Calibration used to take the loudest moment of the first 400ms, so a cough, a chair, or
+ * simply saying "hello" as the call opened set the floor from a voice rather than a room.
+ * The threshold is a multiple of it, so one spike could put the bar above normal speech
+ * and leave the caller inaudible for the rest of the call.
+ */
+const MAX_NOISE_FLOOR = 0.05;
 const CALIBRATION_MS = 400;
+
 
 /**
  * Roughly a sentence or two of speech. We synthesise the reply in chunks and play them
@@ -209,6 +234,8 @@ export function useVoiceCall({ active, token, onTurn, onError }: UseVoiceCallOpt
   const captionRef = useRef<{ starts: number[]; offset: number } | null>(null);
 
   const noiseFloorRef = useRef(0);
+  /** Levels gathered while calibrating, reduced to a median once the window closes. */
+  const calibrationSamplesRef = useRef<number[]>([]);
   const calibratingUntilRef = useRef(0);
   const voiceFramesRef = useRef(0);
   const lastVoiceAtRef = useRef(0);
@@ -476,15 +503,29 @@ export function useVoiceCall({ active, token, onTurn, onError }: UseVoiceCallOpt
       // Spend the first moments of the call measuring the room so the threshold suits
       // a noisy office as well as a quiet one.
       if (calibratingUntilRef.current && now < calibratingUntilRef.current) {
-        noiseFloorRef.current = Math.max(noiseFloorRef.current, micLevel);
+        calibrationSamplesRef.current.push(micLevel);
         return;
       }
-      const threshold = Math.max(MIN_SPEECH_THRESHOLD, noiseFloorRef.current * NOISE_FLOOR_MULTIPLIER);
+
+      // Settle the floor once, from the middle of what was heard rather than the loudest
+      // moment of it. A median ignores the cough or the "hello" that used to define it.
+      if (calibratingUntilRef.current && now >= calibratingUntilRef.current) {
+        const samples = calibrationSamplesRef.current.slice().sort((a, b) => a - b);
+        const median = samples.length ? samples[Math.floor(samples.length / 2)] : 0;
+        noiseFloorRef.current = Math.min(median, MAX_NOISE_FLOOR);
+        calibratingUntilRef.current = 0;
+        calibrationSamplesRef.current = [];
+      }
+      const startThreshold = Math.max(MIN_SPEECH_THRESHOLD, noiseFloorRef.current * SPEECH_START_MULTIPLIER);
+      const continueThreshold = Math.max(MIN_SPEECH_THRESHOLD * 0.5, noiseFloorRef.current * SPEECH_CONTINUE_MULTIPLIER);
 
       if (mutedRef.current) return;
 
       if (state === "listening" || state === "capturing") {
-        if (micLevel > threshold) {
+        // Once you are talking, almost any sound counts as still talking. That is the
+        // whole point of the second threshold: the quiet parts of speech are still speech.
+        const active = speechDetectedRef.current ? micLevel > continueThreshold : micLevel > startThreshold;
+        if (active) {
           voiceFramesRef.current++;
           lastVoiceAtRef.current = now;
           if (!speechDetectedRef.current && voiceFramesRef.current >= SPEECH_ONSET_FRAMES) {
@@ -493,6 +534,18 @@ export function useVoiceCall({ active, token, onTurn, onError }: UseVoiceCallOpt
           }
         } else {
           voiceFramesRef.current = 0;
+          /*
+           * Let a bad calibration heal.
+           *
+           * The floor is measured once, in the first fraction of a second, which is
+           * exactly when a chair scrapes or someone says "hello". Without this the call
+           * is stuck with that number to the end. While waiting for speech, ease the
+           * floor down towards what the room is actually doing, slowly enough that a
+           * pause between words cannot drag it below the noise it exists to ignore.
+           */
+          if (!speechDetectedRef.current && micLevel < noiseFloorRef.current) {
+            noiseFloorRef.current += (micLevel - noiseFloorRef.current) * 0.02;
+          }
         }
 
         if (speechDetectedRef.current) {
@@ -534,7 +587,7 @@ export function useVoiceCall({ active, token, onTurn, onError }: UseVoiceCallOpt
 
         // Barge-in. Echo cancellation removes most of Nexa's own voice from the mic, but
         // not all of it on loudspeakers, so this needs a higher bar than turn onset.
-        if (micLevel > threshold * BARGE_IN_MULTIPLIER) {
+        if (micLevel > startThreshold * BARGE_IN_MULTIPLIER) {
           voiceFramesRef.current++;
           if (voiceFramesRef.current >= BARGE_IN_FRAMES) {
             voiceFramesRef.current = 0;
