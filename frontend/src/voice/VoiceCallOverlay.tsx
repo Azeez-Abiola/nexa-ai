@@ -5,6 +5,8 @@ import styles from "./voiceCall.module.css";
 
 type VoiceCallOverlayProps = {
   status: CallStatus;
+  /** Follows the app's theme: the call screen was dark whatever the rest of the app was doing. */
+  theme: string;
   muted: boolean;
   transcript: string;
   reply: string;
@@ -38,11 +40,14 @@ const STATUS_LABELS: Record<CallStatus, string> = {
 function useVisualizer(
   canvasRef: React.RefObject<HTMLCanvasElement>,
   getLevel: () => number,
-  status: CallStatus
+  status: CallStatus,
+  isDark: boolean
 ) {
   // Read inside the animation loop so it always sees the current status without restarting.
   const statusRef = useRef(status);
   statusRef.current = status;
+  const darkRef = useRef(isDark);
+  darkRef.current = isDark;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -109,11 +114,13 @@ function useVisualizer(
         const x = i * (barWidth + gap) + gap / 2;
         const y = midY - barHeight / 2;
 
-        // Brand red while Nexa talks, cool white while she listens, so you always know whose turn it is.
+        // Brand red while Nexa talks, neutral while she listens, so you always know whose
+        // turn it is. The neutral has to invert with the theme or it vanishes into the page.
         const intensity = Math.min(1, heights[i] * 1.4 + 0.25);
+        const neutral = darkRef.current ? "245, 245, 245" : "51, 51, 61";
         ctx.fillStyle = speaking
           ? `rgba(237, 0, 0, ${0.45 + intensity * 0.55})`
-          : `rgba(245, 245, 245, ${0.28 + intensity * 0.52})`;
+          : `rgba(${neutral}, ${0.28 + intensity * 0.52})`;
 
         const radius = Math.min(barWidth / 2, barHeight / 2);
         ctx.beginPath();
@@ -172,6 +179,7 @@ function SpokenCaption({ text, spokenWords }: { text: string; spokenWords: numbe
 
 export default function VoiceCallOverlay({
   status,
+  theme,
   muted,
   transcript,
   reply,
@@ -182,7 +190,8 @@ export default function VoiceCallOverlay({
   onEnd,
 }: VoiceCallOverlayProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  useVisualizer(canvasRef, getLevel, status);
+  const isDark = theme === "dark";
+  useVisualizer(canvasRef, getLevel, status, isDark);
 
   // Escape hangs up, matching the muscle memory of every other modal in the app.
   useEffect(() => {
@@ -196,7 +205,12 @@ export default function VoiceCallOverlay({
   const statusLabel = muted && (status === "listening" || status === "capturing") ? "Muted" : STATUS_LABELS[status];
 
   return (
-    <div className={styles.overlay} role="dialog" aria-modal="true" aria-label="Voice call with Nexa">
+    <div
+      className={`${styles.overlay} ${isDark ? "" : styles.light}`}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Voice call with Nexa"
+    >
       <div className={styles.header}>
         <span className={styles.title}>Nexa</span>
         {/* Announced politely so a screen reader narrates whose turn it is without interrupting. */}

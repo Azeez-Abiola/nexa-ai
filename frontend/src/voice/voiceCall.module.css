@@ -18,6 +18,40 @@
   animation: overlayIn 220ms ease-out;
 }
 
+/*
+ * Light theme.
+ *
+ * The call screen was dark whatever the rest of the app was doing, so switching to light
+ * mode and starting a call went from a white page to a near-black one. The tinted ground
+ * is kept — it is what makes the call feel like its own place rather than a dialog — just
+ * inverted, so the red reads as a warm blush instead of a dark room.
+ */
+.light {
+  background: radial-gradient(circle at 50% 38%, #fff1f1 0%, #fdf6f6 45%, #ffffff 100%);
+  color: #14100f;
+}
+
+.light .status { color: rgba(20, 16, 15, 0.55); }
+.light .you { color: rgba(20, 16, 15, 0.5); }
+.light .wordSpoken { color: #14100f; }
+.light .wordPending { color: rgba(20, 16, 15, 0.32); }
+.light .error { color: #b91c1c; }
+
+.light .controlIcon {
+  background: rgba(20, 16, 15, 0.05);
+  border-color: rgba(20, 16, 15, 0.12);
+}
+
+.light .controlBtn { color: rgba(20, 16, 15, 0.65); }
+.light .controlBtn:hover .controlIcon { background: rgba(20, 16, 15, 0.1); }
+
+/* Muted and End keep their filled treatment: they are states and actions, not surfaces,
+   and they must stay legible against either ground. */
+.light .mutedIcon { background: #14100f; color: #ffffff; border-color: transparent; }
+.light .endIcon { background: var(--brand-color, #ed0000); color: #fff; border-color: transparent; }
+
+.light .controlBtn:focus-visible .controlIcon { outline-color: #14100f; }
+
 @keyframes overlayIn {
   from { opacity: 0; transform: scale(0.98); }
   to { opacity: 1; transform: scale(1); }

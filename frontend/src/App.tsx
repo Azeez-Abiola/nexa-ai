@@ -4562,6 +4562,7 @@ export const App: React.FC = () => {
         {voiceCallOpen && (
           <VoiceCallOverlay
             status={voiceCall.status}
+            theme={theme}
             muted={voiceCall.muted}
             transcript={voiceCall.transcript}
             reply={voiceCall.reply}
