@@ -10,6 +10,7 @@ import {
   BiPlay, BiPause, BiPhoneCall
 } from "react-icons/bi";
 import { PanelLeft } from "lucide-react";
+import ConnectorSettings from "./ConnectorSettings";
 import DownloadPage from "./download/DownloadPage";
 import SsoCallback, { SsoError } from "./auth/SsoCallback";
 import VoiceCallOverlay from "./voice/VoiceCallOverlay";
@@ -64,6 +65,17 @@ interface GeneratedDocument {
   documentType: string;
 }
 
+/** One connector tool call made while producing an assistant reply. */
+interface ToolActivity {
+  tool: string;
+  connector: string;
+  label: string;
+  /** Undefined while the call is still running. */
+  ok?: boolean;
+  summary?: string;
+  durationMs?: number;
+}
+
 interface Message {
   role: "user" | "assistant";
   content: string;
@@ -75,6 +87,8 @@ interface Message {
   imageUrls?: string[];
   sources?: MessageSource[];
   generatedDocument?: GeneratedDocument;
+  /** Connectors this reply consulted. Persisted, so it survives a reload. */
+  toolActivity?: ToolActivity[];
   timestamp: Date;
   /** Set on shared-with-me view when the recipient lacks access to the cited sources. */
   redacted?: boolean;
@@ -540,6 +554,14 @@ export const App: React.FC = () => {
    * sits there looking done while work is still happening.
    */
   const [generatingDocument, setGeneratingDocument] = useState<{ type: string; label: string } | null>(null);
+  /**
+   * Connector calls in flight for the current turn.
+   *
+   * Transient: cleared when the turn closes, at which point the same information is
+   * on the assistant message itself. It exists so the longest pause in a turn — a
+   * connector round trip — is visibly something happening rather than a hang.
+   */
+  const [activeToolCalls, setActiveToolCalls] = useState<ToolActivity[]>([]);
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
   const currentAudioUrlRef = useRef<string | null>(null);
   const [audioPaused, setAudioPaused] = useState(false);
@@ -580,6 +602,7 @@ export const App: React.FC = () => {
   const isAdminPage = location.pathname.startsWith('/admin');
   const isSuperAdminPage = location.pathname.startsWith('/super-admin');
   const isUserChatProfile = location.pathname === "/user-chat/profile";
+  const isConnectorSettings = location.pathname === "/settings/connectors";
   const isChatPage = location.pathname === "/user-chat";
   const userInitials = user
     ? `${user.fullName?.split(' ').map(n => n[0]).join('').toUpperCase() || ""}`
@@ -1132,6 +1155,7 @@ export const App: React.FC = () => {
       "/super-admin/login",
       "/contact",
       "/download",
+      "/settings/connectors",
       "/privacy",
       "/terms",
       "/accept-invite",
@@ -1522,7 +1546,13 @@ export const App: React.FC = () => {
       window.location.href = "/super-admin/dashboard";
     } else if (authUser.isAdmin === true) {
       window.location.href = "/admin/dashboard";
-    } else if (postLoginPath && postLoginPath.startsWith("/shared/")) {
+    } else if (
+      postLoginPath &&
+      // Connectors joins share links here because Microsoft's consent flow returns to
+      // /settings/connectors with the outcome on the query string. Dropping the stashed
+      // path would land the user in the chat with no idea whether it worked.
+      (postLoginPath.startsWith("/shared/") || postLoginPath.startsWith("/settings/connectors"))
+    ) {
       setIsConversationsLoading(true);
       axios.defaults.headers.common["Authorization"] = `Bearer ${authToken}`;
       applyTenantBrandFromSession(authUser.tenantColor);
@@ -2056,12 +2086,20 @@ export const App: React.FC = () => {
 
               if (data.generatingDocument) {
                 setGeneratingDocument(data.generatingDocument);
+                // Must not fall through. This event carries no `fullResponse`, and the
+                // assignment further down would reset the streamed text to "" — blanking
+                // the reply mid-answer. The toolCall/toolResult branches continue for the
+                // same reason.
+                continue;
               }
 
               if (data.done) {
                 // Whatever happened — file attached, or generation failed — the wait is
                 // over once the turn closes, so the indicator must not outlive it.
                 setGeneratingDocument(null);
+                // The finished message carries its own toolActivity from here on, so
+                // the transient indicator would otherwise be shown twice.
+                setActiveToolCalls([]);
                 // Capture final conversation data from server
                 if (data.conversation) {
                   finalConversation = data.conversation;
@@ -2091,6 +2129,39 @@ export const App: React.FC = () => {
 
               if (data.error) {
                 throw new Error(data.error);
+              }
+
+              // Handled before the fullResponse assignment below: tool events carry no
+              // fullResponse, and falling through would reset the streamed text to "".
+              if (data.toolCall) {
+                setActiveToolCalls((prev) => [
+                  ...prev,
+                  {
+                    tool: data.toolCall.tool,
+                    connector: data.toolCall.connector,
+                    label: data.toolCall.label
+                  }
+                ]);
+                continue;
+              }
+
+              if (data.toolResult) {
+                setActiveToolCalls((prev) => {
+                  const next = [...prev];
+                  const i = next.findIndex(
+                    (c) => c.tool === data.toolResult.tool && c.ok === undefined
+                  );
+                  if (i >= 0) {
+                    next[i] = {
+                      ...next[i],
+                      ok: data.toolResult.ok,
+                      summary: data.toolResult.summary,
+                      durationMs: data.toolResult.durationMs
+                    };
+                  }
+                  return next;
+                });
+                continue;
               }
 
               // Status events arrive before the AI starts — show them as placeholder text
@@ -3005,6 +3076,27 @@ export const App: React.FC = () => {
     // Authenticated — render chat shell below; the effect below loads the share.
   }
 
+  /*
+   * /settings/connectors — requires auth, like the chat itself.
+   *
+   * Needs handling here rather than falling through to the unmatched-route branch,
+   * because Microsoft's consent flow lands back on this exact URL. A session that
+   * expired mid-consent would otherwise drop the user on the marketing page with their
+   * result on the query string, so the path is stashed and replayed after login.
+   */
+  if (location.pathname === "/settings/connectors") {
+    if (!isAuthenticated) {
+      try {
+        sessionStorage.setItem("post-login-redirect", `${location.pathname}${location.search}`);
+      } catch {
+        /* ignore */
+      }
+      window.history.replaceState(null, "", "/login");
+      return <Login onLoginSuccess={handleLogin} />;
+    }
+    // Authenticated — falls through to the chat shell, which renders the page.
+  }
+
   // Access-request respond links — process token then redirect to user-chat
   if (location.pathname === '/access-request/respond') {
     return <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100vh', fontFamily:'Arial', color:'#555' }}>Processing request…</div>;
@@ -3779,7 +3871,14 @@ export const App: React.FC = () => {
             </div>
           )}
 
-          {isUserChatProfile && user ? (
+          {isConnectorSettings ? (
+            <ConnectorSettings
+              token={token}
+              theme={theme}
+              isAdmin={Boolean(user?.isAdmin)}
+              onBack={() => navigate("/user-chat")}
+            />
+          ) : isUserChatProfile && user ? (
             <UserChatProfile
               user={user}
               theme={theme}
@@ -4151,6 +4250,41 @@ export const App: React.FC = () => {
                                   </div>
                                 );
                               })()}
+                          {/* What this reply consulted. Shown above Sources because it
+                              answers a different question: Sources is where the text
+                              came from, this is what was checked to get it. */}
+                          {m.role === "assistant" && m.toolActivity && m.toolActivity.length > 0 ? (
+                            <div className="message-tools-v2">
+                              <span className="message-sources-label-v2">Checked</span>
+                              {m.toolActivity.map((a, i) => (
+                                <span
+                                  key={`${a.tool}-${i}`}
+                                  className={`message-tool-pill-v2${a.ok === false ? " message-tool-pill-failed-v2" : ""}`}
+                                  title={a.summary || a.label}
+                                >
+                                  <span className="message-source-pill-icon-v2">
+                                    {a.ok === false ? <BiLink size={12} /> : <BiLibrary size={12} />}
+                                  </span>
+                                  <span className="message-source-pill-title-v2">
+                                    {a.ok === false ? `${a.label} — unavailable` : a.label}
+                                  </span>
+                                </span>
+                              ))}
+                              {/* A failed Microsoft 365 call almost always means a
+                                  revoked or never-made connection, and the tool's own
+                                  result already tells the model to say so in words —
+                                  what it cannot give the user is a way to act on it. */}
+                              {m.toolActivity.some((a) => a.ok === false && a.tool.startsWith("microsoft_365__")) ? (
+                                <button
+                                  type="button"
+                                  className="message-tool-reconnect-v2"
+                                  onClick={() => navigate("/settings/connectors")}
+                                >
+                                  Reconnect Microsoft 365
+                                </button>
+                              ) : null}
+                            </div>
+                          ) : null}
                           {m.role === "assistant" && m.sources && m.sources.length > 0 ? (
                             <div className="message-sources-v2">
                               <span className="message-sources-label-v2">Sources</span>
@@ -4316,6 +4450,24 @@ export const App: React.FC = () => {
                           <span className="dot-v2"></span>
                         </div>
                       </div>
+                    </div>
+                  )}
+                  {/* A connector round trip is the longest pause in a turn, so it is
+                      announced as it starts rather than reported once it is over. */}
+                  {activeToolCalls.length > 0 && (
+                    <div className="doc-generating-row" aria-live="polite">
+                      {activeToolCalls.map((call, i) => (
+                        <span
+                          key={`${call.tool}-${i}`}
+                          className="doc-generating-pill"
+                          title={call.summary || call.connector}
+                        >
+                          {call.ok === undefined ? (
+                            <span className="doc-generating-spinner" aria-hidden="true" />
+                          ) : null}
+                          {call.ok === false ? `${call.label} — unavailable` : `${call.label}…`}
+                        </span>
+                      ))}
                     </div>
                   )}
                   {/* Outlives the streamed text on purpose: the file is usually still
@@ -7283,6 +7435,54 @@ export const App: React.FC = () => {
           flex-shrink: 0;
         }
 
+        .message-tools-v2 {
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+          gap: 6px;
+          margin-top: 10px;
+        }
+        .message-tool-pill-v2 {
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          padding: 3px 9px;
+          border-radius: 999px;
+          font-size: 12px;
+          border: 1px solid rgba(0, 0, 0, 0.08);
+          background: rgba(0, 0, 0, 0.03);
+          color: #444;
+        }
+        .dark-theme .message-tool-pill-v2 {
+          border-color: rgba(255, 255, 255, 0.12);
+          background: rgba(255, 255, 255, 0.06);
+          color: #cfcfcf;
+        }
+        /* A failed check is muted rather than alarming: the reply already says in
+           words that something could not be reached, and a red badge on an answer
+           that is otherwise fine overstates it. */
+        .message-tool-pill-failed-v2 {
+          opacity: 0.6;
+          text-decoration: line-through;
+        }
+        /* Deliberately not muted like the failed pill next to it — that one just
+           reports what happened, this is the one actionable thing on the row and
+           should read as clickable, not as part of the outage. */
+        .message-tool-reconnect-v2 {
+          display: inline-flex;
+          align-items: center;
+          padding: 3px 10px;
+          border-radius: 999px;
+          font-size: 12px;
+          font-weight: 600;
+          border: 1px solid rgba(237, 0, 0, 0.35);
+          background: transparent;
+          color: #ed0000;
+          cursor: pointer;
+        }
+        .message-tool-reconnect-v2:hover {
+          background: rgba(237, 0, 0, 0.08);
+        }
         .message-sources-v2 {
           display: flex;
           flex-wrap: wrap;

@@ -27,6 +27,8 @@ import { employeeInviteRouter } from "./routes/employeeInvite";
 import { adminDocumentsRouter } from "./routes/adminDocuments";
 import { adminKnowledgeGroupsRouter } from "./routes/adminKnowledgeGroups";
 import { adminAuditLogsRouter } from "./routes/adminAuditLogs";
+import { adminConnectorsRouter } from "./routes/adminConnectors";
+import { connectorAuthRouter } from "./routes/connectorAuth";
 import { BusinessUnit } from "./models/BusinessUnit";
 import { tenantMiddleware } from "./middleware/tenant";
 import { authLimiter, aiLimiter, aiDailyLimiter } from "./middleware/rateLimiter";
@@ -182,6 +184,8 @@ app.use("/api/v1/admin/documents", adminDocumentsRouter);
 app.use("/api/v1/admin/user-groups", adminKnowledgeGroupsRouter);
 app.use("/api/v1/admin/knowledge-groups", adminKnowledgeGroupsRouter); // legacy alias
 app.use("/api/v1/admin/audit-logs", adminAuditLogsRouter);
+app.use("/api/v1/admin/connectors", adminConnectorsRouter);
+app.use("/api/v1/connectors", connectorAuthRouter);
 app.use("/api/v1/analytics", analyticsRouter);
 app.use("/api/v1/provisioning", provisioningRouter);
 app.use("/api/v1/employee-invite", employeeInviteRouter);
@@ -412,6 +416,18 @@ const mongooseOptions = {
 mongoose.connect(mongoUri, mongooseOptions)
   .then(async () => {
     logger.info("MongoDB connected successfully");
+
+    // Connector rows live in Mongo, so this waits for the connection. Failure is
+    // logged and swallowed: without it the connector catalog is empty and chat falls
+    // back to the pre-connector behaviour, which is a degraded feature rather than a
+    // reason to refuse to start.
+    const { bootstrapConnectors } = require("./services/tools/registry");
+    bootstrapConnectors().catch((err: any) => {
+      logger.error("[Connectors] Bootstrap failed — connectors will be unavailable", {
+        error: err?.message
+      });
+    });
+
     const { redisConnection } = require("./queue/connection");
     redisConnection.ping()
       .then(() => {

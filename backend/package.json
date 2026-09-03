@@ -9,10 +9,12 @@
     "start": "node dist/index.js",
     "seed": "ts-node --transpile-only src/scripts/seedSuperAdmin.ts",
     "fix:microsoft-id-index": "ts-node --transpile-only src/scripts/fixMicrosoftIdIndex.ts",
-    "report:utilization": "ts-node --transpile-only src/scripts/utilizationReport.ts"
+    "report:utilization": "ts-node --transpile-only src/scripts/utilizationReport.ts",
+    "check:connectors": "ts-node --transpile-only src/scripts/connectorSpineCheck.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.95.1",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@types/pdfkit": "^0.17.6",
     "axios": "^1.7.7",
     "bcryptjs": "^2.4.3",

@@ -6,6 +6,7 @@ import { AdminHome } from "./AdminHome";
 import { PrivacyPolicy } from "./components/PrivacyPolicy";
 import { FAQSection } from "./components/FAQSection";
 import AdminTestChat from "./components/AdminTestChat";
+import AdminConnectors from "./components/AdminConnectors";
 import LoginLoadingScreen from "./components/LoginLoadingScreen";
 import styles from "./styles/admin-dashboard.module.css";
 
@@ -83,7 +84,7 @@ export const Admin: React.FC = () => {
   const [isDeleting, setIsDeleting] = useState(false);
   const [showPrivacyPolicy, setShowPrivacyPolicy] = useState(false);
   const [isInitializing, setIsInitializing] = useState(!!localStorage.getItem("adminToken"));
-  const [activeTab, setActiveTab] = useState<"knowledge" | "test-nexa">("knowledge");
+  const [activeTab, setActiveTab] = useState<"knowledge" | "test-nexa" | "connectors">("knowledge");
 
   // Memoized loadDocuments function
   const loadDocuments = useCallback(async () => {
@@ -382,8 +383,8 @@ export const Admin: React.FC = () => {
         display: "flex", gap: 0, borderBottom: "1px solid rgba(255,255,255,0.1)",
         background: "rgba(0,0,0,0.3)", padding: "0 2rem", flexShrink: 0
       }}>
-        {(["knowledge", "test-nexa"] as const).map((tab) => {
-          const label = tab === "knowledge" ? "📚 Knowledge Base" : "🤖 Test Nexa";
+        {(["knowledge", "connectors", "test-nexa"] as const).map((tab) => {
+          const label = tab === "knowledge" ? "📚 Knowledge Base" : tab === "connectors" ? "🔌 Connectors" : "🤖 Test Nexa";
           const isActive = activeTab === tab;
           return (
             <button
@@ -675,7 +676,10 @@ export const Admin: React.FC = () => {
           </div>
         </div>
       </>
-    ) : (
+    ) : activeTab === "connectors" ? (
+          /* Connectors tab */
+          <AdminConnectors adminToken={adminToken!} theme={theme} />
+        ) : (
           /* Test Nexa tab */
           <div style={{ height: "calc(100vh - 180px)", display: "flex", flexDirection: "column", gap: 0 }}>
             <div className={styles.contentHeader} style={{ marginBottom: "1rem" }}>

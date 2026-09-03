@@ -1,0 +1,220 @@
+.wrap {
+  padding: clamp(1.5rem, 4vw, 2.5rem);
+  color: #111827;
+  max-width: 920px;
+}
+
+.dark { color: #f3f4f6; }
+
+.header { max-width: 680px; margin-bottom: 1.75rem; }
+
+.title {
+  margin: 0 0 0.5rem;
+  font-size: clamp(1.4rem, 3vw, 1.8rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.subtitle {
+  margin: 0;
+  color: #6b7280;
+  font-size: 0.92rem;
+  line-height: 1.6;
+}
+
+.dark .subtitle { color: #9ca3af; }
+
+.errorBanner {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1.25rem;
+  border-radius: 10px;
+  background: rgba(220, 38, 38, 0.08);
+  color: #b91c1c;
+  font-size: 0.88rem;
+}
+
+.dark .errorBanner {
+  background: rgba(248, 113, 113, 0.12);
+  color: #fca5a5;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.card {
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 14px;
+  padding: 1.25rem 1.4rem;
+  background: #fafafa;
+}
+
+.dark .card {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.cardTop { margin-bottom: 1rem; }
+
+.cardLabelRow {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.35rem;
+}
+
+.cardLabel { font-size: 1.02rem; font-weight: 700; }
+
+.badgeMuted, .badgeWarn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+}
+
+.badgeMuted { background: rgba(107, 114, 128, 0.14); color: #6b7280; }
+.dark .badgeMuted { background: rgba(156, 163, 175, 0.16); color: #9ca3af; }
+
+.badgeWarn { background: rgba(217, 119, 6, 0.14); color: #b45309; }
+.dark .badgeWarn { background: rgba(251, 191, 36, 0.14); color: #fbbf24; }
+
+.cardDescription {
+  margin: 0 0 0.6rem;
+  font-size: 0.88rem;
+  line-height: 1.55;
+  color: #4b5563;
+}
+
+.dark .cardDescription { color: #d1d5db; }
+
+.metaRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem 1.2rem;
+}
+
+.metaRow span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.metaOk { color: #15803d; }
+.dark .metaOk { color: #4ade80; }
+.metaWarn { color: #b45309; }
+.dark .metaWarn { color: #fbbf24; }
+.metaNeutral { color: #6b7280; }
+.dark .metaNeutral { color: #9ca3af; }
+
+.controls {
+  display: grid;
+  gap: 0.65rem;
+  padding-top: 0.9rem;
+  border-top: 1px dashed rgba(0, 0, 0, 0.1);
+}
+
+.dark .controls { border-top-color: rgba(255, 255, 255, 0.1); }
+
+.toggleRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.5rem 0.6rem;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.toggleRow:hover { background: rgba(0, 0, 0, 0.03); }
+.dark .toggleRow:hover { background: rgba(255, 255, 255, 0.04); }
+
+.toggleRowDisabled { opacity: 0.5; cursor: not-allowed; }
+.toggleRowDisabled:hover { background: transparent; }
+
+.toggleRow > span:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.9rem;
+}
+
+.toggleHint {
+  font-size: 0.76rem;
+  font-weight: 400;
+  color: #6b7280;
+  line-height: 1.4;
+  max-width: 480px;
+}
+
+.dark .toggleHint { color: #9ca3af; }
+
+.toggleRow input[type="checkbox"] {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  margin-top: 0.15rem;
+  accent-color: #ed0000;
+  cursor: pointer;
+}
+
+.toolsToggle {
+  margin-top: 0.85rem;
+  border: none;
+  background: transparent;
+  color: #ed0000;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0.3rem 0;
+}
+
+.toolsList {
+  list-style: none;
+  margin: 0.6rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.toolItem {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  font-size: 0.82rem;
+  padding: 0.4rem 0.6rem;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.025);
+}
+
+.dark .toolItem { background: rgba(255, 255, 255, 0.03); }
+
+.accessRead, .accessWrite {
+  flex-shrink: 0;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+}
+
+.accessRead { background: rgba(21, 128, 61, 0.14); color: #15803d; }
+.dark .accessRead { background: rgba(74, 222, 128, 0.14); color: #4ade80; }
+.accessWrite { background: rgba(180, 83, 9, 0.14); color: #b45309; }
+.dark .accessWrite { background: rgba(251, 191, 36, 0.14); color: #fbbf24; }
+
+.toolName { font-weight: 600; flex-shrink: 0; }
+.toolDescription { color: #6b7280; }
+.dark .toolDescription { color: #9ca3af; }

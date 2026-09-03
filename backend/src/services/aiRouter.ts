@@ -4,6 +4,7 @@ import * as kimiService from "./kimiService";
 import * as deepseekService from "./deepseekService";
 import { labelForModelId } from "../config/modelLabels";
 import { classifyProviderError, reportProviderFailure } from "./providerHealth";
+import { StreamEvent } from "./tools/types";
 import logger from "../utils/logger";
 
 export type AIModel = "gpt" | "claude" | "kimi" | "deepseek";
@@ -51,6 +52,9 @@ function isConfigured(model: AIModel): boolean {
  *
  * Failover exists because a dead provider (exhausted credit, bad key) would
  * otherwise surface to the user as an error while three other models sit idle.
+ *
+ * Exported for documentAIService, which runs its own generation outside the chat
+ * path and needs the same ordering rather than reimplementing it.
  */
 export function failoverChain(model: AIModel): AIModel[] {
   return [model, ...FALLBACK_ORDER.filter((m) => m !== model && isConfigured(m))];
@@ -62,24 +66,35 @@ type GenerateArgs = Parameters<ReturnType<typeof rawGenerateAIResponse>>;
 /**
  * Streaming entry point with provider failover.
  *
- * Failover is only possible before the first chunk reaches the client — once text
- * has been streamed we cannot rewind it, so a mid-stream failure is rethrown.
- * In practice quota/auth failures happen on the first request, before any output.
+ * Two independent conditions now block a failover, and they block it for different
+ * reasons:
+ *
+ *   - Text has already been streamed. It cannot be rewound, so switching providers
+ *     mid-answer would splice two different models' prose together.
+ *   - A tool has already been called. This one matters more, because it is not
+ *     cosmetic: a connector call can change something in a third-party system, and
+ *     retrying the turn on another provider could run it a second time. A duplicate
+ *     Slack message is embarrassing; a duplicate write into an ERP is not.
+ *
+ * In practice the failures failover exists for (exhausted quota, bad key) happen on
+ * the first request, before either condition can be true.
  */
 export function getStreamAIResponse(model: AIModel) {
-  return async function* (...args: StreamArgs): AsyncGenerator<string, void, unknown> {
+  return async function* (...args: StreamArgs): AsyncGenerator<StreamEvent, void, unknown> {
     const chain = failoverChain(model);
     let lastError: unknown;
 
     for (let i = 0; i < chain.length; i++) {
       const provider = chain[i];
       const isLast = i === chain.length - 1;
-      let yieldedAny = false;
+      let yieldedText = false;
+      let calledTool = false;
 
       try {
-        for await (const chunk of rawStreamAIResponse(provider)(...args)) {
-          yieldedAny = true;
-          yield chunk;
+        for await (const event of rawStreamAIResponse(provider)(...args)) {
+          if (event.type === "text") yieldedText = true;
+          if (event.type === "tool_call") calledTool = true;
+          yield event;
         }
         if (i > 0) {
           logger.info("[AIRouter] Served by fallback provider", { requested: model, servedBy: provider });
@@ -88,8 +103,14 @@ export function getStreamAIResponse(model: AIModel) {
       } catch (err) {
         lastError = err;
 
-        // Already streamed content — switching now would corrupt the answer.
-        if (yieldedAny) throw err;
+        if (yieldedText) throw err;
+        if (calledTool) {
+          logger.warn("[AIRouter] Not failing over — a connector tool already ran this turn", {
+            requested: model,
+            provider,
+          });
+          throw err;
+        }
 
         const failure = classifyProviderError(err);
         const next = failure.failover && !isLast ? chain[i + 1] : undefined;
