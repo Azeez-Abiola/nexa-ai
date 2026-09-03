@@ -212,7 +212,14 @@ export default function VoiceCallOverlay({
       aria-label="Voice call with Nexa"
     >
       <div className={styles.header}>
-        <span className={styles.title}>Nexa</span>
+        {/* The same lockup as the sidebar, and the same two files rather than a CSS
+            filter: the mark must stay brand red on both themes, and any filter that
+            lightens the black type would drag the red with it. */}
+        <img
+          src={isDark ? "/icons/nexa-logo-light.png" : "/icons/nexa-logo.png"}
+          alt="Nexa"
+          className={styles.logo}
+        />
         {/* Announced politely so a screen reader narrates whose turn it is without interrupting. */}
         <span className={styles.status} aria-live="polite">{statusLabel}</span>
       </div>

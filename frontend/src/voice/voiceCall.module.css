@@ -65,10 +65,13 @@
   text-align: center;
 }
 
-.title {
-  font-size: 1.05rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
+/* Height-constrained, width auto: the lockup is wide, and fixing its width would
+   squash it on a narrow screen. */
+.logo {
+  height: 26px;
+  width: auto;
+  object-fit: contain;
+  display: block;
 }
 
 .status {
