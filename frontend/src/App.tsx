@@ -4270,6 +4270,19 @@ export const App: React.FC = () => {
                                   </span>
                                 </span>
                               ))}
+                              {/* A failed Microsoft 365 call almost always means a
+                                  revoked or never-made connection, and the tool's own
+                                  result already tells the model to say so in words —
+                                  what it cannot give the user is a way to act on it. */}
+                              {m.toolActivity.some((a) => a.ok === false && a.tool.startsWith("microsoft_365__")) ? (
+                                <button
+                                  type="button"
+                                  className="message-tool-reconnect-v2"
+                                  onClick={() => navigate("/settings/connectors")}
+                                >
+                                  Reconnect Microsoft 365
+                                </button>
+                              ) : null}
                             </div>
                           ) : null}
                           {m.role === "assistant" && m.sources && m.sources.length > 0 ? (
@@ -7451,6 +7464,24 @@ export const App: React.FC = () => {
         .message-tool-pill-failed-v2 {
           opacity: 0.6;
           text-decoration: line-through;
+        }
+        /* Deliberately not muted like the failed pill next to it — that one just
+           reports what happened, this is the one actionable thing on the row and
+           should read as clickable, not as part of the outage. */
+        .message-tool-reconnect-v2 {
+          display: inline-flex;
+          align-items: center;
+          padding: 3px 10px;
+          border-radius: 999px;
+          font-size: 12px;
+          font-weight: 600;
+          border: 1px solid rgba(237, 0, 0, 0.35);
+          background: transparent;
+          color: #ed0000;
+          cursor: pointer;
+        }
+        .message-tool-reconnect-v2:hover {
+          background: rgba(237, 0, 0, 0.08);
         }
         .message-sources-v2 {
           display: flex;
