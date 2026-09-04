@@ -23,6 +23,7 @@ import {
   Moon,
   Sun,
   Search,
+  Plug,
   PanelLeft
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -56,6 +57,7 @@ import UsersManagement from './pages/UsersManagement';
 import BusinessProfile from './pages/BusinessProfile';
 import AdminUserGroupsPage from './pages/AdminUserGroupsPage';
 import Analytics from './pages/Analytics';
+import AdminConnectors from '../components/AdminConnectors';
 import { hexToHslSpace, DEFAULT_RING_HSL } from '@/lib/brandCss';
 import { ChatGptStyleMenuIcon } from '@/components/ChatGptStyleMenuIcon';
 
@@ -208,6 +210,7 @@ const SuperAdminMain: React.FC<SuperAdminMainProps> = ({ theme, toggleTheme }) =
     { name: 'Departments', path: '/admin/departments', icon: Layers },
     { name: 'Categories', path: '/admin/categories', icon: FolderTree },
     { name: 'User groups', path: '/admin/user-groups', icon: Network },
+    { name: 'Connectors', path: '/admin/connectors', icon: Plug },
     { name: 'Analytics', path: '/admin/analytics', icon: BarChart3 },
     { name: 'Audit Logs', path: '/admin/audit', icon: Shield },
     { name: 'Help & Support', path: '/admin/help', icon: HelpCircle },
@@ -534,6 +537,18 @@ const SuperAdminMain: React.FC<SuperAdminMainProps> = ({ theme, toggleTheme }) =
                       land somewhere sensible rather than on the catch-all. */}
                   <Route path="/admin/ask-nexa" element={<Navigate to="/admin/dashboard" replace />} />
                   <Route path="/admin/user-groups" element={<AdminUserGroupsPage />} />
+                  {/* The component was written against Admin.tsx, which App.tsx imports
+                      but never renders — /admin/* has resolved to this shell for a while.
+                      Same component, reachable page. */}
+                  <Route
+                    path="/admin/connectors"
+                    element={
+                      <AdminConnectors
+                        adminToken={localStorage.getItem('nexa-token') || localStorage.getItem('cpanelToken') || ''}
+                        theme={theme === 'dark' ? 'dark' : 'light'}
+                      />
+                    }
+                  />
                   <Route path="/admin/knowledge-groups" element={<Navigate to="/admin/user-groups" replace />} />
                   <Route path="/admin/users" element={<UsersManagement />} />
                   <Route path="/admin/users/:id" element={<UserDetail />} />
