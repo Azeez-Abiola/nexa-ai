@@ -1,14 +1,15 @@
 /**
- * TEMPORARY ESCAPE HATCH for two-factor sign-in.
+ * Escape hatch for two-factor sign-in.
  *
  * Set AUTH_OTP_BYPASS_CODE to a fixed code and sign-in stops emailing anything: that
- * code is accepted instead, for both administrators and employees. It exists because a
- * failure at the email provider currently locks everyone out of the platform with no way
- * back in, which is exactly how it was first needed.
+ * code is accepted instead, for administrators and employees alike. It exists because a
+ * failure at the email provider locks everyone out of the platform with no way back in,
+ * which is exactly what happened when Resend's daily quota ran out.
  *
- * This reduces sign-in to a single factor, so anyone holding a password is through.
- * Unset the variable as soon as you are done. Nothing else has to change and the normal
- * emailed-code flow resumes on the very next request.
+ * Unset — which is how it ships — this file changes nothing at all. Setting it reduces
+ * sign-in to a single factor, so anyone holding a password is through, and it warns
+ * loudly at startup for that reason. It belongs in local development. Setting it in
+ * production turns off two-factor authentication for the whole organisation.
  *
  * Lives in its own module so both auth.ts and adminAuth.ts can read it without importing
  * each other, which would be circular.
