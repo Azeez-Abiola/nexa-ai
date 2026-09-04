@@ -7,7 +7,7 @@ import {
   BiBoltCircle, BiShareAlt, BiHelpCircle, BiChevronDown,
   BiUpArrowAlt, BiMessageRounded, BiPlus, BiDotsHorizontalRounded,
   BiPaperclip, BiMicrophone, BiMoon, BiSun, BiCamera, BiCopy, BiCheck, BiLink, BiReply, BiSmile, BiX,
-  BiPlay, BiPause, BiPhoneCall
+  BiPlay, BiPause, BiPhoneCall, BiPlug
 } from "react-icons/bi";
 import { PanelLeft } from "lucide-react";
 import ConnectorSettings from "./ConnectorSettings";
@@ -3579,6 +3579,18 @@ export const App: React.FC = () => {
                 />
               </span>
               <span>Change AI avatar</span>
+            </button>
+            <button
+              className="theme-toggle-btn"
+              onClick={() => {
+                navigate("/settings/connectors");
+                if (typeof window !== "undefined" && window.innerWidth <= 768) {
+                  setSidebarOpen(false);
+                }
+              }}
+            >
+              <BiPlug size={18} />
+              <span>Connectors</span>
             </button>
             <button className="sidebar-logout-btn" onClick={() => setLogoutConfirmOpen(true)}>
               <FiLogOut size={18} />
